@@ -1,5 +1,7 @@
-# project-sahara_pk
-
+<div align="center">
+    <img src="./assets/logo.png" alt="" width="192" align="center" />
+        <h1 align="center">Welcome to S.A.H.A.R.A.</h1>
+        </div>
 S.A.H.A.R.A. (Substance Abuse Harm Assessment, Response & Assistance) - An innovative AI-driven Android application designed to detect and prevent early-stage prescription drug misuse among Pakistani youth, transitioning seamlessly to full abuse prevention through multimodal analysis and empathetic support.
 
 ## Status: 🛠 In Development 🛠
