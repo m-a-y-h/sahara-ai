@@ -2,7 +2,8 @@
     <img src="./assets/logo.png" alt="" width="192" align="center" />
         <h1 align="center">Welcome to S.A.H.A.R.A.</h1>
         </div>
-S.A.H.A.R.A. (Substance Abuse Harm Assessment, Response & Assistance) - An innovative AI-driven Android application designed to detect and prevent early-stage prescription drug misuse among Pakistani youth, transitioning seamlessly to full abuse prevention through multimodal analysis and empathetic support.
+An acronym for "Substance Abuse — Harm Assessment, Response & Assistance".
+It is an upcoming AI-driven Android application designed to detect and prevent early-stage prescription drug misuse among Pakistani youth, transitioning seamlessly to full abuse prevention through multimodal analysis and empathetic support.
 
 ## Status: 🛠 In Development 🛠
 This project is currently under active development. Features are being implemented and are subject to change. Contributions are welcome!
