@@ -1,7 +1,7 @@
 <div align="center">
     <img src="./assets/logo.png" alt="S.A.H.A.R.A. Logo" width="192" />
     <h1>S.A.H.A.R.A.</h1>
-    <p><strong>S</strong>ubstance <strong>A</strong>buse — <strong>H</strong>arm <strong>A</strong>ssessment, <strong>R</strong>esponse & <strong>A</strong>ssistance</p>
+    <p><b>S</b>ubstance <b>A</b>buse — <b>H</b>arm <b>A</b>ssessment, <b>R</b>esponse & <b>A</b>ssistance</p>
 </div>
 
 ---
@@ -25,7 +25,7 @@
 ## Overview
 
 <p align="justify">
-We aspire S.A.H.A.R.A. to be AI-driven Android application designed to detect and prevent early-stage drug misuse among Pakistani youth, whether it is prescription-based or otherwise. The app transitions seamlessly to full abuse prevention (stopping misuse ==> no future abuse) through multimodal analysis and empathetic support, addressing Pakistan's growing substance abuse crisis with culturally sensitive, privacy-first interventions.
+S.A.H.A.R.A. is designed to be an AI-driven Android application for detecting and preventing early-stage drug misuse among Pakistani youth, whether prescription-based or otherwise. The app aims to transition seamlessly to full abuse prevention (stopping misuse before it becomes abuse) through multimodal analysis and empathetic support, addressing Pakistan's growing substance abuse crisis with culturally sensitive, privacy-first interventions.
 </p>
 
 ---
@@ -44,12 +44,14 @@ Early intervention is critical, as misuse of prescription drugs (e.g., painkille
 
 ## Key Features
 
-- **🔬 AI-Powered Detection**: 85%+ accurate early risk detection via behavioral analysis, voice patterns, phone usage, and culturally adapted text inputs
+- **🔬 AI-Powered Detection**: Targeting 85%+ accurate early risk detection via behavioral analysis, voice patterns, phone usage, and culturally adapted text inputs*
 - **🤖 Multilingual Support**: 24/7 chatbot support in English, Urdu script, and Roman Urdu
 - **🎮 Gamified Recovery**: Engaging recovery tracking with rewards and milestones
 - **🗺️ Anonymous Connectivity**: NGO/counselor connections via Google Maps integration
 - **🔒 Privacy-First**: AES-256 encryption and anonymous usage to address cultural barriers
 - **📊 Professional Dashboard**: Analytics for NGOs and healthcare professionals
+
+> **Note:** Accuracy target is based on literary-review projections; actual performance will be validated during development and testing phases.
 
 ---
 
