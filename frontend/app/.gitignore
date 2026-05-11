@@ -1,0 +1,8 @@
+/build
+*.apk
+*.ap_
+*.dex
+*.class
+/sampledata
+src/androidTest
+src/test

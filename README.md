@@ -1,6 +1,6 @@
 <div align="center">
-    <img src="./assets/logo.png" alt="S.A.H.A.R.A. Logo" width="192" />
-    <h1>S.A.H.A.R.A.</h1>
+    <img src="./assets/logo.webp" alt="SAHARA AI Logo" width="192" />
+    <h1>SAHARA AI</h1>
     <p><b>S</b>ubstance <b>A</b>buse — <b>H</b>arm <b>A</b>ssessment, <b>R</b>esponse & <b>A</b>ssistance</p>
 </div>
 
@@ -25,7 +25,7 @@
 ## Overview
 
 <p align="justify">
-S.A.H.A.R.A. is designed to be an AI-driven Android application for detecting and preventing early-stage drug misuse among Pakistani youth, whether prescription-based or otherwise. The app aims to transition seamlessly to full abuse prevention (stopping misuse before it becomes abuse) through multimodal analysis and empathetic support, addressing Pakistan's growing substance abuse crisis with culturally sensitive, privacy-first interventions.
+SAHARA AI is designed to be an AI-driven Android application for detecting and preventing early-stage drug misuse among Pakistani youth, whether prescription-based or otherwise. The app aims to transition seamlessly to full abuse prevention (stopping misuse before it becomes abuse) through multimodal analysis and empathetic support, addressing Pakistan's growing substance abuse crisis with culturally sensitive, privacy-first interventions.
 </p>
 
 ---
@@ -58,7 +58,7 @@ Early intervention is critical, as misuse of prescription drugs (e.g., painkille
 ## Work Breakdown Structure
 
 <div align="center">
-    <img src="./assets/work_breakdown_structure.png" alt="Work Breakdown Structure" width="800" />
+    <img src="./assets/work_breakdown_structure.webp" alt="Work Breakdown Structure" width="800" />
 </div>
 
 ---
@@ -163,9 +163,9 @@ Join our beta testing community and help shape the future of substance abuse pre
 This project is licensed under the **GNU General Public License v3.0 (GPL-3.0)**.
 See the [LICENSE](./LICENSE.md) file for the full text.
 
-### Additional Notice for the S.A.H.A.R.A. Project
+### Additional Notice for the SAHARA AI Project
 
-S.A.H.A.R.A. and its ML models included in this repository are provided **as-is**, with no guarantee of accuracy, completeness, or reliability in detecting substance abuse patterns.
+SAHARA AI and its ML models included in this repository are provided **as-is**, with no guarantee of accuracy, completeness, or reliability in detecting substance abuse patterns.
 
 **Users are responsible for:**
 - Understanding that this is a research/development project, not a medical device
