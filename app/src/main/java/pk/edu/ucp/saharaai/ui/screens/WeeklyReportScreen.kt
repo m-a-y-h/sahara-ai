@@ -97,7 +97,6 @@ fun WeeklyReportScreen(
             )
     ) {
         Column(Modifier.fillMaxSize().statusBarsPadding()) {
-            // Top bar
             Row(
                 Modifier
                     .fillMaxWidth()
@@ -196,9 +195,6 @@ fun WeeklyReportScreen(
     }
 }
 
-// ---------------------------------------------------------------------------
-// Sub-composables
-// ---------------------------------------------------------------------------
 
 @Composable
 private fun EmptyState(isEnglish: Boolean) {

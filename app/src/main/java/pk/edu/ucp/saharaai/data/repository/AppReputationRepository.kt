@@ -87,7 +87,6 @@ object AppReputationRepository {
     /** Drop the local cache — used by signed-out / signed-in transitions. */
     fun clearCache() { cache.clear() }
 
-    // ----------------------------------------------------------------------
 
     private suspend fun enqueueForClassification(
         hash: String,
