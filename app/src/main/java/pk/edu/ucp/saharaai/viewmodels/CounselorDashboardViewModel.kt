@@ -1,0 +1,195 @@
+package pk.edu.ucp.saharaai.viewmodels
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.google.firebase.Firebase
+import com.google.firebase.auth.auth
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import pk.edu.ucp.saharaai.data.model.CounselorProfile
+import pk.edu.ucp.saharaai.data.model.EmergencyAlert
+import pk.edu.ucp.saharaai.data.model.ModerationReport
+import pk.edu.ucp.saharaai.data.remote.RealtimeDBService
+import pk.edu.ucp.saharaai.data.repository.CounselorRepository
+import pk.edu.ucp.saharaai.data.repository.EmergencyRepository
+import pk.edu.ucp.saharaai.data.repository.ReportRepository
+
+class CounselorDashboardViewModel : ViewModel() {
+
+    val signedInCounselorId: String get() = Firebase.auth.currentUser?.uid.orEmpty()
+
+    private val _profile        = MutableStateFlow<CounselorProfile?>(null)
+    val profile: StateFlow<CounselorProfile?> = _profile.asStateFlow()
+
+    private val _openAlerts     = MutableStateFlow<List<EmergencyAlert>>(emptyList())
+    val openAlerts: StateFlow<List<EmergencyAlert>> = _openAlerts.asStateFlow()
+
+    private val _openReports    = MutableStateFlow<List<ModerationReport>>(emptyList())
+    val openReports: StateFlow<List<ModerationReport>> = _openReports.asStateFlow()
+
+    private val _activeSessions = MutableStateFlow<List<String>>(emptyList())
+    val activeSessions: StateFlow<List<String>> = _activeSessions.asStateFlow()
+
+    
+    private val _chatSessions   = MutableStateFlow<List<Map<String, Any>>>(emptyList())
+    val chatSessions: StateFlow<List<Map<String, Any>>> = _chatSessions.asStateFlow()
+
+    private val _isChatSessionsLoading = MutableStateFlow(true)
+    val isChatSessionsLoading: StateFlow<Boolean> = _isChatSessionsLoading.asStateFlow()
+
+    private val _isOnline       = MutableStateFlow(false)
+    val isOnline: StateFlow<Boolean> = _isOnline.asStateFlow()
+
+    private val _callEnabled    = MutableStateFlow(false)
+    val callEnabled: StateFlow<Boolean> = _callEnabled.asStateFlow()
+
+    
+    private val _realtimeData   = MutableStateFlow<Map<String, Any>?>(null)
+    val realtimeData: StateFlow<Map<String, Any>?> = _realtimeData.asStateFlow()
+
+    private val _isLoading      = MutableStateFlow(false)
+    val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
+
+    private val _error          = MutableStateFlow<String?>(null)
+    val error: StateFlow<String?> = _error.asStateFlow()
+
+    
+    fun loadProfile(counselorId: String) {
+        viewModelScope.launch {
+            _isLoading.value = true
+            val result = CounselorRepository.getCounselor(counselorId)
+            result.onSuccess { profile ->
+                _profile.value = profile
+                _isOnline.value = profile?.isAvailable ?: false
+            }.onFailure {
+                
+                val byUser = CounselorRepository.getCounselorByUserId(counselorId)
+                byUser.onSuccess { profile ->
+                    _profile.value = profile
+                    _isOnline.value = profile?.isAvailable ?: false
+                }.onFailure {
+                    _error.value = it.message
+                }
+            }
+            _isLoading.value = false
+        }
+    }
+
+    
+    fun loadOpenAlerts(ngoId: String) {
+        viewModelScope.launch {
+            val result = EmergencyRepository.getOpenAlerts(ngoId)
+            result.onSuccess { _openAlerts.value = it }
+            result.onFailure { _error.value = it.message }
+        }
+    }
+
+    
+    fun loadReports() {
+        viewModelScope.launch {
+            val result = ReportRepository.getOpenReports()
+            result.onSuccess { _openReports.value = it }
+            result.onFailure { _error.value = it.message }
+        }
+    }
+
+    
+    fun listenToChatSessions(counselorId: String) {
+        viewModelScope.launch {
+            _isChatSessionsLoading.value = true
+            CounselorRepository.getCounselorChatsFlow(counselorId).collect { sessions ->
+                _chatSessions.value = sessions
+                _isChatSessionsLoading.value = false
+            }
+        }
+    }
+
+    
+    fun listenToRealtimeProfile(key: String) {
+        viewModelScope.launch {
+            RealtimeDBService.listenToCounselorData(key).collect { data ->
+                _realtimeData.value = data
+                _isOnline.value = data?.get("isOnline") as? Boolean ?: false
+                _callEnabled.value = data?.get("callEnabled") as? Boolean ?: false
+            }
+        }
+    }
+
+    
+    fun toggleOnlineStatus(key: String) {
+        val newStatus = !_isOnline.value
+        _isOnline.value = newStatus
+        viewModelScope.launch {
+            RealtimeDBService.setOnlineStatus(key, newStatus)
+        }
+    }
+
+    fun setCallAvailability(key: String, enabled: Boolean) {
+        _callEnabled.value = enabled
+        viewModelScope.launch {
+            RealtimeDBService.setCounselorCallAvailability(key, enabled)
+                .onFailure { _error.value = it.message }
+        }
+    }
+
+    
+    fun listenToChatSessionsRealtime(key: String) {
+        viewModelScope.launch {
+            _isChatSessionsLoading.value = true
+            RealtimeDBService.listenToCounselorChats(key).collect { sessions ->
+                _chatSessions.value = sessions
+                _isChatSessionsLoading.value = false
+            }
+        }
+    }
+
+    
+    fun toggleAvailability(counselorId: String) {
+        val newStatus = !_isOnline.value
+        _isOnline.value = newStatus
+        viewModelScope.launch {
+            val effectiveId = _profile.value?.counselorId?.ifBlank { counselorId } ?: counselorId
+            CounselorRepository.setAvailability(effectiveId, newStatus)
+            _profile.value = _profile.value?.copy(isAvailable = newStatus)
+        }
+    }
+
+    
+    fun acknowledgeAlert(alertId: String, counselorId: String) {
+        viewModelScope.launch {
+            EmergencyRepository.acknowledge(alertId, counselorId)
+            _openAlerts.value = _openAlerts.value.filter { it.alertId != alertId }
+        }
+    }
+
+    
+    fun resolveAlert(alertId: String, counselorId: String) {
+        viewModelScope.launch {
+            EmergencyRepository.resolve(alertId, counselorId)
+            _openAlerts.value = _openAlerts.value.filter { it.alertId != alertId }
+            
+            val effectiveId = _profile.value?.counselorId?.ifBlank { counselorId } ?: counselorId
+            CounselorRepository.completeSession(effectiveId)
+        }
+    }
+
+    
+    fun resolveReport(reportId: String, counselorId: String, note: String) {
+        viewModelScope.launch {
+            ReportRepository.resolveReport(reportId, counselorId, note)
+            _openReports.value = _openReports.value.filter { it.reportId != reportId }
+        }
+    }
+
+    
+    fun dismissReport(reportId: String, counselorId: String) {
+        viewModelScope.launch {
+            ReportRepository.dismissReport(reportId, counselorId, "No action needed.")
+            _openReports.value = _openReports.value.filter { it.reportId != reportId }
+        }
+    }
+
+    fun clearError() { _error.value = null }
+}

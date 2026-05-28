@@ -1,0 +1,25 @@
+# Sahara Voice (HuBERT emotion classifier) dependencies.
+#
+# Two install profiles:
+#   - serving + training:    pip install -r sahara_voice/requirements.txt
+#   - screening logic only:  pip install numpy           (tests run on this alone)
+#
+# Torch versions match the sahara_ai stack so a single container can host both
+# /v1/chat and /v1/voice/analyze.
+
+torch>=2.4,<2.7
+transformers>=4.45,<4.50
+accelerate>=0.34
+huggingface_hub>=0.25
+
+# Audio IO + DSP
+soundfile>=0.12
+librosa>=0.10
+noisereduce>=3.0
+numpy>=1.26
+
+# API
+fastapi>=0.115
+pydantic>=2.6
+python-multipart>=0.0.9
+uvicorn[standard]>=0.30

@@ -1,0 +1,39 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+
+    "users":              { "$uid": { ".read": "auth != null",                       ".write": "auth != null && auth.uid === $uid" } },
+    "device_tokens":      { "$uid": { ".read": "auth != null && auth.uid === $uid",  ".write": "auth != null && auth.uid === $uid" } },
+    "user_notifications": { "$uid": { ".read": "auth != null && auth.uid === $uid",  ".write": "auth != null" } },
+    "journals":           { "$uid": { ".read": "auth != null && auth.uid === $uid",  ".write": "auth != null && auth.uid === $uid" } },
+    "mood_logs":          { "$uid": { ".read": "auth != null && auth.uid === $uid",  ".write": "auth != null && auth.uid === $uid" } },
+    "progress":           { "$uid": { ".read": "auth != null && auth.uid === $uid",  ".write": "auth != null && auth.uid === $uid" } },
+    "screen_time":        { "$uid": { ".read": "auth != null && auth.uid === $uid",  ".write": "auth != null && auth.uid === $uid" } },
+    "sleep":              { "$uid": { ".read": "auth != null && auth.uid === $uid",  ".write": "auth != null && auth.uid === $uid" } },
+    "sleep_goals":        { "$uid": { ".read": "auth != null && auth.uid === $uid",  ".write": "auth != null && auth.uid === $uid" } },
+    "assessment":         { "$uid": { ".read": "auth != null && auth.uid === $uid",  ".write": "auth != null && auth.uid === $uid" } },
+    "user_activity":      { "$uid": { ".read": "auth != null && auth.uid === $uid",  ".write": "auth != null && auth.uid === $uid" } },
+    "app_usage_events":   { "$uid": { ".read": "auth != null && auth.uid === $uid",  ".write": "auth != null && auth.uid === $uid" } },
+    "game_recovery":      { "$uid": { ".read": "auth != null && auth.uid === $uid",  ".write": "auth != null && auth.uid === $uid" } },
+    "social_connections": { "$uid": { ".read": "auth != null && auth.uid === $uid",  ".write": "auth != null && auth.uid === $uid" } },
+
+    "user_chats":             { ".read": "auth != null", ".write": "auth != null" },
+    "counselor_keys":         { ".read": "auth != null", ".write": "auth != null" },
+    "ngo_keys":               { ".read": "auth != null", ".write": "auth != null" },
+    "community_posts":        { ".read": "auth != null", ".write": "auth != null" },
+    "community_likes":        { ".read": "auth != null", ".write": "auth != null" },
+    "community_replies":      { ".read": "auth != null", ".write": "auth != null" },
+    "leaderboard":            { ".read": "auth != null", ".write": "auth != null" },
+    "game_leaderboard":       { ".read": "auth != null", ".write": "auth != null" },
+    "payment_requests":       { ".read": "auth != null", ".write": "auth != null" },
+    "registration_requests":  { ".read": "auth != null", ".write": "auth != null" },
+    "avatar_requests":        { ".read": "auth != null", ".write": "auth != null" },
+    "bug_reports":            { ".read": "auth != null", ".write": "auth != null" },
+    "bug_report_daily_counts":{ ".read": "auth != null", ".write": "auth != null" },
+    "blocked_users":          { ".read": "auth != null", ".write": "auth != null" },
+    "blocked_emails":         { ".read": "auth != null", ".write": "auth != null" },
+
+    "email_otps":             { ".read": true, ".write": true }
+  }
+}

@@ -1,0 +1,37 @@
+// Merge this match block inside your deployed
+// match /databases/{database}/documents { ... } Firestore rules block.
+// It intentionally does not replace teammates' rules for other collections.
+
+match /users/{uid}/sahara_lens_checkins/{checkInId} {
+  allow create: if request.auth != null
+    && request.auth.uid == uid
+    && request.resource.data.keys().hasOnly([
+      "id",
+      "moodSelfReported",
+      "note",
+      "supportSuggested",
+      "source",
+      "imageUploaded",
+      "emotionInferredFromFace",
+      "createdAt"
+    ])
+    && request.resource.data.id == checkInId
+    && request.resource.data.moodSelfReported in [
+      "steady",
+      "stressed",
+      "anxious",
+      "low",
+      "craving",
+      "unsafe_now"
+    ]
+    && request.resource.data.note is string
+    && request.resource.data.note.size() <= 240
+    && request.resource.data.supportSuggested is bool
+    && request.resource.data.source == "self_reported_camera_check_in"
+    && request.resource.data.imageUploaded == false
+    && request.resource.data.emotionInferredFromFace == false
+    && request.resource.data.createdAt == request.time;
+
+  allow read: if request.auth != null && request.auth.uid == uid;
+  allow update, delete: if false;
+}

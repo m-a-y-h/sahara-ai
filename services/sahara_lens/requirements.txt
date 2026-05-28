@@ -1,0 +1,30 @@
+# Sahara Lens ML pipeline dependencies.
+#
+# Two install profiles:
+#   - serving + training:   pip install -r sahara_lens/requirements.txt
+#   - screening logic only: pip install pillow numpy           (tests run on these alone)
+#
+# Torch versions are pinned to a CUDA-12 wheel by default; on Colab/Kaggle the
+# pre-installed torch satisfies these constraints. For CPU-only servers use:
+#   pip install --index-url https://download.pytorch.org/whl/cpu torch==2.4.* torchvision==0.19.*
+
+# ── ML core ──────────────────────────────────────────────────────────────────
+torch>=2.4,<2.7
+torchvision>=0.19,<0.22
+
+# ── Image IO / preprocessing ─────────────────────────────────────────────────
+pillow>=10.0
+numpy>=1.26
+
+# ── Server-side face detection (quality gate) ────────────────────────────────
+opencv-python>=4.9
+
+# ── API ──────────────────────────────────────────────────────────────────────
+fastapi>=0.115
+pydantic>=2.6
+python-multipart>=0.0.9   # FastAPI File() upload support
+uvicorn[standard]>=0.30   # only for local serving / Dockerfile entrypoint
+
+# ── Optional: pretty-printing metrics + plotting confusion matrices ─────────
+# scikit-learn>=1.5         # uncomment if you want extra metric helpers
+# matplotlib>=3.9           # uncomment for confusion-matrix plots

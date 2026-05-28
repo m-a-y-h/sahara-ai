@@ -1,0 +1,34 @@
+// Merge inside the deployed service cloud.firestore {
+// match /databases/{database}/documents { ... } rules block.
+match /users/{userId}/sleep_logs/{date} {
+  allow read: if request.auth != null && request.auth.uid == userId;
+
+  allow create, update: if request.auth != null
+    && request.auth.uid == userId
+    && request.resource.data.keys().hasOnly([
+      "date", "bedtime", "waketime", "hours", "qualityType",
+      "source", "timeZoneId", "automatic", "confidence", "sourceReason",
+      "recordedAt"
+    ])
+    && request.resource.data.date == date
+    && request.resource.data.bedtime is string
+    && request.resource.data.waketime is string
+    && request.resource.data.hours is number
+    && request.resource.data.hours > 0
+    && request.resource.data.hours <= 24
+    && request.resource.data.qualityType in ["excellent", "good", "okay", "poor"]
+    && request.resource.data.source in [
+      "self_reported", "health_connect", "actigraphy",
+      "six_month_average", "default"
+    ]
+    && request.resource.data.timeZoneId is string
+    && request.resource.data.automatic is bool
+    && request.resource.data.sourceReason is string
+    && (!("confidence" in request.resource.data)
+      || (request.resource.data.confidence is number
+        && request.resource.data.confidence >= 0
+        && request.resource.data.confidence <= 1))
+    && request.resource.data.recordedAt is timestamp;
+
+  allow delete: if request.auth != null && request.auth.uid == userId;
+}

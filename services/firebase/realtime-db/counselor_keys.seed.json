@@ -1,0 +1,20 @@
+{
+  "counselor_keys": {
+    "abc123": {
+      "isActive": true,
+      "assignedName": "",
+      "usedBy": "",
+      "ngoName": "",
+      "createdAt": "2025-01-01",
+      "notes": "Default counselor key"
+    },
+    "SAHARA999": {
+      "isActive": true,
+      "assignedName": "Admin Bypass",
+      "usedBy": "",
+      "ngoName": "Sahara",
+      "createdAt": "2025-01-01",
+      "notes": "Master admin bypass key"
+    }
+  }
+}

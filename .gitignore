@@ -1,0 +1,64 @@
+# Android and Gradle generated/local files
+.gradle/
+.kotlin/
+/build/
+**/build/
+/captures/
+.externalNativeBuild/
+.cxx/
+/local.properties
+
+# IDE and local assistant configuration
+.idea/
+/shelf/
+/workspace.xml
+
+# Python service environments and caches
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Node service dependencies and local environment files
+node_modules/
+.env
+.env.*
+
+# Centralized secrets — NEVER commit (service-account keys, etc.)
+/secrets/
+*firebase-adminsdk*.json
+*serviceAccount*.json
+
+# OAuth/local application credentials
+app/client_secret.json
+app/google-services.json
+firebase_realtime_db_counselor_keys.json
+*.keystore
+*.jks
+key.properties
+gradle.local.properties
+
+# ML artefacts — these belong on HuggingFace Hub / Modal Volumes, not in git
+services/sahara_lens/checkpoints/
+services/sahara_voice/checkpoints/
+services/sahara_listening/checkpoints/
+services/**/data/
+data/inferpp/
+*.pt
+*.ckpt
+*.safetensors
+*.onnx
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# NOTE: no blanket "!*.ext" re-includes here. A `!*.properties` line previously
+# un-ignored local.properties (a secret) because a later negation overrides the
+# earlier `/local.properties` rule. Source files aren't ignored to begin with, so
+# these were unnecessary as well as dangerous.

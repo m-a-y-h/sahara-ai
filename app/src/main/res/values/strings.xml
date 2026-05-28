@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Sahara AI</string>
+    <string name="accessibility_service_description">Sahara AI tracks which apps you use to help monitor your mental wellness screen time.</string>
+</resources>

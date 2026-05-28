@@ -1,0 +1,154 @@
+# Sahara AI Protocol
+
+Run the commands in this document from the repository's `services/` directory.
+
+This folder is the safety and app-contract layer for the Sahara AI fine-tuned LLM. It runs in front of the model on whichever host the team picks (Hugging Face Spaces, Google Cloud Run, a Firebase-Functions container, or a Colab GPU during research) and produces the `/v1/chat` JSON contract the Android app consumes.
+
+The core rule: **do not rely on the model alone for overdose triage.** The protocol re-computes substance, risk, counselor trigger, UI card, and emergency destination before any model output is returned. The model still writes the user-facing reply when it meets the safety floor; deterministic Roman/Urdu/English text is only used when the model breaks JSON, invents a substance, gives unsafe instructions, or misses required overdose steps.
+
+The Android app owns user workflow and Firebase access. This API receives the minimum chat payload, validates it, recomputes safety-critical fields, clamps the JSON response contract, and ignores any client-sent override of counselor triggers, risk level, or user data fields.
+
+## Files
+
+| File | Purpose |
+|---|---|
+| `sahara_ai_protocol.py` | Slang/risk parser, prompt builder, JSON extractor, safe-fallback replies, FastAPI route registration. |
+| `app.py` | Deployment-agnostic FastAPI app for HF Spaces / Cloud Run / Firebase / Colab. Lazy model loading + health checks. |
+| `generate_sahara_ai_sft_dataset.py` | Seed JSONL generator for supervised fine-tuning / LoRA. |
+| `sahara_ai_sft_seed.jsonl` | Generated SFT seed examples (committed for reproducibility). |
+| `../tests/test_sahara_ai_protocol.py` | Offline edge-case tests. |
+
+## Coverage
+
+The slang parser ships with substance profiles spanning the Pakistan substance-use landscape, not just the urban-Karachi slang most LLMs know:
+
+- **Stimulants** — Ice/Methamphetamine, MDMA/Ecstasy, Cocaine/Crack
+- **Opioids** — Heroin/Opioids (incl. Balochistan/KPK street slang: *smack*, *black tar*, *brown powder*, *sufaid maal*); Tramadol & unprescribed pain pills; Doda/Bhukki/Poppy husk (rural Punjab, Seraiki, Sindhi: *doda*, *bhukki*, *post*, *kuknar*, *tariyak*, *nattha*)
+- **Depressants** — Xanax/Benzodiazepines, Alcohol, Cough syrup / DXM / codeine, Pregabalin/Gabapentin, and **Hooch/Kachi sharab/Tharra** (rural Punjab + Sindh + Balochistan illicit moonshine, treated separately because methanol contamination is a distinct ICU emergency)
+- **Cannabis** — Cannabis/Charas with Androon-e-Lahore walled-city slang (*bottle wali*, *tola*, *tilla*, *boota*, *manori*, *majoon*, *thandai*, *phookni*, *tash*, *sulfa*), plus Synthetic cannabinoids / Spice / K2 as a separate high-risk profile
+- **Dissociatives & psychedelics** — Ketamine, LSD/Psychedelics
+- **Inhalants** — Samad Bond, glue/petrol sniffing, thinner
+- **Nicotine** — Cigarettes/vape (Nicotine profile) plus a dedicated **Smokeless tobacco** profile for naswar, gutka, chaalia, mainpuri, mawa, khaini, paan masala
+- **Pills** — Unknown / unprescribed pill catch-all
+
+## Out-of-scope: prescription pharma
+
+A separate detection layer catches users asking about **legitimately prescribed medication** in a medical context (`my doctor prescribed sertraline`, `meri BP ki dawai`, `nuska`, `missed dose`, `interaction`, `for my thyroid`). In that case the route returns `user_intent = "prescription_inquiry_out_of_scope"`, `risk_level = "low"`, `message_type = "TEXT"`, and a localized reply telling the user to talk to their prescribing doctor or licensed pharmacist. This layer is intentionally conservative — it stays out of the way when overdose / misuse / craving / mixing cues are present, so a "doctor gave me Xanax and I took the whole strip" message is still routed as a critical event.
+
+The drugs the prescription layer recognises include common Pakistani-prescribed antidepressants (sertraline, escitalopram, fluoxetine), antipsychotics, mood stabilisers, hypertension meds (amlodipine, losartan, ramipril), diabetes meds (metformin, insulin, gliclazide), thyroid (levothyroxine/eltroxin), antibiotics (augmentin, azee, cipro, flagyl), antihistamines, asthma inhalers, common OTC analgesics (panadol, brufen, disprin), and reproductive/hormonal medications.
+
+## Deployment
+
+Sahara AI is deployment-agnostic. `sahara_ai/app.py` exposes the FastAPI app object every modern Python host can serve. There is **no ngrok** anywhere in this repo — pick whichever managed host fits the budget:
+
+### Modal.com (recommended — A10G GPU, pay-per-second)
+
+`sahara_ai/modal_deploy.py` is a complete Modal app: 24 GB A10G, persistent volume for cached HF weights, automatic scale-to-zero between requests. Deploy:
+
+```bash
+pip install modal>=0.65
+modal token new                                        # first time only
+modal secret create huggingface-secret HF_TOKEN=<hf token>
+modal deploy sahara_ai/modal_deploy.py
+```
+
+Modal prints a public HTTPS URL (e.g. `https://<user>--sahara-ai-chat-endpoint.modal.run`). Set it as `sahara.ai.chat.url` in the Android `local.properties`.
+
+Pre-download the weights once after deploy so the first real chat request doesn't pay for the 16 GB download:
+
+```bash
+modal run sahara_ai/modal_deploy.py::prewarm_weights
+```
+
+Override the model id by passing `--env-var SAHARA_AI_MODEL_ID=enstazao/<your-fine-tune>` on `modal deploy`.
+
+### Hugging Face Spaces (recommended for FYP / research)
+
+```text
+sahara-ai-space/
+├── Dockerfile
+├── requirements.txt
+└── app.py            # just: from sahara_ai.app import app
+```
+
+The Space exposes a public HTTPS URL. Set it as `sahara.ai.chat.url=https://<space>.hf.space/v1/chat` in the Android app's `local.properties`.
+
+### Google Cloud Run
+
+```bash
+gcloud run deploy sahara-ai \
+    --source . \
+    --port 8000 \
+    --memory 16Gi \
+    --cpu 4 \
+    --gpu 1 --gpu-type=nvidia-l4 \
+    --max-instances 1 \
+    --region asia-south1 \
+    --no-cpu-throttling \
+    --set-env-vars="SAHARA_AI_MODEL_ID=enstazao/Sahara-AI-1.0-8B-Instruct"
+```
+
+### Firebase Cloud Functions (CPU-only smoke testing)
+
+Wrap `sahara_ai.app:app` in a `functions_framework` HTTP function. Inference on CPU is slow but the deterministic safety layer always works, so the app degrades gracefully when the model is unavailable.
+
+### Colab (research)
+
+`sahara_ai.app:app` runs under `uvicorn` directly. Skip ngrok — use the public URL Colab exposes via `--share` Gradio for quick demos, or push the model to HF Hub and switch to the HF Spaces flow.
+
+## Local smoke test
+
+`test_connection.py` in `services/` sends a high-risk crisis payload to `http://localhost:8000/v1/chat` and prints the response. Start the app first:
+
+```bash
+uvicorn sahara_ai.app:app --host 0.0.0.0 --port 8000
+```
+
+Then in another shell:
+
+```bash
+python test_connection.py
+```
+
+## Local tests
+
+```bash
+python -m unittest tests/test_sahara_ai_protocol.py
+```
+
+## Generate seed fine-tuning data
+
+```bash
+python -m sahara_ai.generate_sahara_ai_sft_dataset --output sahara_ai/sahara_ai_sft_seed.jsonl
+```
+
+## `/v1/chat` contract
+
+Request:
+
+```json
+{
+  "user_input": "bhai mene boht zyada aiis pii li h ab saans ni ari help",
+  "language": "roman_urdu"
+}
+```
+
+Response (one of: critical overdose, high-risk mixing, medium substance support, out-of-scope prescription, anxiety, general):
+
+```json
+{
+  "reply": "Ye stimulant/ice emergency ho sakti hai. Abhi 1122/115 call karein …",
+  "trigger_counselor": true,
+  "substance_detected": "Ice / Methamphetamine",
+  "risk_level": "critical",
+  "message_type": "CRISIS_CARD",
+  "action_destination": "emergency",
+  "quick_replies": ["Emergency kholo", "Trusted banda bulao", "Location bhejo"],
+  "safety_flags": [],
+  "detected_symptoms": ["breathing_distress", "severe_overdose_language"],
+  "substances_detected": ["Ice / Methamphetamine"],
+  "user_intent": "possible_overdose_or_medical_emergency"
+}
+```
+
+The Android `ChatRepository` reads `reply`, `trigger_counselor`, `substance_detected`, `risk_level`, `message_type`, `action_destination`, and `quick_replies`.
