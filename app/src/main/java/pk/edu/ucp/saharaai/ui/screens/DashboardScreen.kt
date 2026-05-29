@@ -361,7 +361,7 @@ fun DashboardScreen(
 
                 Spacer(modifier = Modifier.height(32.dp))
 
-                Text(if (isEnglish) "Quick Actions" else "Fauri Actions", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                Text(if (isEnglish) "Quick Actions" else "Ek Click Par", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
                 Spacer(modifier = Modifier.height(16.dp))
 
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
