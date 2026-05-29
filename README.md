@@ -389,4 +389,7 @@ University of Central Punjab — Faculty of Information Technology
 - A. R. Tariq
 - M. A. Y. Haider
 
-Project Advisor: Prof. U. Aamer
+Project Advisors:
+
+- Prof. U. Aamer
+- Hafiz U. Ishtiaq
