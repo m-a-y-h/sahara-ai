@@ -69,7 +69,7 @@ fun OnboardingScreen(
     val currentSituation = onboardingViewModel.currentSituation
     val selectedHelps = onboardingViewModel.selectedHelps
     val notificationsAllowed = onboardingViewModel.notificationsAllowed
-    val persistentNotificationsAllowed = onboardingViewModel.persistentNotificationsAllowed
+    val locationAllowed = onboardingViewModel.locationAllowed
     val actigraphyAllowed = onboardingViewModel.actigraphyAllowed
     val selectedAvatarId = onboardingViewModel.selectedAvatarId
     val onboardingError = onboardingViewModel.errorMessage
@@ -96,6 +96,18 @@ fun OnboardingScreen(
         ),
         onGranted = { onboardingViewModel.actigraphyAllowed = true },
         onDenied = { onboardingViewModel.actigraphyAllowed = false },
+    )
+    val locationPermissionRequester = rememberAppPermissionRequester(
+        permission = Manifest.permission.ACCESS_FINE_LOCATION,
+        isEnglish = isEnglish,
+        copy = PermissionCopy(
+            deniedEn = "Location permission was denied.",
+            deniedUr = "Location ki ijazat nahi di gayi.",
+            settingsEn = "Enable location in App settings for regional features.",
+            settingsUr = "Regional features ke liye App settings mein location ki ijazat dein.",
+        ),
+        onGranted = { onboardingViewModel.locationAllowed = true },
+        onDenied = { onboardingViewModel.locationAllowed = false },
     )
 
     val isNextEnabled = onboardingViewModel.isNextEnabled
@@ -133,7 +145,7 @@ fun OnboardingScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            HazeBackButton(onClick = onNavigateBack, hazeState = bgHazeState)
+                            HazeBackButton(onClick = { if (step > 1) onboardingViewModel.previousStep() else onNavigateBack() }, hazeState = bgHazeState)
                             Spacer(Modifier.width(12.dp))
                             Text(
                                 text = if (isEnglish) "Create Account" else "Naya Account",
@@ -188,19 +200,12 @@ fun OnboardingScreen(
                                     4 -> StepFourPermissions(
                                         isE        = isEnglish,
                                         notif      = notificationsAllowed,
-                                        persistent = persistentNotificationsAllowed,
+                                        location   = locationAllowed,
                                         actigraphy = actigraphyAllowed,
                                         h          = bgHazeState,
                                         stc        = softTextColor,
                                         onNotif    = { notificationPermissionRequester.request() },
-                                        onPersistent = {
-                                            onboardingViewModel.persistentNotificationsAllowed = true
-                                            if (!onboardingViewModel.notificationsAllowed) {
-                                                notificationPermissionRequester.request()
-                                            } else {
-                                                onboardingViewModel.notificationsAllowed = true
-                                            }
-                                        },
+                                        onLocation = { locationPermissionRequester.request() },
                                         onActigraphy = {
                                             actigraphyPermissionRequester.request()
                                         }
@@ -496,26 +501,26 @@ fun StepHeader(title: String, subtitle: String, hazeState: HazeState, textColor:
 fun StepFourPermissions(
     isE: Boolean,
     notif: Boolean,
-    persistent: Boolean,
+    location: Boolean,
     actigraphy: Boolean,
     h: HazeState,
     stc: Color,
     onNotif: () -> Unit,
-    onPersistent: () -> Unit,
+    onLocation: () -> Unit,
     onActigraphy: () -> Unit
 ) {
     Column {
+        PermissionRow(
+            Icons.Default.LocationOn,
+            if (isE) "Location" else "Location",
+            if (isE) "Used for regional support and nearby help." else "Regional support aur nazdeeki madad ke liye.",
+            location, onLocation, h, stc, isE
+        )
         PermissionRow(
             Icons.Default.Notifications,
             if (isE) "Notifications" else "Notifications",
             if (isE) "Get alerts and reminders." else "Alerts aur reminders.",
             notif, onNotif, h, stc, isE
-        )
-        PermissionRow(
-            Icons.Default.NotificationsActive,
-            if (isE) "Persistent Notifications" else "Persistent Notifications",
-            if (isE) "Keep safety tracking visibly disclosed." else "Safety tracking ko visible rakhta hai.",
-            persistent, onPersistent, h, stc, isE
         )
         PermissionRow(
             Icons.Default.DirectionsWalk,

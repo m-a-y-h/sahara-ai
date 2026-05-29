@@ -16,7 +16,7 @@ class OnboardingViewModel : ViewModel() {
     var currentSituation by mutableStateOf("")
     var selectedHelps by mutableStateOf(setOf<String>())
     var notificationsAllowed by mutableStateOf(false)
-    var persistentNotificationsAllowed by mutableStateOf(false)
+    var locationAllowed by mutableStateOf(false)
     var actigraphyAllowed by mutableStateOf(false)
     var selectedAvatarId by mutableStateOf("avatar_01")
     var isSaving by mutableStateOf(false)
@@ -74,7 +74,7 @@ class OnboardingViewModel : ViewModel() {
                     selectedHelps = selectedHelps,
                     avatarId = selectedAvatarId,
                     notificationsAllowed = notificationsAllowed,
-                    persistentNotificationsAllowed = persistentNotificationsAllowed,
+                    locationAllowed = locationAllowed,
                     actigraphyAllowed = actigraphyAllowed,
                 ).onSuccess {
                     GlobalAppState.isMinor = (ageGroup == "18 se Kam")

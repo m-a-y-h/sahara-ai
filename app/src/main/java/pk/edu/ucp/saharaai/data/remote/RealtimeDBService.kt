@@ -111,7 +111,7 @@ object RealtimeDBService {
         selectedHelps: Set<String>,
         avatarId: String,
         notificationsAllowed: Boolean,
-        persistentNotificationsAllowed: Boolean,
+        locationAllowed: Boolean,
         actigraphyAllowed: Boolean,
     ): Result<Unit> = runCatching {
         require(uid.isNotBlank()) { "Missing user id." }
@@ -122,7 +122,7 @@ object RealtimeDBService {
                 "selectedHelps" to selectedHelps.toList(),
                 "avatarId" to avatarId,
                 "notificationsAllowed" to notificationsAllowed,
-                "persistentNotificationsAllowed" to persistentNotificationsAllowed,
+                "locationAllowed" to locationAllowed,
                 "actigraphyAllowed" to actigraphyAllowed,
                 "onboardingCompleted" to true,
                 "onboardedAt" to System.currentTimeMillis(),

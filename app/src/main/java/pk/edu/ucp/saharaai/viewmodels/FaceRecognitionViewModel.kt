@@ -11,6 +11,7 @@ import com.google.firebase.auth.auth
 import kotlinx.coroutines.launch
 import pk.edu.ucp.saharaai.data.remote.RealtimeDBService
 import pk.edu.ucp.saharaai.ui.screens.GlobalAppState
+import pk.edu.ucp.saharaai.util.callingName
 
 class FaceRecognitionViewModel : ViewModel() {
     var biometricEnabled by mutableStateOf(false)
@@ -38,7 +39,7 @@ class FaceRecognitionViewModel : ViewModel() {
         val user = Firebase.auth.currentUser
         val email = user?.email?.ifBlank { null } ?: storedEmail
         val name = user?.displayName?.ifBlank { null } ?: storedName.ifBlank { null } ?: "User"
-        GlobalAppState.userName = name.substringBefore(" ").ifBlank { name }
+        GlobalAppState.userName = callingName(name).ifBlank { name }
         GlobalAppState.userEmail = email
         user?.uid?.let { uid ->
             viewModelScope.launch { RealtimeDBService.logFaceLogin(uid) }

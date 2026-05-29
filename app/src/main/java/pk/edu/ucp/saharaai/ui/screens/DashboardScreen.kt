@@ -245,7 +245,7 @@ fun DashboardScreen(
     ) { innerPadding ->
 
         Box(
-            modifier = Modifier.fillMaxSize()
+            modifier = Modifier.fillMaxSize().padding(innerPadding)
         ) {
             Column(
                 modifier = Modifier

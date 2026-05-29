@@ -10,6 +10,7 @@ import kotlinx.coroutines.launch
 import pk.edu.ucp.saharaai.ASSESSMENT_VALIDITY_MS
 import pk.edu.ucp.saharaai.data.remote.RealtimeDBService
 import pk.edu.ucp.saharaai.data.repository.ChatRepository
+import pk.edu.ucp.saharaai.util.callingName
 import pk.edu.ucp.saharaai.ui.screens.GlobalAppState
 import pk.edu.ucp.saharaai.ui.theme.*
 import java.util.Calendar
@@ -38,7 +39,7 @@ class DashboardViewModel : ViewModel() {
         private set
 
     fun loadDashboard(defaultName: String) {
-        resolvedName = defaultName
+        resolvedName = callingName(defaultName).ifBlank { defaultName }
         userId = Firebase.auth.currentUser?.uid.orEmpty()
         isAiCheckInLoaded = false
         if (userId.isBlank()) {
@@ -52,7 +53,7 @@ class DashboardViewModel : ViewModel() {
             isAiCheckInLoaded = true
             val dbName = RealtimeDBService.getUserDisplayName(activeUserId)
             if (dbName.isNotBlank()) {
-                resolvedName = dbName.substringBefore(" ").ifBlank { dbName }
+                resolvedName = callingName(dbName).ifBlank { dbName }
             }
             val latest = RealtimeDBService.loadLatestAssessment(activeUserId) ?: return@launch
             val savedScore = (latest["score"] as? Int) ?: (latest["score"] as? Long)?.toInt()

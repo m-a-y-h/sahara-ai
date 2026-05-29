@@ -25,6 +25,7 @@ import kotlinx.coroutines.tasks.await
 import pk.edu.ucp.saharaai.data.remote.RealtimeDBService
 import pk.edu.ucp.saharaai.ui.screens.*
 import pk.edu.ucp.saharaai.util.NotificationRouteStore
+import pk.edu.ucp.saharaai.util.callingName
 import pk.edu.ucp.saharaai.util.showAssessmentRequiredToast as showAssessmentToast
 import pk.edu.ucp.saharaai.util.showLocalizedToast
 import pk.edu.ucp.saharaai.viewmodels.ChatViewModel
@@ -121,7 +122,7 @@ fun SaharaApp() {
     var userCallingName by rememberSaveable {
         mutableStateOf(
             prefs.getString(KEY_USER_NAME, "")
-                ?.ifBlank { firebaseUser?.displayName?.substringBefore(" ") }
+                ?.ifBlank { firebaseUser?.displayName?.let { callingName(it) } }
                 ?.ifBlank { "User" }
                 ?: "User"
         )
@@ -175,7 +176,7 @@ fun SaharaApp() {
         val cleanEmail = email.ifBlank { Firebase.auth.currentUser?.email.orEmpty() }
         val cleanName = fullName.ifBlank { Firebase.auth.currentUser?.displayName.orEmpty() }
             .ifBlank { "Sahara User" }
-        val calling = cleanName.substringBefore(" ").ifBlank { cleanName }.ifBlank { "User" }
+        val calling = callingName(cleanName).ifBlank { cleanName }.ifBlank { "User" }
         userEmail = cleanEmail
         userFullName = cleanName
         userCallingName = calling
@@ -317,7 +318,7 @@ fun SaharaApp() {
 
                         val restoredCalling =
                             prefs.getString(KEY_USER_NAME, "")?.ifBlank { null }
-                                ?: storedFull.substringBefore(" ").ifBlank { storedFull }
+                                ?: callingName(storedFull).ifBlank { storedFull }
                                     .ifBlank { "User" }
 
                         applyUserState(restoredEmail, storedFull.ifBlank { restoredCalling })
