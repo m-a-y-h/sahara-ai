@@ -27,9 +27,6 @@ android {
             localProperties.load(localPropertiesFile.inputStream())
         }
 
-        val bypassCode = localProperties.getProperty("sahara.bypass.code") ?: "000000"
-        buildConfigField("String", "BYPASS_CODE", "\"$bypassCode\"")
-
         val ngoKey = localProperties.getProperty("sahara.ngo.key") ?: ""
         buildConfigField("String", "NGO_KEY", "\"$ngoKey\"")
 
@@ -58,14 +55,14 @@ android {
         buildConfigField("String", "LIVEKIT_URL", "\"$liveKitUrl\"")
         buildConfigField("String", "LIVEKIT_TOKEN_URL", "\"$liveKitTokenUrl\"")
 
-        val hblAccountTitle = localProperties.getProperty("sahara.hbl.account.title") ?: ""
-        val hblIban = localProperties.getProperty("sahara.hbl.iban") ?: ""
-        val hblBank = localProperties.getProperty("sahara.hbl.bank") ?: ""
-        val hblAccountNumber = localProperties.getProperty("sahara.hbl.account.number") ?: ""
-        buildConfigField("String", "HBL_ACCOUNT_TITLE", "\"$hblAccountTitle\"")
-        buildConfigField("String", "HBL_IBAN", "\"$hblIban\"")
-        buildConfigField("String", "HBL_BANK", "\"$hblBank\"")
-        buildConfigField("String", "HBL_ACCOUNT_NUMBER", "\"$hblAccountNumber\"")
+        val bankAccountTitle = localProperties.getProperty("sahara.bank.account.title") ?: ""
+        val bankIban = localProperties.getProperty("sahara.bank.iban") ?: ""
+        val bankName = localProperties.getProperty("sahara.bank.name") ?: ""
+        val bankAccountNumber = localProperties.getProperty("sahara.bank.account.number") ?: ""
+        buildConfigField("String", "BANK_ACCOUNT_TITLE", "\"$bankAccountTitle\"")
+        buildConfigField("String", "BANK_IBAN", "\"$bankIban\"")
+        buildConfigField("String", "BANK_NAME", "\"$bankName\"")
+        buildConfigField("String", "BANK_ACCOUNT_NUMBER", "\"$bankAccountNumber\"")
 
         val blueskyPocBaseUrl = localProperties.getProperty("sahara.bluesky.poc.base.url")
             ?: "http://127.0.0.1:8787"

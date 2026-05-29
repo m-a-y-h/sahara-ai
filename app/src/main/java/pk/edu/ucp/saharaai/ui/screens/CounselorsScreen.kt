@@ -542,10 +542,10 @@ private fun PaymentProofDialog(
                         "Locked counselor fee neeche diye gaye account mein bhejein. Approval manual hai aur aam tor par aadha ghanta se 1 din lagta hai.",
                     style = MaterialTheme.typography.bodySmall
                 )
-                PaymentReceiverRow("Title", BuildConfig.HBL_ACCOUNT_TITLE)
-                PaymentReceiverRow("IBAN", BuildConfig.HBL_IBAN)
-                PaymentReceiverRow("Bank", BuildConfig.HBL_BANK)
-                PaymentReceiverRow("Account #", BuildConfig.HBL_ACCOUNT_NUMBER)
+                PaymentReceiverRow("Title", BuildConfig.BANK_ACCOUNT_TITLE)
+                PaymentReceiverRow("IBAN", BuildConfig.BANK_IBAN)
+                PaymentReceiverRow("Bank", BuildConfig.BANK_NAME)
+                PaymentReceiverRow("Account #", BuildConfig.BANK_ACCOUNT_NUMBER)
                 OutlinedTextField(
                     value = "PKR $amountPkr",
                     onValueChange = {},

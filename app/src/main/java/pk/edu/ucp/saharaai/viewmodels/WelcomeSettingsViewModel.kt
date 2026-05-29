@@ -16,13 +16,8 @@ class WelcomeSettingsViewModel : ViewModel() {
     ) {
         if (type == "ORGANIZATION" &&
             ((BuildConfig.ADMIN_KEY.isNotBlank() && key == BuildConfig.ADMIN_KEY) ||
-                (BuildConfig.NGO_KEY.isNotBlank() && key == BuildConfig.NGO_KEY) ||
-                key == BuildConfig.BYPASS_CODE)
+                (BuildConfig.NGO_KEY.isNotBlank() && key == BuildConfig.NGO_KEY))
         ) {
-            onSuccess(key)
-            return
-        }
-        if (type == "COUNSELOR" && key == BuildConfig.BYPASS_CODE) {
             onSuccess(key)
             return
         }

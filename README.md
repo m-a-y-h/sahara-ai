@@ -45,30 +45,27 @@ Firebase Auth, Firestore, and Realtime Database are the app backend services. Th
 ## Repository Layout
 
 ```text
-app/                                Android Studio application module
-app/src/main/java/pk/edu/ucp/saharaai/data/
-                                    Firebase/Auth/Firestore/RealtimeDB repositories and models
-app/src/main/java/pk/edu/ucp/saharaai/viewmodels/
-                                    UI state holders for Compose screens
-app/src/main/java/pk/edu/ucp/saharaai/ui/screens/
-                                    Compose screens
-app/src/main/java/pk/edu/ucp/saharaai/ui/components/
-                                    Reusable Compose components
-app/src/main/java/pk/edu/ucp/saharaai/service/
-                                    Foreground services (app tracker, meditation music)
-services/                           Non-Android APIs and local integration helpers
-services/sahara_ai/                 Sahara AI chat protocol, safety parser, and SFT tooling
-services/sahara_lens/               Facial screening API/model prototype
-services/sahara_voice/              Voice screening API/model prototype
-services/sahara_listening/          Research-only listening classifier prototype
-services/connections_poc_server/    Local Bluesky/Steam/Spotify connection helper
-services/tests/                     Python service tests
-services/sahara_livekit/            LiveKit token server (Modal) for in-app calls
-services/sahara_push/               FCM push sender (Modal) for notifications
-services/firebase/                  Firestore + Realtime DB security rules and seed data
-secrets/                            Local-only secrets (gitignored): service-account key + symlinks
-docs/assets/                        README/documentation images
-gradle/, gradlew*, *.gradle.kts     Required Android/Gradle project configuration
+.
+├─ app/                                Android app module (Kotlin + Jetpack Compose)
+│  └─ src/main/java/pk/edu/ucp/saharaai/
+│     ├─ data/                         Firebase/Firestore/RealtimeDB repositories + models
+│     ├─ viewmodels/                   Compose screen state holders
+│     ├─ ui/screens/                   Compose screens
+│     ├─ ui/components/                Reusable Compose components
+│     └─ service/                      Foreground services (app tracker, meditation music)
+├─ services/                           Python services (FastAPI, deployed on Modal)
+│  ├─ sahara_ai/                       Chat protocol, safety parser, SFT tooling
+│  ├─ sahara_lens/                     Facial-emotion screening model + API
+│  ├─ sahara_voice/                    Voice-emotion screening model + API
+│  ├─ sahara_listening/                Listening-signal classifier (research)
+│  ├─ sahara_livekit/                  LiveKit token server (in-app calls)
+│  ├─ sahara_push/                     FCM push sender
+│  ├─ connections_poc_server/          Local Bluesky/Steam/Spotify OAuth helper
+│  ├─ firebase/                        Firestore + Realtime DB security rules + seed data
+│  └─ tests/                           Python service tests
+├─ secrets/                            Local-only secrets (gitignored) — see "Secrets"
+├─ docs/assets/                        README/documentation images
+└─ gradle/, gradlew*, *.gradle.kts     Android/Gradle project configuration
 ```
 
 The Android module is `:app`, so application source and Android resources live
@@ -81,7 +78,7 @@ application feature clutter.
 ## Android Setup
 
 1. Open this folder in Android Studio.
-2. Keep local Android secrets in `local.properties` at the repository root.
+2. Provide your secrets — see the **[Secrets](#secrets)** section below for the files and how to symlink them out of `secrets/`.
 3. Add the Firebase Android config file at:
 
 ```text
@@ -108,7 +105,6 @@ sahara.ai.chat.url=https://your-colab-or-api-url/v1/chat
 6. Other optional local secrets:
 
 ```properties
-sahara.bypass.code=000000
 sahara.admin.key=<admin-dashboard-key>
 sahara.ngo.key=<ngo-key>
 sahara.counselor.key=<counselor-key>
@@ -119,15 +115,72 @@ sahara.livekit.url=wss://<your>.livekit.cloud
 sahara.livekit.token.url=<sahara_livekit Modal URL>/token
 sahara.lens.scan.url=<sahara_lens Modal URL>/v1/lens/scan
 sahara.voice.analyze.url=<sahara_voice Modal URL>/v1/voice/analyze
-sahara.hbl.account.title=<receiving account title>
-sahara.hbl.iban=<iban>
-sahara.hbl.bank=<bank>
-sahara.hbl.account.number=<account-number>
+sahara.bank.account.title=<receiving account title>
+sahara.bank.iban=<iban or mobile-wallet number>
+sahara.bank.name=<bank or wallet, e.g. HBL, JazzCash, Easypaisa>
+sahara.bank.account.number=<account-number>
 ```
+
+> The payment receiver is bank-agnostic: use `sahara.bank.*` for any bank or mobile wallet (HBL, JazzCash, Easypaisa, …), not just one bank.
 
 7. Sync Gradle and run the Android module `:app`.
 
-All secrets live in the gitignored `secrets/` folder — the real `local.properties`, `google-services.json`, and `client_secret.json` are kept there and symlinked into the build paths, so nothing sensitive sits loose in the tree. Never commit `secrets/` or signing keys.
+## Secrets
+
+The entire `secrets/` folder is gitignored, so **nothing here is ever committed.** The *real* files live in `secrets/`; the build expects three of them at fixed paths, so we symlink those out of `secrets/`:
+
+| Real file in `secrets/`                | Symlinked to                | Needed by |
+|----------------------------------------|-----------------------------|-----------|
+| `local.properties`                     | `./local.properties`        | Gradle (SDK path + build config) |
+| `google-services.json`                 | `app/google-services.json`  | google-services plugin (Firebase) |
+| `client_secret.json`                   | `app/client_secret.json`    | Google OAuth |
+| `<project>-firebase-adminsdk-*.json`   | *(not symlinked)*           | the `sahara_push` Modal secret only |
+
+After you place your real files in `secrets/`, recreate the symlinks **from the repo root**. Run the block for your OS in one go (the `cd` keeps you in the right folder):
+
+**Linux / macOS / FreeBSD / OpenBSD** — `sh`, `bash`, or `zsh` (macOS defaults to zsh, the BSDs to sh/ksh); `ln -s` is identical on all four:
+
+```sh
+cd /path/to/project-sahara && \
+ln -sf secrets/local.properties local.properties && \
+ln -sf ../secrets/google-services.json app/google-services.json && \
+ln -sf ../secrets/client_secret.json app/client_secret.json
+```
+
+**Windows (NT)** — `cmd.exe`, **Run as Administrator** (or enable Settings → Privacy & security → For developers → Developer Mode, after which any shell can make links):
+
+```bat
+cd /d C:\path\to\project-sahara && ^
+mklink local.properties secrets\local.properties && ^
+mklink app\google-services.json ..\secrets\google-services.json && ^
+mklink app\client_secret.json ..\secrets\client_secret.json
+```
+
+**Windows (NT)** — PowerShell, **Run as Administrator** (or Developer Mode). Uses absolute targets so it is PowerShell-version independent:
+
+```powershell
+cd C:\path\to\project-sahara
+New-Item -ItemType SymbolicLink -Force -Path local.properties         -Target (Resolve-Path secrets\local.properties)
+New-Item -ItemType SymbolicLink -Force -Path app\google-services.json -Target (Resolve-Path secrets\google-services.json)
+New-Item -ItemType SymbolicLink -Force -Path app\client_secret.json   -Target (Resolve-Path secrets\client_secret.json)
+```
+
+**Symlinks giving you trouble?** (common on Windows without admin/Developer Mode, or on exFAT/network drives) — just **copy** the files into place instead. You lose the single-source-of-truth, but it always works:
+
+```sh
+# POSIX
+cp secrets/local.properties local.properties
+cp secrets/google-services.json app/google-services.json
+cp secrets/client_secret.json app/client_secret.json
+```
+```bat
+:: Windows cmd
+copy secrets\local.properties local.properties
+copy secrets\google-services.json app\google-services.json
+copy secrets\client_secret.json app\client_secret.json
+```
+
+Never commit `secrets/`, the symlinks/copies it feeds, or any signing key.
 
 ## Social Connection Prototype
 
