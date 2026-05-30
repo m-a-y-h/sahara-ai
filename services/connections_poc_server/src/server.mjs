@@ -42,15 +42,33 @@ function mapStore(map) {
   };
 }
 
-const oauthClient = new NodeOAuthClient({
-  clientMetadata: buildAtprotoLoopbackClientMetadata({
-    scope: SCOPE,
-    redirect_uris: [`${BASE_URL}/oauth/bluesky/callback`]
-  }),
-  requestLock: requestLocalLock,
-  stateStore: mapStore(stateStore),
-  sessionStore: mapStore(sessionStore)
-});
+// Bluesky atproto's loopback-client helper is dev-only: it ONLY accepts
+// http:// URLs (it's the convenience path for local testing that skips client
+// registration with the atproto directory). On a cloud HTTPS deploy that
+// helper throws "URL must use the http: protocol" and the whole process dies
+// before Steam/Spotify can even start. Until we wire a proper confidential
+// client (hosted client_metadata.json + entry registered with atproto), we
+// only initialise the Bluesky client on http URLs and no-op the Bluesky
+// routes elsewhere. Steam + Spotify work fine on either protocol.
+const isLoopbackBase = BASE_URL.startsWith("http://");
+let oauthClient = null;
+if (isLoopbackBase) {
+  oauthClient = new NodeOAuthClient({
+    clientMetadata: buildAtprotoLoopbackClientMetadata({
+      scope: SCOPE,
+      redirect_uris: [`${BASE_URL}/oauth/bluesky/callback`]
+    }),
+    requestLock: requestLocalLock,
+    stateStore: mapStore(stateStore),
+    sessionStore: mapStore(sessionStore)
+  });
+} else {
+  console.warn(
+    `[sahara-connections] Bluesky routes disabled — atproto loopback client requires http:// (got ${BASE_URL}). ` +
+      `To enable Bluesky on this deploy, swap buildAtprotoLoopbackClientMetadata for a confidential client and ` +
+      `host a client_metadata.json at ${BASE_URL}/client-metadata.json.`
+  );
+}
 
 function sendJson(response, status, body) {
   response.writeHead(status, {
@@ -332,6 +350,12 @@ async function handleRequest(request, response) {
   }
 
   if (request.method === "GET" && url.pathname === "/oauth-client-metadata.json") {
+    if (!oauthClient) {
+      return sendJson(response, 503, {
+        error: "bluesky-disabled",
+        detail: "Bluesky is loopback-only on this deploy. See server logs for setup notes.",
+      });
+    }
     return sendJson(response, 200, oauthClient.clientMetadata);
   }
 
@@ -351,6 +375,11 @@ async function handleRequest(request, response) {
   }
 
   if (request.method === "GET" && url.pathname === "/oauth/bluesky/start") {
+    if (!oauthClient) {
+      return sendHtml(response, 503, "Bluesky disabled on this deploy",
+        "<p>This Sahara connections helper is hosted on HTTPS, but the Bluesky atproto loopback client only works on http://. " +
+        "Run the helper locally with <code>adb reverse</code> for Bluesky testing, or wire a confidential client to enable Bluesky in production.</p>");
+    }
     const identifier = normalizeIdentifier(url.searchParams.get("handle") ?? "");
     if (!identifier || !identifier.includes(".")) {
       return sendHtml(response, 400, "Invalid Bluesky handle", "<p>Return to Sahara and enter a full handle such as user.bsky.social.</p>");
@@ -369,6 +398,11 @@ async function handleRequest(request, response) {
   }
 
   if (request.method === "GET" && url.pathname === "/oauth/bluesky/callback") {
+    if (!oauthClient) {
+      return sendHtml(response, 503, "Bluesky disabled on this deploy",
+        "<p>This Sahara connections helper is hosted on HTTPS, but the Bluesky atproto loopback client only works on http://. " +
+        "Run the helper locally with <code>adb reverse</code> for Bluesky testing.</p>");
+    }
     try {
       const { session } = await oauthClient.callback(url.searchParams);
       const profile = await loadPublicProfile(session.did);
