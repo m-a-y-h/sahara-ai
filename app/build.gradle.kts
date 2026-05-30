@@ -148,6 +148,7 @@ dependencies {
     implementation(libs.tensorflow.lite)
     implementation(libs.tensorflow.lite.support)
     implementation(libs.androidx.biometric)
+    implementation(libs.androidx.security.crypto)
     implementation(libs.androidx.health.connect.client)
     implementation(libs.play.services.location)
     implementation(libs.play.services.auth)

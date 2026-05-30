@@ -131,10 +131,13 @@ fun LoginScreen(
     
     
     
+    // The biometric chip is only useful if the vault has been armed — i.e. the
+    // user has signed in manually at least once on this device, so we have a
+    // sealed (email, password) pair waiting behind their biometric. After
+    // sign-out the vault is intentionally NOT cleared, so this stays true and
+    // they can come back in with a fingerprint.
     val showBiometric = remember {
-        prefs.getBoolean("biometric_enabled", false) &&
-        (prefs.getString("user_email", "").orEmpty().isNotBlank() ||
-         prefs.getString("biometric_last_email", "").orEmpty().isNotBlank())
+        pk.edu.ucp.saharaai.util.BiometricCredentialVault.isArmed(context)
     }
 
     val primaryGreen = if (isDark) SaharaStrongGreen else SaharaGreen
@@ -249,7 +252,17 @@ fun LoginScreen(
                         SaharaButton(
                             text = if (isEnglish) "Sign In" else "Sign In Karein",
                             onClick = {
-                                loginViewModel.signIn(email, password, isEnglish, onNavigateToDashboard)
+                                // Capture the password before VM clears the form so we can seal
+                                // it into the biometric vault on success. Vault is overwritten
+                                // each successful login, so a password change always re-arms.
+                                val capturedPassword = password
+                                loginViewModel.signIn(email, password, isEnglish) { cleanEmail ->
+                                    pk.edu.ucp.saharaai.util.BiometricCredentialVault.save(
+                                        context, cleanEmail, capturedPassword
+                                    )
+                                    prefs.edit().putBoolean("biometric_enabled", true).apply()
+                                    onNavigateToDashboard(cleanEmail)
+                                }
                             },
                             enabled = isFormValid,
                             isFullWidth = true,
@@ -297,7 +310,27 @@ fun LoginScreen(
                             authenticateWithBiometrics(
                                 context = context,
                                 isEnglish = isEnglish,
-                                onSuccess = onBiometricSuccess,
+                                onSuccess = {
+                                    // After the system biometric prompt succeeds, decrypt the
+                                    // saved (email, password) from the keystore-backed vault
+                                    // and run a real Firebase sign-in. No vault entry =
+                                    // biometric is "armed" only after a successful manual
+                                    // login, so this path is guaranteed to have creds.
+                                    val creds = pk.edu.ucp.saharaai.util.BiometricCredentialVault
+                                        .load(context)
+                                    if (creds == null) {
+                                        loginViewModel.reportError(
+                                            if (isEnglish)
+                                                "Sign in with your password once to enable fingerprint login."
+                                            else
+                                                "Pehli baar password se login karein, phir fingerprint kaam karega."
+                                        )
+                                        return@authenticateWithBiometrics
+                                    }
+                                    loginViewModel.signIn(creds.first, creds.second, isEnglish) {
+                                        onBiometricSuccess()
+                                    }
+                                },
                                 onError = loginViewModel::reportError
                             )
                         },
