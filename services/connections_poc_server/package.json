@@ -6,9 +6,11 @@
     "node": ">=22"
   },
   "scripts": {
-    "start": "node src/server.mjs"
+    "start": "node src/server.mjs",
+    "generate-bluesky-key": "node scripts/generate-bluesky-key.mjs"
   },
   "dependencies": {
+    "@atproto/jwk-jose": "^0.1.5",
     "@atproto/oauth-client": "^0.7.0",
     "@atproto/oauth-client-node": "^0.4.0"
   }

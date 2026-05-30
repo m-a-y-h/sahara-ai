@@ -2,6 +2,7 @@ import http from "node:http";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { requestLocalLock } from "@atproto/oauth-client";
 import { NodeOAuthClient, buildAtprotoLoopbackClientMetadata } from "@atproto/oauth-client-node";
+import { JoseKey } from "@atproto/jwk-jose";
 
 // HOST: default 0.0.0.0 so Render's port scanner can reach us (it expects all
 // interfaces). Local-dev `adb reverse tcp:8787 tcp:8787` still works against
@@ -42,31 +43,82 @@ function mapStore(map) {
   };
 }
 
-// Bluesky atproto's loopback-client helper is dev-only: it ONLY accepts
-// http:// URLs (it's the convenience path for local testing that skips client
-// registration with the atproto directory). On a cloud HTTPS deploy that
-// helper throws "URL must use the http: protocol" and the whole process dies
-// before Steam/Spotify can even start. Until we wire a proper confidential
-// client (hosted client_metadata.json + entry registered with atproto), we
-// only initialise the Bluesky client on http URLs and no-op the Bluesky
-// routes elsewhere. Steam + Spotify work fine on either protocol.
-const isLoopbackBase = BASE_URL.startsWith("http://");
+// Bluesky has three operating modes — chosen at startup based on BASE_URL
+// and whether a private signing key is configured:
+//
+//   loopback     — http:// BASE_URL. Uses atproto's built-in loopback helper.
+//                  Zero registration; convenient for local dev (adb reverse).
+//                  http:// only — atproto's helper zod-rejects https.
+//   confidential — https:// BASE_URL AND BLUESKY_CLIENT_PRIVATE_JWK env var
+//                  is present. The server self-registers as a confidential
+//                  OAuth client by serving its own client_metadata.json + a
+//                  JWKS containing only the public key. The atproto OAuth
+//                  directory fetches both URLs the first time a user starts
+//                  a Bluesky auth flow on this server.
+//                  Generate the keypair with: node scripts/generate-bluesky-key.mjs
+//   disabled     — https:// BASE_URL with no key configured. The three
+//                  Bluesky routes return a clean 503 with a setup hint.
+const PRIVATE_JWK_JSON = (process.env.BLUESKY_CLIENT_PRIVATE_JWK || "").trim();
+let bskyPrivateJwk = null;
+let bskyPublicJwk = null;
+if (PRIVATE_JWK_JSON) {
+  try {
+    bskyPrivateJwk = JSON.parse(PRIVATE_JWK_JSON);
+    // Public JWK = private JWK minus the secret components. EC private fields
+    // are 'd'; we strip the RSA private fields too for robustness in case
+    // someone swaps key types later.
+    bskyPublicJwk = { ...bskyPrivateJwk };
+    for (const f of ["d", "p", "q", "dp", "dq", "qi", "oth", "k"]) delete bskyPublicJwk[f];
+  } catch (e) {
+    console.warn("[sahara-connections] BLUESKY_CLIENT_PRIVATE_JWK is not valid JSON:", e.message);
+  }
+}
+
 let oauthClient = null;
-if (isLoopbackBase) {
+let bskyMode = "disabled";
+
+if (BASE_URL.startsWith("http://")) {
   oauthClient = new NodeOAuthClient({
     clientMetadata: buildAtprotoLoopbackClientMetadata({
       scope: SCOPE,
-      redirect_uris: [`${BASE_URL}/oauth/bluesky/callback`]
+      redirect_uris: [`${BASE_URL}/oauth/bluesky/callback`],
     }),
     requestLock: requestLocalLock,
     stateStore: mapStore(stateStore),
-    sessionStore: mapStore(sessionStore)
+    sessionStore: mapStore(sessionStore),
   });
-} else {
+  bskyMode = "loopback";
+} else if (bskyPrivateJwk) {
+  const CLIENT_ID = `${BASE_URL}/client-metadata.json`;
+  const confidentialMetadata = {
+    client_id: CLIENT_ID,
+    client_name: "Sahara AI",
+    client_uri: BASE_URL,
+    application_type: "web",
+    grant_types: ["authorization_code", "refresh_token"],
+    scope: SCOPE,
+    response_types: ["code"],
+    redirect_uris: [`${BASE_URL}/oauth/bluesky/callback`],
+    token_endpoint_auth_method: "private_key_jwt",
+    token_endpoint_auth_signing_alg: "ES256",
+    dpop_bound_access_tokens: true,
+    jwks_uri: `${BASE_URL}/jwks.json`,
+  };
+  const signingKey = await JoseKey.fromImportable(bskyPrivateJwk);
+  oauthClient = new NodeOAuthClient({
+    clientMetadata: confidentialMetadata,
+    keyset: [signingKey],
+    requestLock: requestLocalLock,
+    stateStore: mapStore(stateStore),
+    sessionStore: mapStore(sessionStore),
+  });
+  bskyMode = "confidential";
+}
+
+if (bskyMode === "disabled") {
   console.warn(
-    `[sahara-connections] Bluesky routes disabled — atproto loopback client requires http:// (got ${BASE_URL}). ` +
-      `To enable Bluesky on this deploy, swap buildAtprotoLoopbackClientMetadata for a confidential client and ` +
-      `host a client_metadata.json at ${BASE_URL}/client-metadata.json.`
+    "[sahara-connections] Bluesky routes disabled. To enable on this HTTPS deploy, generate a keypair with " +
+      "`node scripts/generate-bluesky-key.mjs` and paste the JSON into env var BLUESKY_CLIENT_PRIVATE_JWK.",
   );
 }
 
@@ -353,10 +405,38 @@ async function handleRequest(request, response) {
     if (!oauthClient) {
       return sendJson(response, 503, {
         error: "bluesky-disabled",
-        detail: "Bluesky is loopback-only on this deploy. See server logs for setup notes.",
+        detail: "Set env var BLUESKY_CLIENT_PRIVATE_JWK on this deploy to enable Bluesky in confidential-client mode (see scripts/generate-bluesky-key.mjs).",
       });
     }
     return sendJson(response, 200, oauthClient.clientMetadata);
+  }
+
+  // Canonical atproto OAuth metadata endpoint. The client_metadata.json
+  // returned here IS our registration — atproto's OAuth directory fetches
+  // this URL whenever a user starts a Bluesky auth flow on this server.
+  if (request.method === "GET" && url.pathname === "/client-metadata.json") {
+    if (!oauthClient || bskyMode !== "confidential") {
+      return sendJson(response, 503, {
+        error: "bluesky-not-in-confidential-mode",
+        mode: bskyMode,
+        detail: "Confidential-client metadata is only published when BASE_URL is https:// AND BLUESKY_CLIENT_PRIVATE_JWK is configured.",
+      });
+    }
+    return sendJson(response, 200, oauthClient.clientMetadata);
+  }
+
+  // Public JWKS — atproto fetches this from the jwks_uri in client_metadata
+  // to verify our private_key_jwt client assertions. Only ever serves the
+  // public half of the key (private 'd' / 'p' / 'q' fields were stripped at
+  // startup); the private JWK in env never leaves this process.
+  if (request.method === "GET" && url.pathname === "/jwks.json") {
+    if (!bskyPublicJwk) {
+      return sendJson(response, 503, {
+        error: "bluesky-not-in-confidential-mode",
+        mode: bskyMode,
+      });
+    }
+    return sendJson(response, 200, { keys: [bskyPublicJwk] });
   }
 
   if (request.method === "GET" && url.pathname === "/") {
