@@ -23,12 +23,14 @@ import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
@@ -80,6 +82,7 @@ private fun EmergencyAlert.toRiskAlert(): RiskAlert {
     )
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CounselorDashboardScreen(
     navController: NavController,
@@ -145,66 +148,97 @@ fun CounselorDashboardScreen(
     val blobMotion = rememberBackdropBlobMotion()
 
     val pagerState = rememberPagerState(pageCount = { 3 })
+    val isRefreshing by dashboardViewModel.isRefreshing.collectAsState()
+
+    // Match the rest of the app: gradient + animated blobs as the hazeSource,
+    // a HazeBackButton + title row instead of an image + dim + dark bar.
+    val bgGradient = if (isDark) {
+        listOf(
+            SaharaStrongGreen.copy(alpha = 0.18f),
+            MaterialTheme.colorScheme.background.copy(alpha = 0.6f),
+            MaterialTheme.colorScheme.background,
+        )
+    } else {
+        listOf(
+            SaharaStrongGreen.copy(alpha = 0.22f),
+            SaharaSky.copy(alpha = 0.10f),
+            MaterialTheme.colorScheme.background.copy(alpha = 0.2f),
+        )
+    }
 
     Box(modifier = Modifier.fillMaxSize()) {
 
-        Box(modifier = Modifier.fillMaxSize().hazeSource(bgHazeState)) {
-            Image(
-                painter = painterResource(id = R.drawable.sahara_bg3),
-                contentDescription = null,
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop
-            )
-            if (isDark) {
-                Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.5f)))
-            } else {
-                Box(modifier = Modifier.fillMaxSize().background(Color.White.copy(alpha = 0.1f)))
-            }
-
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .hazeSource(bgHazeState)
+                .background(Brush.verticalGradient(bgGradient)),
+        ) {
             Box(
-                modifier = Modifier.size(350.dp).offset(x = (-50).dp, y = (-100).dp).primaryBlobMotion(blobMotion)
+                modifier = Modifier
+                    .size(350.dp)
+                    .offset(x = (-50).dp, y = (-100).dp)
+                    .primaryBlobMotion(blobMotion)
                     .background(
                         if (isDark) SaharaCoral.copy(0.15f) else SaharaCoral.copy(0.2f),
-                        CircleShape
-                    ).blur(100.dp)
+                        CircleShape,
+                    )
+                    .blur(100.dp),
             )
             Box(
-                modifier = Modifier.size(400.dp).align(Alignment.BottomEnd)
-                    .offset(x = 50.dp, y = 150.dp).secondaryBlobMotion(blobMotion).background(
+                modifier = Modifier
+                    .size(400.dp)
+                    .align(Alignment.BottomEnd)
+                    .offset(x = 50.dp, y = 150.dp)
+                    .secondaryBlobMotion(blobMotion)
+                    .background(
                         if (isDark) SaharaSky.copy(0.15f) else SaharaSky.copy(0.25f),
-                        CircleShape
-                    ).blur(120.dp)
+                        CircleShape,
+                    )
+                    .blur(120.dp),
             )
         }
 
-        Column(modifier = Modifier.fillMaxSize()) {
+        PullToRefreshBox(
+            isRefreshing = isRefreshing,
+            onRefresh = {
+                dashboardViewModel.refresh(
+                    counselorKey = counselorKey,
+                    counselorId  = counselorId,
+                )
+            },
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            Column(modifier = Modifier.fillMaxSize()) {
 
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(Color.Black.copy(alpha = 0.25f))
-                    .statusBarsPadding()
-                    .padding(horizontal = 24.dp, vertical = 16.dp)
-            ) {
+                // Header: HazeBackButton + title Column + actions (visibility
+                // switch + sign out). Matches the NGO dashboard / Counselors
+                // screen pattern so the role-switch dashboards stop looking
+                // like a different app.
                 Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .statusBarsPadding()
+                        .padding(horizontal = 24.dp, vertical = 16.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.fillMaxWidth()
                 ) {
+                    HazeBackButton(onClick = { navController.popBackStack() }, hazeState = bgHazeState)
+                    Spacer(Modifier.width(12.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = displayName,
                             style = MaterialTheme.typography.headlineSmall,
                             fontWeight = FontWeight.ExtraBold,
-                            color = SaharaStrongGreen
+                            color = SaharaStrongGreen,
+                            maxLines = 1,
                         )
                         Text(
                             text = displayRegion,
                             style = MaterialTheme.typography.bodySmall,
-                            color = Color.White.copy(alpha = 0.9f)
+                            color = softTextColor.copy(0.75f),
                         )
                     }
 
-                    
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         // The switch is the counselor's manual "appear offline"

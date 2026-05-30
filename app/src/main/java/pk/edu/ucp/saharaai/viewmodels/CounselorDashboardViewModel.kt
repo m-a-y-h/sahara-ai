@@ -51,6 +51,9 @@ class CounselorDashboardViewModel : ViewModel() {
 
     private var presenceCloser: (() -> Unit)? = null
 
+    private val _isRefreshing = MutableStateFlow(false)
+    val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
+
     private val _callEnabled    = MutableStateFlow(false)
     val callEnabled: StateFlow<Boolean> = _callEnabled.asStateFlow()
 
@@ -146,6 +149,27 @@ class CounselorDashboardViewModel : ViewModel() {
     override fun onCleared() {
         super.onCleared()
         detachPresence()
+    }
+
+    /** Pull-to-refresh hook for the dashboard. Real-time listeners already
+     *  keep the data live, so this just re-runs the one-shot fetches (profile,
+     *  open alerts, reports) and flips a brief refreshing flag for visible
+     *  feedback. Safe to call with blank ids — those branches no-op. */
+    fun refresh(counselorKey: String, counselorId: String) {
+        viewModelScope.launch {
+            _isRefreshing.value = true
+            if (counselorKey.isNotBlank()) {
+                listenToRealtimeProfile(counselorKey)
+            } else if (counselorId.isNotBlank()) {
+                loadProfile(counselorId)
+            }
+            if (counselorId.isNotBlank()) {
+                loadOpenAlerts(counselorId)
+                loadReports()
+            }
+            kotlinx.coroutines.delay(450)            // let the user actually see the spinner
+            _isRefreshing.value = false
+        }
     }
 
     /** Counselor's manual "appear offline" toggle. Online is still driven by

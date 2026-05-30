@@ -1128,6 +1128,31 @@ object RealtimeDBService {
             )).await()
     }
 
+    /** Persist the rule-based classifier's output for the user's subscriptions
+     *  list. Written to a sibling node `social_connections/{uid}/youtube_flags`
+     *  so the raw subscription store stays clean and so the risk aggregator can
+     *  read just the summary without scanning the full list. The schema mirrors
+     *  the per-channel record produced by `YouTubeSubscriptionClassifier`. */
+    suspend fun saveYouTubeFlaggedSubscriptions(
+        uid: String,
+        totalSubscriptions: Int,
+        flagged: List<Map<String, Any>>,
+        overallSeverity: String,
+        recoveryChannelCount: Int,
+    ): Result<Unit> = runCatching {
+        require(uid.isNotBlank()) { "Missing user id." }
+        val now = System.currentTimeMillis()
+        db.getReference("social_connections").child(uid).child("youtube_flags")
+            .setValue(mapOf(
+                "evaluatedAt"          to now,
+                "totalSubscriptions"   to totalSubscriptions,
+                "flaggedCount"         to flagged.size,
+                "overallSeverity"      to overallSeverity,
+                "recoveryChannelCount" to recoveryChannelCount,
+                "flagged"              to flagged,
+            )).await()
+    }
+
     
     suspend fun removeSocialConnection(uid: String, platform: String): Result<Unit> = runCatching {
         db.getReference("social_connections").child(uid).child(platform).removeValue().await()

@@ -155,6 +155,33 @@ class SocialConnectionsViewModel : ViewModel() {
                     ).onFailure {
                         _error.value = it.message ?: "Failed to store YouTube connection."
                     }
+
+                    // Reverse search: scan the freshly-fetched subscriptions
+                    // against the rule-based substance / recovery deny-lists and
+                    // persist the summary alongside the raw list. Failure here
+                    // is non-fatal — the raw connection still goes in.
+                    val report = pk.edu.ucp.saharaai.util.YouTubeSubscriptionClassifier
+                        .classify(data.subscriptions)
+                    val recoveryCount = pk.edu.ucp.saharaai.util.YouTubeSubscriptionClassifier
+                        .recoveryChannelCount(data.subscriptions)
+                    val flaggedPayload = report.flagged.map {
+                        mapOf(
+                            "channelId"    to it.channelId,
+                            "channelTitle" to it.channelTitle,
+                            "severity"     to it.severity.name,
+                            "matches"      to it.matches,
+                        )
+                    }
+                    RealtimeDBService.saveYouTubeFlaggedSubscriptions(
+                        uid                  = uid,
+                        totalSubscriptions   = report.totalSubscriptions,
+                        flagged              = flaggedPayload,
+                        overallSeverity      = report.overallSeverity.name,
+                        recoveryChannelCount = recoveryCount,
+                    )
+                    _youtubeFlaggedCount.value = report.flaggedCount
+                    _youtubeRecoveryCount.value = recoveryCount
+                    _youtubeOverallSeverity.value = report.overallSeverity.name
                 }
                 .onFailure {
                     _error.value = it.message ?: "Failed to read YouTube subscriptions."
@@ -162,6 +189,16 @@ class SocialConnectionsViewModel : ViewModel() {
             _saving.value = null
         }
     }
+
+    // Lightweight UI state for the Connections panel to show a "found N
+    // concerning channels in your N subscriptions" banner immediately after
+    // the YouTube connect completes, without re-reading from RTDB.
+    private val _youtubeFlaggedCount = kotlinx.coroutines.flow.MutableStateFlow(0)
+    val youtubeFlaggedCount: kotlinx.coroutines.flow.StateFlow<Int> = _youtubeFlaggedCount
+    private val _youtubeRecoveryCount = kotlinx.coroutines.flow.MutableStateFlow(0)
+    val youtubeRecoveryCount: kotlinx.coroutines.flow.StateFlow<Int> = _youtubeRecoveryCount
+    private val _youtubeOverallSeverity = kotlinx.coroutines.flow.MutableStateFlow("NONE")
+    val youtubeOverallSeverity: kotlinx.coroutines.flow.StateFlow<String> = _youtubeOverallSeverity
 
     fun reportError(message: String) {
         _error.value = message
