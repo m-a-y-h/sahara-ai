@@ -58,6 +58,17 @@ image = (
         "HF_HOME": HF_CACHE_PATH,
         "TRANSFORMERS_CACHE": HF_CACHE_PATH,
         "TOKENIZERS_PARALLELISM": "false",
+        # Tell the inference engine where the fine-tuned checkpoint and
+        # accompanying id2label config live inside the sahara-voice-weights
+        # volume (mounted at HF_CACHE_PATH below). Upload commands:
+        #
+        #   modal volume put sahara-voice-weights ./best.pt          /checkpoints/best.pt
+        #   modal volume put sahara-voice-weights ./model_config.json /checkpoints/model_config.json
+        #
+        # Both files live in the same /checkpoints subdir so HF snapshot
+        # downloads (which also use this volume) don't collide.
+        "SAHARA_VOICE_CHECKPOINT":   f"{HF_CACHE_PATH}/checkpoints/best.pt",
+        "SAHARA_VOICE_MODEL_CONFIG": f"{HF_CACHE_PATH}/checkpoints/model_config.json",
     })
     .add_local_python_source("sahara_voice")
 )
