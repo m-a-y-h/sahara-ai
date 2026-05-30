@@ -3,9 +3,16 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { requestLocalLock } from "@atproto/oauth-client";
 import { NodeOAuthClient, buildAtprotoLoopbackClientMetadata } from "@atproto/oauth-client-node";
 
-const HOST = "127.0.0.1";
+// HOST: default 0.0.0.0 so Render's port scanner can reach us (it expects all
+// interfaces). Local-dev `adb reverse tcp:8787 tcp:8787` still works against
+// 0.0.0.0. Override with HOST=127.0.0.1 in your shell if you want loopback only.
+const HOST = process.env.HOST || "0.0.0.0";
 const PORT = Number(process.env.PORT || 8787);
-const BASE_URL = `http://${HOST}:${PORT}`;
+// BASE_URL must be the externally-reachable origin, not the bound host:port —
+// OAuth callback URLs are registered with each platform against this string.
+// On Render set BASE_URL=https://<service>.onrender.com in env vars; locally
+// it falls back to the bound host:port for adb-reverse dev flows.
+const BASE_URL = process.env.BASE_URL || `http://${HOST}:${PORT}`;
 const SCOPE = "atproto";
 const APP_CALLBACK = "saharaai://oauth/bluesky/callback";
 const STEAM_OPENID_ENDPOINT = "https://steamcommunity.com/openid/login";
