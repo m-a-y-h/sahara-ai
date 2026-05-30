@@ -1,20 +1,4 @@
 {
-  "counselor_keys": {
-    "abc123": {
-      "isActive": true,
-      "assignedName": "",
-      "usedBy": "",
-      "ngoName": "",
-      "createdAt": "2025-01-01",
-      "notes": "Default counselor key"
-    },
-    "SAHARA999": {
-      "isActive": true,
-      "assignedName": "Admin Bypass",
-      "usedBy": "",
-      "ngoName": "Sahara",
-      "createdAt": "2025-01-01",
-      "notes": "Master admin bypass key"
-    }
-  }
+  "_comment": "Counselor key seed — leave empty. Real counselor keys are issued by the admin dashboard's RegistrationReviewCard via approveRegistrationRequest(), which writes to counselor_keys/{key} with profileComplete=false. Test/seed keys (e.g. 'abc123', 'SAHARA999 Master admin bypass') were removed because they were standing master-access bypasses that any leaked client could use to enter the counselor-only flow.",
+  "counselor_keys": {}
 }

@@ -2072,7 +2072,11 @@ object RealtimeDBService {
         qualificationSummary: String,
         details: String,
         documentUris: Map<String, Uri>,
-        requiredDocumentKeys: List<String>
+        requiredDocumentKeys: List<String>,
+        // Captured at submit time. Stored verbatim so the admin's later
+        // approval can push the issued key back to this specific device via
+        // sahara_push, without forcing the applicant to monitor email.
+        applicantFcmToken: String = "",
     ): Result<String> = runCatching {
         val requestId = UUID.randomUUID().toString()
         require(documentUris.isNotEmpty()) { "At least one verification document is required." }
@@ -2088,6 +2092,7 @@ object RealtimeDBService {
                 "organizationName" to organizationName,
                 "email" to email,
                 "phone" to phone,
+                "applicantFcmToken" to applicantFcmToken,
                 "region" to region,
                 "city" to city,
                 "district" to district,
@@ -2192,6 +2197,24 @@ object RealtimeDBService {
         )
         db.getReference("registration_requests").child(request.requestId)
             .updateChildren(requestUpdates).await()
+
+        // Queue the issued-key delivery for sahara_push. It picks up entries
+        // here every minute, pushes an FCM notification to the applicant's
+        // stored device token (if any) AND emails the key to their address.
+        // Marked status=PENDING; sahara_push flips it to SENT after delivery.
+        db.getReference("key_deliveries").child(request.requestId).setValue(
+            mapOf(
+                "requestId"       to request.requestId,
+                "applicantType"   to request.applicantType,
+                "applicantName"   to request.applicantName,
+                "applicantEmail"  to request.email,
+                "applicantToken"  to request.applicantFcmToken,
+                "issuedKey"       to issuedKey.trim(),
+                "reviewNotes"     to reviewNotes.trim(),
+                "status"          to "PENDING",
+                "createdAt"       to timestamp,
+            )
+        ).await()
 
         if (request.applicantType == "COUNSELOR") {
             val attributeLabelsEn = cleanAttributes.map(CounselorAttributeCatalog::labelEn)
@@ -2482,6 +2505,7 @@ object RealtimeDBService {
             organizationName = snapshot.child("organizationName").getValue(String::class.java).orEmpty(),
             email = snapshot.child("email").getValue(String::class.java).orEmpty(),
             phone = snapshot.child("phone").getValue(String::class.java).orEmpty(),
+            applicantFcmToken = snapshot.child("applicantFcmToken").getValue(String::class.java).orEmpty(),
             region = snapshot.child("region").getValue(String::class.java).orEmpty(),
             city = snapshot.child("city").getValue(String::class.java).orEmpty(),
             district = snapshot.child("district").getValue(String::class.java).orEmpty(),

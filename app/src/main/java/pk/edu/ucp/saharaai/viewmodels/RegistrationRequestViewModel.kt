@@ -13,6 +13,8 @@ import androidx.lifecycle.viewModelScope
 import androidx.core.content.ContextCompat
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
+import com.google.firebase.messaging.messaging
+import kotlinx.coroutines.tasks.await
 import com.google.android.gms.tasks.CancellationTokenSource
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -102,22 +104,30 @@ class RegistrationRequestViewModel : ViewModel() {
         error = ""
         isSubmitting = true
         viewModelScope.launch {
+            // Grab this device's FCM token (best-effort) so the admin's later
+            // approval can push the issued key straight back to this device.
+            // Failure is non-fatal — the email channel still works.
+            val fcmToken = runCatching {
+                com.google.firebase.Firebase.messaging.token
+                    .await()
+            }.getOrNull().orEmpty()
             RealtimeDBService.submitRegistrationRequest(
-                applicantType,
-                name.trim(),
-                organization.trim(),
-                email.trim(),
-                phone.trim(),
-                region.trim(),
-                city.trim(),
-                district.trim(),
-                locationAccuracyMeters,
-                verificationBody.trim(),
-                registrationNumber.trim(),
-                qualificationSummary.trim(),
-                details.trim(),
-                documentUris,
-                requiredDocumentKeys
+                applicantType = applicantType,
+                applicantName = name.trim(),
+                organizationName = organization.trim(),
+                email = email.trim(),
+                phone = phone.trim(),
+                region = region.trim(),
+                city = city.trim(),
+                district = district.trim(),
+                locationAccuracyMeters = locationAccuracyMeters,
+                verificationBody = verificationBody.trim(),
+                registrationNumber = registrationNumber.trim(),
+                qualificationSummary = qualificationSummary.trim(),
+                details = details.trim(),
+                documentUris = documentUris,
+                requiredDocumentKeys = requiredDocumentKeys,
+                applicantFcmToken = fcmToken,
             ).onSuccess {
                 submitted = true
             }.onFailure {

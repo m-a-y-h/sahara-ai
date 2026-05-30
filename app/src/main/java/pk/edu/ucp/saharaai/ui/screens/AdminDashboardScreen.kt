@@ -25,6 +25,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import coil.compose.AsyncImage
+import com.google.firebase.messaging.messaging
+import kotlinx.coroutines.tasks.await
 import pk.edu.ucp.saharaai.data.model.AvatarRequest
 import pk.edu.ucp.saharaai.data.model.PaymentRequest
 import pk.edu.ucp.saharaai.data.model.RegistrationRequest
@@ -55,6 +57,17 @@ fun AdminDashboardScreen(
     val bugReports = dashboardViewModel.bugReports
     val avatarRequests = dashboardViewModel.avatarRequests
     val error = dashboardViewModel.error
+
+    // Subscribe this device to the "admins" FCM topic so the sahara_push cron
+    // can push a notification whenever a new registration / payment proof /
+    // bug report lands. Idempotent — the platform de-dupes the subscription.
+    LaunchedEffect(Unit) {
+        runCatching {
+            com.google.firebase.Firebase.messaging
+                .subscribeToTopic("admins")
+                .await()
+        }
+    }
 
     val counselorApplications = applications.filter { it.applicantType.equals("COUNSELOR", ignoreCase = true) }
     val ngoApplications = applications.filter { it.applicantType.equals("NGO", ignoreCase = true) }

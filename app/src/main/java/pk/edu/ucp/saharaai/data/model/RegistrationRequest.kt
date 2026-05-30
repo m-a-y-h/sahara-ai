@@ -7,6 +7,10 @@ data class RegistrationRequest(
     val organizationName: String = "",
     val email: String = "",
     val phone: String = "",
+    // Captured at submission so the admin's later approval can push the issued
+    // key back to the device that filed the application — without it the
+    // applicant has to keep watching for the email manually.
+    val applicantFcmToken: String = "",
     val region: String = "",
     val city: String = "",
     val district: String = "",
