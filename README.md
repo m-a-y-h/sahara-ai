@@ -30,13 +30,28 @@ The app combines culturally aware chat support, Sahara AI harm-reduction respons
 | Database | Cloud Firestore + Firebase Realtime Database |
 | Android data layer | `data/model`, `data/remote`, and `data/repository` |
 | Android state layer | `viewmodels` |
-| AI chat endpoint | Sahara AI served from Colab/FastAPI |
+| AI chat endpoint | Sahara AI (Modal proxy to `huggingface_hub.InferenceClient` against `enstazao/Qalb-1.0-8B-Instruct`) |
 | AI chat protocol | Prompting, safety parser, and SFT tooling in `services/sahara_ai/` |
 | Base model credit | Fine-tuned from Qalb/Llama 3.1 |
+| Facial-emotion screening (Lens) | Pretrained `dima806/facial_emotions_image_detection` ViT served on Modal (~91.9% on 25k FER test set) |
+| Voice screening | `facebook/wav2vec2-xls-r-300m` fine-tuned on UrduSER, served on Modal (~91% precision on flagged distress, 86.6% accuracy on conf ≥ 0.65) |
 | Maps/location | Google Play Services / Google Maps |
 | Voice & video calls | LiveKit (in-app WebRTC); tokens minted by `services/sahara_livekit/` |
 | Python model hosting | Modal (scale-to-zero) — `services/sahara_*/modal_deploy.py` |
-| Push notifications | Firebase Cloud Messaging; sender in `services/sahara_push/` |
+| OAuth connections helper | Node Express on Render — `services/connections_poc_server/` (Bluesky / Steam / Spotify; YouTube authorised on-device) |
+| Push notifications | Firebase Cloud Messaging; sender + admin notifier + key-delivery cron in `services/sahara_push/` |
+
+### Deployed endpoints
+
+All five Python services run on the same Modal account (`its-asattar`). The Node OAuth helper runs on Render. URLs to drop into `local.properties`:
+
+| Service | URL |
+|---|---|
+| Sahara AI chat | `https://its-asattar--chat-endpoint.modal.run/v1/chat` |
+| Sahara Lens scan | `https://its-asattar--sahara-lens.modal.run/v1/lens/scan` |
+| Sahara Voice analyze | `https://its-asattar--voice-endpoint.modal.run/v1/voice/analyze` |
+| LiveKit token | `https://its-asattar--livekit-token.modal.run/token` |
+| Connections OAuth helper | `https://sahara-connections.onrender.com` |
 
 Firebase Auth, Firestore, and Realtime Database are the app backend services. The Android `data/` package is the client-side data layer that talks to Firebase and the Sahara AI endpoint. A separate FastAPI folder is only needed if we later deploy our own server outside Colab.
 
@@ -202,8 +217,16 @@ authorization runs in Android through Google Play services; its saved
 authorized data expires after 30 days and is removed on the app's next
 synchronization after expiry. Using Unlink revokes Sahara's YouTube access.
 
-For local development it uses AT Protocol's supported loopback OAuth mode, so
-the app does not have to be deployed. Start the helper service:
+The helper has three Bluesky operating modes, chosen at startup based on `BASE_URL` and the `BLUESKY_CLIENT_PRIVATE_JWK` env var. **Loopback** — `http://` `BASE_URL`, uses atproto's built-in loopback helper; convenient for local dev (`adb reverse`). **Confidential** — `https://` `BASE_URL` plus a private ES256 JWK; the server self-registers as a confidential OAuth client by serving its own `/client-metadata.json` and a JWKS at `/jwks.json` (public key only). The atproto OAuth directory fetches both URLs the first time a user starts a Bluesky auth flow on this server — no developer dashboard or directory registration step exists. **Disabled** — `https://` `BASE_URL` with no key configured; the three Bluesky routes return a clean 503. Steam + Spotify work on either protocol; YouTube authorisation happens entirely on-device via Google Identity Services and does not hit this server. Generate the ES256 keypair once with:
+
+```bash
+cd services/connections_poc_server
+node scripts/generate-bluesky-key.mjs
+```
+
+The script prints the **private JWK** as a single line — paste it into the deploy host's env (Render → Environment → `BLUESKY_CLIENT_PRIVATE_JWK`) AND into `secrets/connections.env` for local dev. The public half is derived from it on startup and served at `/jwks.json`.
+
+For local-only flows (without a public deploy), start the helper service and use loopback mode:
 
 ```bash
 cd services/connections_poc_server
@@ -306,6 +329,10 @@ The NGO/Admin key entry in welcome settings now distinguishes:
 - An issued `counselor_keys/{key}` value — opens counselor setup/dashboard.
 
 The admin dashboard accepts pending NGO/counselor registration forms, opens their submitted evidence, launches an email contact action, issues a key after manual review, and approves/rejects submitted payment screenshots. The NGO dashboard shows aggregate latest-assessment risk averages by voluntarily recorded user region and does not infer a region where none was supplied. A download button on the Regional Risk Averages section exports a CSV snapshot (header totals + per-region risk averages + counselor roster) through the Android Storage Access Framework so the NGO can save it to Downloads, Drive, or any picked location.
+
+When admins open the dashboard their device is subscribed to the `admins` FCM topic. `services/sahara_push/` runs three minute-level jobs: `push_pending` (delivers in-app notifications written under `user_notifications/{uid}/{id}`), `notify_admins_of_pending` (walks registration / payment / bug-report queues and pings the `admins` topic when something new lands, then stamps the item so admins are not re-pinged about the same case), and `deliver_keys` (when an admin approves a registration, pushes the issued key to the applicant's device via the FCM token captured at submit time AND emails it via Gmail SMTP from the `sahara-mail` Modal secret).
+
+Counselor visibility on the user-facing counselor list is driven by Firebase presence (`.info/connected` + `onDisconnect`), so a counselor with the dashboard open is auto-online to users without a manual switch. The dashboard's "Visible/Invisible" switch is now an override that hides the counselor from users without dropping the live connection. Offline counselors stay listed on the user side (sorted after online ones, with a grey status pip) so users can still queue a message.
 
 ### Firebase Security Requirement
 
