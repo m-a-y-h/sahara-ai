@@ -44,6 +44,7 @@ import androidx.navigation.NavController
 import coil.compose.AsyncImage
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeSource
+import pk.edu.ucp.saharaai.ui.components.GlassAlertDialog
 import pk.edu.ucp.saharaai.ui.components.*
 import pk.edu.ucp.saharaai.ui.theme.*
 import pk.edu.ucp.saharaai.util.PermissionCopy
@@ -139,64 +140,6 @@ fun ProfileScreen(
         } else {
             regionPermissionRequester.request()
         }
-    }
-
-    if (showEditNameDialog) {
-        AlertDialog(
-            onDismissRequest = { showEditNameDialog = false },
-            title = { Text(if (isEnglish) "Edit Name" else "Naam Badlein") },
-            text = {
-                Column {
-                    OutlinedTextField(
-                        value = editNameInput,
-                        onValueChange = { editNameInput = it },
-                        label = { Text(if (isEnglish) "Your name" else "Apna naam") },
-                        singleLine = true,
-                        isError = editNameError.isNotBlank(),
-                        supportingText = { if (editNameError.isNotBlank()) Text(editNameError) }
-                    )
-                    if (editNameLoading) {
-                        Spacer(Modifier.height(8.dp))
-                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        val trimmed = editNameInput.trim()
-                        if (trimmed.isBlank()) {
-                            editNameError = if (isEnglish) "Name cannot be empty" else "Naam khali nahi ho sakta"
-                            return@TextButton
-                        }
-                        editNameError = ""
-                        profileViewModel.updateName(context, trimmed) {
-                            showEditNameDialog = false
-                        }
-                    },
-                    enabled = !editNameLoading
-                ) {
-                    Text(if (isEnglish) "Save" else "Mahfooz Karein")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showEditNameDialog = false }) {
-                    Text(if (isEnglish) "Cancel" else "Cancel Karein")
-                }
-            }
-        )
-    }
-
-    if (showAvatarPickerDialog) {
-        AvatarPresetDialog(
-            selectedAvatarId = avatarId,
-            isEnglish = isEnglish,
-            onSelect = {
-                profileViewModel.updateAvatarId(it, isEnglish)
-                showAvatarPickerDialog = false
-            },
-            onDismiss = { showAvatarPickerDialog = false }
-        )
     }
 
     val displayedEmail = remember(finalEmail, isPrivacyModeEnabled) {
@@ -361,6 +304,66 @@ fun ProfileScreen(
                 )
             }
         }
+    }
+
+    if (showEditNameDialog) {
+        GlassAlertDialog(
+            hazeState = hazeState,
+            onDismissRequest = { showEditNameDialog = false },
+            title = { Text(if (isEnglish) "Edit Name" else "Naam Badlein") },
+            text = {
+                Column {
+                    OutlinedTextField(
+                        value = editNameInput,
+                        onValueChange = { editNameInput = it },
+                        label = { Text(if (isEnglish) "Your name" else "Apna naam") },
+                        singleLine = true,
+                        isError = editNameError.isNotBlank(),
+                        supportingText = { if (editNameError.isNotBlank()) Text(editNameError) }
+                    )
+                    if (editNameLoading) {
+                        Spacer(Modifier.height(8.dp))
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val trimmed = editNameInput.trim()
+                        if (trimmed.isBlank()) {
+                            editNameError = if (isEnglish) "Name cannot be empty" else "Naam khali nahi ho sakta"
+                            return@TextButton
+                        }
+                        editNameError = ""
+                        profileViewModel.updateName(context, trimmed) {
+                            showEditNameDialog = false
+                        }
+                    },
+                    enabled = !editNameLoading
+                ) {
+                    Text(if (isEnglish) "Save" else "Mahfooz Karein")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showEditNameDialog = false }) {
+                    Text(if (isEnglish) "Cancel" else "Cancel Karein")
+                }
+            }
+        )
+    }
+
+    if (showAvatarPickerDialog) {
+        AvatarPresetDialog(
+            hazeState = hazeState,
+            selectedAvatarId = avatarId,
+            isEnglish = isEnglish,
+            onSelect = {
+                profileViewModel.updateAvatarId(it, isEnglish)
+                showAvatarPickerDialog = false
+            },
+            onDismiss = { showAvatarPickerDialog = false }
+        )
     }
 }
 
@@ -550,13 +553,15 @@ private data class ProfileAvatarPreset(val id: String, val drawableRes: Int)
 
 @Composable
 private fun AvatarPresetDialog(
+    hazeState: HazeState,
     selectedAvatarId: String,
     isEnglish: Boolean,
     onSelect: (String) -> Unit,
     onDismiss: () -> Unit
 ) {
     val presets = remember { profileAvatarPresets() }
-    AlertDialog(
+    GlassAlertDialog(
+        hazeState = hazeState,
         onDismissRequest = onDismiss,
         title = { Text(if (isEnglish) "Choose Avatar" else "Avatar chunein") },
         text = {

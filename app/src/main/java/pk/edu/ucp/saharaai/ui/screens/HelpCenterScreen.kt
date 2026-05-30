@@ -234,6 +234,7 @@ fun HelpCenterScreen(
         }
         if (showBugReports) {
             BugReportsDialog(
+                hazeState = hazeState,
                 reports = reports,
                 isEnglish = isEnglish,
                 viewModel = helpViewModel,

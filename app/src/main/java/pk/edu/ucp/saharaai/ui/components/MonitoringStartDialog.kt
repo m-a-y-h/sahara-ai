@@ -15,6 +15,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import dev.chrisbanes.haze.HazeState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -33,11 +34,13 @@ import pk.edu.ucp.saharaai.ui.theme.SaharaStrongGreen
  */
 @Composable
 fun MonitoringStartDialog(
+    hazeState: HazeState,
     notice: MonitoringStartNotice,
     isEnglish: Boolean,
     onAcknowledge: () -> Unit,
 ) {
-    AlertDialog(
+    GlassAlertDialog(
+        hazeState = hazeState,
         onDismissRequest = onAcknowledge,
         icon = {
             Icon(Icons.Filled.Timeline, contentDescription = null, tint = SaharaStrongGreen)

@@ -17,6 +17,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import dev.chrisbanes.haze.HazeState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -26,6 +27,7 @@ import pk.edu.ucp.saharaai.ui.theme.SaharaStrongGreen
 
 @Composable
 fun CumulativeReportDialog(
+    hazeState: HazeState,
     report: CumulativeRiskReport,
     isEnglish: Boolean,
     onViewProgress: () -> Unit,
@@ -37,7 +39,8 @@ fun CumulativeReportDialog(
         .joinToString { it.key.replace("_", " ") }
         .ifBlank { if (isEnglish) "No dominant driver" else "Koi dominant driver nahi" }
 
-    AlertDialog(
+    GlassAlertDialog(
+        hazeState = hazeState,
         onDismissRequest = onAcknowledge,
         icon = {
             Icon(Icons.Default.Assessment, contentDescription = null, tint = SaharaStrongGreen)

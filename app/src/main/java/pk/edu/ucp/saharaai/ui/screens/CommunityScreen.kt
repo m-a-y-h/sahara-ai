@@ -38,6 +38,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeSource
+import pk.edu.ucp.saharaai.ui.components.GlassAlertDialog
 import pk.edu.ucp.saharaai.ui.components.BottomNav
 import pk.edu.ucp.saharaai.ui.components.HazeBackButton
 import pk.edu.ucp.saharaai.ui.theme.*
@@ -107,35 +108,6 @@ fun CommunityScreen(
     var flagTarget   by remember { mutableStateOf<String?>(null) }   
 
     
-    deleteTarget?.let { postId ->
-        AlertDialog(
-            onDismissRequest = { deleteTarget = null },
-            title = { Text(if (isEnglish) "Delete Post?" else "Post Delete Karein?", fontWeight = FontWeight.Bold) },
-            text  = { Text(if (isEnglish) "This post will be permanently deleted." else "Yeh post hamesha ke liye delete ho jaegi.") },
-            confirmButton = {
-                TextButton(onClick = { communityViewModel.deletePost(postId); deleteTarget = null }) {
-                    Text(if (isEnglish) "Delete" else "Delete", color = SaharaCoral, fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = { TextButton(onClick = { deleteTarget = null }) { Text(if (isEnglish) "Cancel" else "Cancel Karein") } }
-        )
-    }
-
-    
-    flagTarget?.let { postId ->
-        AlertDialog(
-            onDismissRequest = { flagTarget = null },
-            title = { Text(if (isEnglish) "Report Post?" else "Post Report Karein?", fontWeight = FontWeight.Bold) },
-            text  = { Text(if (isEnglish) "This post will be flagged for review." else "Yeh post review ke liye flag ho jaegi.") },
-            confirmButton = {
-                TextButton(onClick = { communityViewModel.flagPost(postId); flagTarget = null }) {
-                    Text(if (isEnglish) "Report" else "Report Karein", color = SaharaCoral, fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = { TextButton(onClick = { flagTarget = null }) { Text(if (isEnglish) "Cancel" else "Cancel Karein") } }
-        )
-    }
-
     Box(modifier = Modifier.fillMaxSize()) {
         Box(
             modifier = Modifier
@@ -268,8 +240,39 @@ fun CommunityScreen(
     }
 
     
+    deleteTarget?.let { postId ->
+        GlassAlertDialog(
+            hazeState = hazeState,
+            onDismissRequest = { deleteTarget = null },
+            title = { Text(if (isEnglish) "Delete Post?" else "Post Delete Karein?", fontWeight = FontWeight.Bold) },
+            text  = { Text(if (isEnglish) "This post will be permanently deleted." else "Yeh post hamesha ke liye delete ho jaegi.") },
+            confirmButton = {
+                TextButton(onClick = { communityViewModel.deletePost(postId); deleteTarget = null }) {
+                    Text(if (isEnglish) "Delete" else "Delete", color = SaharaCoral, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = { TextButton(onClick = { deleteTarget = null }) { Text(if (isEnglish) "Cancel" else "Cancel Karein") } }
+        )
+    }
+
+    flagTarget?.let { postId ->
+        GlassAlertDialog(
+            hazeState = hazeState,
+            onDismissRequest = { flagTarget = null },
+            title = { Text(if (isEnglish) "Report Post?" else "Post Report Karein?", fontWeight = FontWeight.Bold) },
+            text  = { Text(if (isEnglish) "This post will be flagged for review." else "Yeh post review ke liye flag ho jaegi.") },
+            confirmButton = {
+                TextButton(onClick = { communityViewModel.flagPost(postId); flagTarget = null }) {
+                    Text(if (isEnglish) "Report" else "Report Karein", color = SaharaCoral, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = { TextButton(onClick = { flagTarget = null }) { Text(if (isEnglish) "Cancel" else "Cancel Karein") } }
+        )
+    }
+
     if (showNewPost) {
-        AlertDialog(
+        GlassAlertDialog(
+            hazeState = hazeState,
             onDismissRequest = { showNewPost = false },
             title = {
                 Text(

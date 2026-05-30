@@ -7,7 +7,7 @@ import threading
 import unicodedata
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 
 MAX_INPUT_CHARS = 900
@@ -1679,16 +1679,30 @@ def build_llama31_prompt(system_prompt: str, clean_user_input: str) -> str:
 def generate_with_sahara_ai(
     prompt: str,
     *,
-    tokenizer: Any,
-    model: Any,
+    tokenizer: Any = None,
+    model: Any = None,
     terminators: Any = None,
     device: str = "cuda",
     max_new_tokens: int = 240,
+    text_generator: Optional[Callable[[str], str]] = None,
 ) -> str:
+    # Remote-inference shortcut: if a caller passes ``text_generator`` (e.g. an
+    # adapter over huggingface_hub.InferenceClient.text_generation), we skip
+    # torch and the local model.generate path entirely. Lets the Modal app
+    # serve the protocol with no GPU and no local weights — Modal becomes a
+    # thin proxy that hits an external inference provider.
+    if text_generator is not None:
+        return text_generator(prompt)
+
     try:
         import torch
     except Exception as exc:
         raise RuntimeError("torch is required for SAHARA AI generation") from exc
+
+    if tokenizer is None or model is None:
+        raise RuntimeError(
+            "generate_with_sahara_ai needs either (tokenizer, model) or text_generator."
+        )
 
     inputs = tokenizer([prompt], return_tensors="pt")
     if device:
@@ -1867,12 +1881,13 @@ def sahara_ai_chat(
     preferred_language: Optional[str] = None,
     model_lock: Optional[threading.Lock] = None,
     bypass_model_for_critical: bool = False,
+    text_generator: Optional[Callable[[str], str]] = None,
 ) -> Dict[str, Any]:
     assessment = assess_user_input(user_input, preferred_language=preferred_language)
 
+    has_backend = text_generator is not None or (tokenizer is not None and model is not None)
     should_skip_model = (
-        tokenizer is None
-        or model is None
+        not has_backend
         or (bypass_model_for_critical and assessment.risk_level == "critical")
     )
     if should_skip_model:
@@ -1889,6 +1904,7 @@ def sahara_ai_chat(
                 model=model,
                 terminators=terminators,
                 device=device,
+                text_generator=text_generator,
             )
     except Exception:
         raw_output = None

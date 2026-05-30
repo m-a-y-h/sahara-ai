@@ -15,6 +15,8 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import dev.chrisbanes.haze.HazeState
+import pk.edu.ucp.saharaai.ui.components.GlassOverlay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -31,6 +33,7 @@ import java.util.Locale
 
 @Composable
 fun BugReportsDialog(
+    hazeState: HazeState,
     reports: List<BugReport>,
     isEnglish: Boolean,
     viewModel: HelpCenterViewModel,
@@ -56,14 +59,8 @@ fun BugReportsDialog(
         }
     }
 
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(
-            shape = RoundedCornerShape(26.dp),
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 8.dp,
-            modifier = Modifier.fillMaxWidth().heightIn(max = 650.dp),
-        ) {
-            Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    GlassOverlay(hazeState = hazeState, onDismiss = onDismiss) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Default.BugReport, null, tint = SaharaCoral)
                     Spacer(Modifier.width(8.dp))
@@ -168,7 +165,6 @@ fun BugReportsDialog(
                     }
                 }
             }
-        }
     }
 }
 

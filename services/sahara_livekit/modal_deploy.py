@@ -17,7 +17,11 @@ Then set in the app's local.properties:
     sahara.livekit.url=wss://<your>.livekit.cloud
     sahara.livekit.token.url=<the https URL Modal prints>/token
 """
-from __future__ import annotations
+# NOTE: do NOT add `from __future__ import annotations` here. It would turn the
+# `req: TokenReq` route annotation into the string "TokenReq", which FastAPI then
+# tries to resolve against this module's globals — but TokenReq is defined inside
+# fastapi_app() (so pydantic stays a container-only import), so the lookup fails
+# with `NameError: name 'TokenReq' is not defined` and the container crash-loops.
 
 import os
 import modal

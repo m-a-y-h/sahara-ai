@@ -35,6 +35,7 @@ import dev.chrisbanes.haze.blur.HazeColorEffect
 import dev.chrisbanes.haze.blur.blurEffect
 import dev.chrisbanes.haze.hazeEffect
 import dev.chrisbanes.haze.hazeSource
+import pk.edu.ucp.saharaai.ui.components.GlassAlertDialog
 import pk.edu.ucp.saharaai.ui.components.BottomNav
 import pk.edu.ucp.saharaai.ui.components.ButtonVariant
 import pk.edu.ucp.saharaai.ui.components.SaharaButton
@@ -181,51 +182,6 @@ fun SleepTrackerScreen(
         "okay"      -> "Behtar ho sakta hai. Aaj 30 min pehle sonay ki koshish karein."
         "poor"      -> "Neend kam thi. Sonay se 1 ghanta pehle screen band karein."
         else        -> "Aaj raat ka record neeche darj karein."
-    }
-
-    
-    if (showBedtimePicker) {
-        AlertDialog(
-            onDismissRequest = { showBedtimePicker = false },
-            title = { Text(if (isEnglish) "Select Bedtime" else "Sonay ka Waqt Chunein") },
-            text  = { Box(Modifier.fillMaxWidth(), Alignment.Center) { TimePicker(bedtimeState) } },
-            confirmButton = {
-                TextButton({ bedtimeHour = bedtimeState.hour; bedtimeMinute = bedtimeState.minute; showBedtimePicker = false }) {
-                    Text("OK", color = SaharaLavender)
-                }
-            },
-            dismissButton = { TextButton({ showBedtimePicker = false }) { Text(if (isEnglish) "Cancel" else "Wapas") } }
-        )
-    }
-    if (showWaketimePicker) {
-        AlertDialog(
-            onDismissRequest = { showWaketimePicker = false },
-            title = { Text(if (isEnglish) "Select Wake Time" else "Uthnay ka Waqt Chunein") },
-            text  = { Box(Modifier.fillMaxWidth(), Alignment.Center) { TimePicker(waketimeState) } },
-            confirmButton = {
-                TextButton({ waketimeHour = waketimeState.hour; waketimeMinute = waketimeState.minute; showWaketimePicker = false }) {
-                    Text("OK", color = SaharaSky)
-                }
-            },
-            dismissButton = { TextButton({ showWaketimePicker = false }) { Text(if (isEnglish) "Cancel" else "Wapas") } }
-        )
-    }
-    if (showGoalDialog) {
-        var tempGoal by remember { mutableStateOf(sleepGoal) }
-        AlertDialog(
-            onDismissRequest = { showGoalDialog = false },
-            title = { Text(if (isEnglish) "Set Sleep Goal" else "Neend ka Hadaf") },
-            text = {
-                Column {
-                    Text("${tempGoal.toInt()}h", style = MaterialTheme.typography.headlineMedium,
-                        color = SaharaLavender, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
-                    Slider(value = tempGoal, onValueChange = { tempGoal = it }, valueRange = 6f..10f, steps = 3)
-                }
-            },
-            confirmButton = {
-                TextButton({ viewModel.updateGoal(tempGoal); showGoalDialog = false }) { Text("Save", color = SaharaLavender) }
-            }
-        )
     }
 
     
@@ -772,6 +728,53 @@ fun SleepTrackerScreen(
                 Spacer(Modifier.height(40.dp))
             }
         }
+    }
+
+    if (showBedtimePicker) {
+        GlassAlertDialog(
+            hazeState = hazeState,
+            onDismissRequest = { showBedtimePicker = false },
+            title = { Text(if (isEnglish) "Select Bedtime" else "Sonay ka Waqt Chunein") },
+            text  = { Box(Modifier.fillMaxWidth(), Alignment.Center) { TimePicker(bedtimeState) } },
+            confirmButton = {
+                TextButton({ bedtimeHour = bedtimeState.hour; bedtimeMinute = bedtimeState.minute; showBedtimePicker = false }) {
+                    Text("OK", color = SaharaLavender)
+                }
+            },
+            dismissButton = { TextButton({ showBedtimePicker = false }) { Text(if (isEnglish) "Cancel" else "Wapas") } }
+        )
+    }
+    if (showWaketimePicker) {
+        GlassAlertDialog(
+            hazeState = hazeState,
+            onDismissRequest = { showWaketimePicker = false },
+            title = { Text(if (isEnglish) "Select Wake Time" else "Uthnay ka Waqt Chunein") },
+            text  = { Box(Modifier.fillMaxWidth(), Alignment.Center) { TimePicker(waketimeState) } },
+            confirmButton = {
+                TextButton({ waketimeHour = waketimeState.hour; waketimeMinute = waketimeState.minute; showWaketimePicker = false }) {
+                    Text("OK", color = SaharaSky)
+                }
+            },
+            dismissButton = { TextButton({ showWaketimePicker = false }) { Text(if (isEnglish) "Cancel" else "Wapas") } }
+        )
+    }
+    if (showGoalDialog) {
+        var tempGoal by remember { mutableStateOf(sleepGoal) }
+        GlassAlertDialog(
+            hazeState = hazeState,
+            onDismissRequest = { showGoalDialog = false },
+            title = { Text(if (isEnglish) "Set Sleep Goal" else "Neend ka Hadaf") },
+            text = {
+                Column {
+                    Text("${tempGoal.toInt()}h", style = MaterialTheme.typography.headlineMedium,
+                        color = SaharaLavender, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
+                    Slider(value = tempGoal, onValueChange = { tempGoal = it }, valueRange = 6f..10f, steps = 3)
+                }
+            },
+            confirmButton = {
+                TextButton({ viewModel.updateGoal(tempGoal); showGoalDialog = false }) { Text("Save", color = SaharaLavender) }
+            }
+        )
     }
 }
 

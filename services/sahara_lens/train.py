@@ -201,6 +201,16 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     p.add_argument("--no-weighted-sampler", action="store_true", help="Disable WeightedRandomSampler.")
     p.add_argument("--no-class-weighted-loss", action="store_true", help="Disable class-weighted CE loss.")
     p.add_argument("--early-stop-patience", type=int, default=TRAIN_CONFIG.early_stop_patience)
+    p.add_argument(
+        "--select-metric",
+        type=str,
+        default="ship_gate",
+        choices=["ship_gate", "val_acc"],
+        help="Metric used to pick best.pt. 'ship_gate' (default, production) = min F1 "
+             "over (stress, sadness, fear). Use 'val_acc' for datasets that lack the "
+             "distress classes (e.g. IIITM has no fear/anger/disgust) — otherwise the "
+             "ship-gate is stuck at 0 and best.pt locks to an untrained epoch.",
+    )
     p.add_argument("--num-workers", type=int, default=TRAIN_CONFIG.num_workers)
     p.add_argument("--seed", type=int, default=TRAIN_CONFIG.seed)
     p.add_argument(
@@ -262,7 +272,7 @@ def main(argv: Optional[list[str]] = None) -> None:
     )
 
     
-    best_ship_gate = -1.0
+    best_score = -1.0
     best_path = args.output_dir / "best.pt"
     history_path = args.output_dir / "history.jsonl"
     epochs_without_improvement = 0
@@ -287,6 +297,7 @@ def main(argv: Optional[list[str]] = None) -> None:
 
         val_metrics = evaluate(model, val_loader, device=device)
         ship_gate = ship_gate_metric(val_metrics["screening_f1_per_class"])
+        select_score = val_metrics["top1"] if args.select_metric == "val_acc" else ship_gate
         elapsed = time.perf_counter() - t0
 
         log_entry: dict[str, Any] = {
@@ -307,8 +318,8 @@ def main(argv: Optional[list[str]] = None) -> None:
             f"ship_gate={ship_gate:.3f} ({elapsed:.0f}s)"
         )
 
-        if ship_gate > best_ship_gate:
-            best_ship_gate = ship_gate
+        if select_score > best_score:
+            best_score = select_score
             epochs_without_improvement = 0
             torch.save(
                 {
@@ -319,16 +330,18 @@ def main(argv: Optional[list[str]] = None) -> None:
                     "screening_classes": list(SCREENING_CLASSES),
                     "epoch": epoch,
                     "ship_gate": ship_gate,
+                    "select_metric": args.select_metric,
+                    "select_score": select_score,
                     "val_metrics": val_metrics,
                 },
                 best_path,
             )
-            print(f"[train] new best ship-gate {ship_gate:.4f} → {best_path}")
+            print(f"[train] new best {args.select_metric}={select_score:.4f} (ship_gate={ship_gate:.4f}) → {best_path}")
         else:
             epochs_without_improvement += 1
             if epochs_without_improvement >= args.early_stop_patience:
                 print(
-                    f"[train] no ship-gate improvement for {epochs_without_improvement} epochs; stopping."
+                    f"[train] no {args.select_metric} improvement for {epochs_without_improvement} epochs; stopping."
                 )
                 break
 

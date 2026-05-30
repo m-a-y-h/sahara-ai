@@ -66,6 +66,7 @@ import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.blur.blurEffect
 import dev.chrisbanes.haze.hazeEffect
 import dev.chrisbanes.haze.hazeSource
+import pk.edu.ucp.saharaai.ui.components.GlassAlertDialog
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import pk.edu.ucp.saharaai.ui.components.BottomNav
@@ -541,30 +542,6 @@ private fun ChatConversationScreen(
             navController.navigate("counselor-call/$counselorId/$nameArg/$mode/$target")
         }
     }
-    if (showBlockConfirm) {
-        AlertDialog(
-            onDismissRequest = { showBlockConfirm = false },
-            title = { Text(if (isEnglish) "Block this chat?" else "Ye chat block karein?") },
-            text = {
-                Text(
-                    if (isEnglish) "They won't be able to message you, and this session will be blocked."
-                    else "Wo aapko message nahi kar sakenge, aur ye session block ho jayega."
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    showBlockConfirm = false
-                    chatViewModel.blockCurrentChat()
-                    context.showLocalizedToast(isEnglish, "Chat blocked.", "Chat block ho gayi.")
-                }) { Text(if (isEnglish) "Block" else "Block", color = SaharaCoral) }
-            },
-            dismissButton = {
-                TextButton(onClick = { showBlockConfirm = false }) {
-                    Text(if (isEnglish) "Cancel" else "Cancel")
-                }
-            }
-        )
-    }
     Box(modifier = Modifier.fillMaxSize()) {
         Box(
             modifier = Modifier
@@ -821,6 +798,32 @@ private fun ChatConversationScreen(
                 onDismiss = { showProfileSheet = false },
             )
         }
+    }
+
+    if (showBlockConfirm) {
+        GlassAlertDialog(
+            hazeState = hazeState,
+            onDismissRequest = { showBlockConfirm = false },
+            title = { Text(if (isEnglish) "Block this chat?" else "Ye chat block karein?") },
+            text = {
+                Text(
+                    if (isEnglish) "They won't be able to message you, and this session will be blocked."
+                    else "Wo aapko message nahi kar sakenge, aur ye session block ho jayega."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showBlockConfirm = false
+                    chatViewModel.blockCurrentChat()
+                    context.showLocalizedToast(isEnglish, "Chat blocked.", "Chat block ho gayi.")
+                }) { Text(if (isEnglish) "Block" else "Block", color = SaharaCoral) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showBlockConfirm = false }) {
+                    Text(if (isEnglish) "Cancel" else "Cancel")
+                }
+            }
+        )
     }
 }
 

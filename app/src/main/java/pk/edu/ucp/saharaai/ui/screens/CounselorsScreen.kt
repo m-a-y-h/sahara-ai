@@ -42,6 +42,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeSource
+import pk.edu.ucp.saharaai.ui.components.GlassAlertDialog
 import pk.edu.ucp.saharaai.BuildConfig
 import pk.edu.ucp.saharaai.data.model.CounselorAttributeCatalog
 import pk.edu.ucp.saharaai.ui.components.BottomNav
@@ -493,6 +494,7 @@ fun CounselorsScreen(
 
         paymentCounselor?.let { counselor ->
             PaymentProofDialog(
+                hazeState = hazeState,
                 counselorName = counselor.name,
                 amountPkr = counselor.feePkr,
                 isEnglish = isEnglish,
@@ -518,6 +520,7 @@ fun CounselorsScreen(
 
 @Composable
 private fun PaymentProofDialog(
+    hazeState: dev.chrisbanes.haze.HazeState,
     counselorName: String,
     amountPkr: Int,
     isEnglish: Boolean,
@@ -530,7 +533,8 @@ private fun PaymentProofDialog(
     var error by remember { mutableStateOf("") }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { proofUri = it }
 
-    AlertDialog(
+    GlassAlertDialog(
+        hazeState = hazeState,
         onDismissRequest = onDismiss,
         title = { Text(if (isEnglish) "Paid session with $counselorName" else "$counselorName ke saath paid session") },
         text = {

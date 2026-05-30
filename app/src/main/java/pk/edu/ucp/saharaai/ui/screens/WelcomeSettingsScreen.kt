@@ -430,7 +430,7 @@ fun SecurityKeyOverlay(
                                 if (keyInput.isEmpty()) {
                                     Text(
                                         text = if (type == "COUNSELOR")
-                                            (if (isEnglish) "e.g.  abc123" else "maslan  abc123")
+                                            (if (isEnglish) "Paste your counselor key here..." else "Yahan apni counselor key darj karein...")
                                         else
                                             (if (isEnglish) "Enter NGO / admin key..." else "NGO / admin key darj karein..."),
                                         style = MaterialTheme.typography.bodyMedium.copy(color = textColor.copy(0.4f), fontSize = 15.sp)

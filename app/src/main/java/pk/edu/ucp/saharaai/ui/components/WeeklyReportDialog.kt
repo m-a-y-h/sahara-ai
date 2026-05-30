@@ -19,6 +19,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import dev.chrisbanes.haze.HazeState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -41,6 +42,7 @@ import pk.edu.ucp.saharaai.ui.theme.SaharaWarning
  */
 @Composable
 fun WeeklyReportPopupDialog(
+    hazeState: HazeState,
     report: WeeklyListeningReport,
     isEnglish: Boolean,
     onOpen: () -> Unit,
@@ -60,7 +62,8 @@ fun WeeklyReportPopupDialog(
             SaharaWarning to (if (isEnglish) "Weekly listening summary" else "Hafte ka summary")
     }
 
-    AlertDialog(
+    GlassAlertDialog(
+        hazeState = hazeState,
         onDismissRequest = onDismiss,
         icon = {
             Surface(
@@ -146,9 +149,5 @@ fun WeeklyReportPopupDialog(
                 }
             }
         },
-        containerColor = MaterialTheme.colorScheme.surface,
-        titleContentColor = MaterialTheme.colorScheme.onSurface,
-        textContentColor = MaterialTheme.colorScheme.onSurface,
-        iconContentColor = Color.Unspecified,
     )
 }

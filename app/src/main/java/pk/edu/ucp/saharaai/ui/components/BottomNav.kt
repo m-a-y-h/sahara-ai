@@ -66,7 +66,7 @@ fun BottomNav(navController: NavController, hazeState: HazeState) {
     items.addAll(
         listOf(
             NavItem("Chat", Icons.AutoMirrored.Filled.Chat, "chat", requiresAssessment = true),
-            NavItem("Recovery", Icons.Default.Favorite, "recovery"),
+            NavItem("Recovery", Icons.Default.Favorite, "recovery", requiresAssessment = true),
             NavItem("Profile", Icons.Default.Person, "profile")
         )
     )

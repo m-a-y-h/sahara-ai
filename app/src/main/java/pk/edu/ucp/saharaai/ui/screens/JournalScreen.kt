@@ -38,6 +38,7 @@ import androidx.navigation.NavController
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeSource
 import pk.edu.ucp.saharaai.ui.components.BottomNav
+import pk.edu.ucp.saharaai.ui.components.GlassAlertDialog
 import pk.edu.ucp.saharaai.ui.components.ButtonVariant
 import pk.edu.ucp.saharaai.ui.components.CardVariant
 import pk.edu.ucp.saharaai.ui.components.SaharaButton
@@ -129,31 +130,6 @@ fun JournalScreen(
     val blobMotion = rememberBackdropBlobMotion()
 
     
-    deleteTarget?.let { target ->
-        AlertDialog(
-            onDismissRequest = { deleteTarget = null },
-            title = { Text(if (isEnglish) "Delete Entry?" else "Entry Delete Karein?") },
-            text  = { Text(if (isEnglish) "This journal entry will be permanently deleted." else "Yeh entry hamesha ke liye delete ho jaegi.") },
-            confirmButton = {
-                TextButton(onClick = {
-                    deleteTarget = null
-                    journalViewModel.deleteEntry(target.id) { deleted ->
-                        if (!deleted) {
-                            context.showLocalizedToast(isEnglish, "Delete failed.", "Delete nahi hua.")
-                        }
-                    }
-                }) {
-                    Text(if (isEnglish) "Delete" else "Delete", color = SaharaCoral, fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { deleteTarget = null }) {
-                    Text(if (isEnglish) "Cancel" else "Cancel Karein")
-                }
-            }
-        )
-    }
-
     Box(modifier = Modifier.fillMaxSize()) {
         Box(
             modifier = Modifier
@@ -495,6 +471,33 @@ fun JournalScreen(
                     }
                 }
             }
+        }
+
+        deleteTarget?.let { target ->
+            GlassAlertDialog(
+                hazeState = hazeState,
+                isDark = isDark,
+                onDismissRequest = { deleteTarget = null },
+                title = { Text(if (isEnglish) "Delete Entry?" else "Entry Delete Karein?") },
+                text  = { Text(if (isEnglish) "This journal entry will be permanently deleted." else "Yeh entry hamesha ke liye delete ho jaegi.") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        deleteTarget = null
+                        journalViewModel.deleteEntry(target.id) { deleted ->
+                            if (!deleted) {
+                                context.showLocalizedToast(isEnglish, "Delete failed.", "Delete nahi hua.")
+                            }
+                        }
+                    }) {
+                        Text(if (isEnglish) "Delete" else "Delete", color = SaharaCoral, fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { deleteTarget = null }) {
+                        Text(if (isEnglish) "Cancel" else "Cancel Karein")
+                    }
+                }
+            )
         }
     }
 }

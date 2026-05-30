@@ -55,6 +55,7 @@ import pk.edu.ucp.saharaai.ui.components.ButtonVariant
 import pk.edu.ucp.saharaai.ui.components.CardVariant
 import pk.edu.ucp.saharaai.ui.components.SaharaButton
 import pk.edu.ucp.saharaai.ui.components.SaharaCard
+import pk.edu.ucp.saharaai.ui.components.GlassAlertDialog
 import pk.edu.ucp.saharaai.ui.components.HazeBackButton
 import pk.edu.ucp.saharaai.ui.theme.*
 import pk.edu.ucp.saharaai.util.PermissionCopy
@@ -442,113 +443,6 @@ fun GameRecoveryScreen(
         listOf(SaharaStrongGreen.copy(0.25f), SaharaSky.copy(0.15f), MaterialTheme.colorScheme.background.copy(0.2f))
 
     val blobMotion = rememberBackdropBlobMotion()
-
-    selectedTask?.let { task ->
-        val isThisLoading = loadingTaskId == task.id
-        AlertDialog(
-            onDismissRequest = {
-                if (!isThisLoading) selectedTaskId = null
-            },
-            icon = {
-                Icon(
-                    task.icon,
-                    contentDescription = null,
-                    tint = if (task.isComplete) SaharaStrongGreen else SaharaSky
-                )
-            },
-            title = {
-                Text(
-                    text = if (isEnglish) task.titleEn else task.titleUr,
-                    fontWeight = FontWeight.Bold
-                )
-            },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text(
-                        text = if (isEnglish) task.descEn else task.descUr,
-                        style = MaterialTheme.typography.bodyMedium
-                    )
-                    Surface(
-                        shape = RoundedCornerShape(10.dp),
-                        color = if (task.isComplete) {
-                            SaharaStrongGreen.copy(alpha = 0.12f)
-                        } else {
-                            SaharaSky.copy(alpha = 0.12f)
-                        }
-                    ) {
-                        Text(
-                            text = if (task.isComplete) {
-                                if (isEnglish) "Completed today" else "Aaj complete ho gaya"
-                            } else {
-                                if (isEnglish) "Reward: +${task.xp} XP" else "Inaam: +${task.xp} XP"
-                            },
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = if (task.isComplete) SaharaStrongGreen else SaharaSky,
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
-                        )
-                    }
-                }
-            },
-            confirmButton = {
-                if (!task.isComplete) {
-                    Button(
-                        onClick = {
-                            if (task.requiresAiCheckIn && !GlobalAppState.hasCheckedIn) {
-                                selectedTaskId = null
-                                navController.navigate("chat") { launchSingleTop = true }
-                                return@Button
-                            }
-                            loadingTaskId = task.id
-                            gameViewModel.completeTask(task.id, task.xp, today, thisWeek) { updated ->
-                                if (updated != null) {
-                                    totalXp = updated["totalXp"].asRecoveryInt(totalXp)
-                                    dailyXp = updated["dailyXp"].asRecoveryInt(dailyXp)
-                                    weeklyXp = updated["weeklyXp"].asRecoveryInt(weeklyXp)
-                                    level = updated["level"].asRecoveryInt(level)
-                                    @Suppress("UNCHECKED_CAST")
-                                    completedToday = updated["completedToday"] as? Set<String> ?: completedToday
-                                    selectedTaskId = null
-                                } else {
-                                    context.showLocalizedToast(
-                                        isEnglish,
-                                        "Unable to complete task. Try again.",
-                                        "Task complete nahi hua. Dobara koshish karein.",
-                                    )
-                                }
-                                loadingTaskId = null
-                            }
-                        },
-                        enabled = !isThisLoading
-                    ) {
-                        if (isThisLoading) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(18.dp),
-                                color = Color.White,
-                                strokeWidth = 2.dp
-                            )
-                        } else {
-                            Text(
-                                if (task.requiresAiCheckIn && !GlobalAppState.hasCheckedIn) {
-                                    if (isEnglish) "Open Check-in" else "Check-in Kholein"
-                                } else {
-                                    if (isEnglish) "Complete Task" else "Task Complete"
-                                }
-                            )
-                        }
-                    }
-                }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = { selectedTaskId = null },
-                    enabled = !isThisLoading
-                ) {
-                    Text(if (isEnglish) "Close" else "Band Karein")
-                }
-            }
-        )
-    }
 
     Box(modifier = Modifier.fillMaxSize()) {
         Box(
@@ -1038,6 +932,115 @@ fun GameRecoveryScreen(
                 }
             }
         }
+        }
+
+        selectedTask?.let { task ->
+            val isThisLoading = loadingTaskId == task.id
+            GlassAlertDialog(
+                hazeState = hazeState,
+                isDark = isDark,
+                onDismissRequest = {
+                    if (!isThisLoading) selectedTaskId = null
+                },
+                icon = {
+                    Icon(
+                        task.icon,
+                        contentDescription = null,
+                        tint = if (task.isComplete) SaharaStrongGreen else SaharaSky
+                    )
+                },
+                title = {
+                    Text(
+                        text = if (isEnglish) task.titleEn else task.titleUr,
+                        fontWeight = FontWeight.Bold
+                    )
+                },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text(
+                            text = if (isEnglish) task.descEn else task.descUr,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (task.isComplete) {
+                                SaharaStrongGreen.copy(alpha = 0.12f)
+                            } else {
+                                SaharaSky.copy(alpha = 0.12f)
+                            }
+                        ) {
+                            Text(
+                                text = if (task.isComplete) {
+                                    if (isEnglish) "Completed today" else "Aaj complete ho gaya"
+                                } else {
+                                    if (isEnglish) "Reward: +${task.xp} XP" else "Inaam: +${task.xp} XP"
+                                },
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = if (task.isComplete) SaharaStrongGreen else SaharaSky,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                            )
+                        }
+                    }
+                },
+                confirmButton = {
+                    if (!task.isComplete) {
+                        Button(
+                            onClick = {
+                                if (task.requiresAiCheckIn && !GlobalAppState.hasCheckedIn) {
+                                    selectedTaskId = null
+                                    navController.navigate("chat") { launchSingleTop = true }
+                                    return@Button
+                                }
+                                loadingTaskId = task.id
+                                gameViewModel.completeTask(task.id, task.xp, today, thisWeek) { updated ->
+                                    if (updated != null) {
+                                        totalXp = updated["totalXp"].asRecoveryInt(totalXp)
+                                        dailyXp = updated["dailyXp"].asRecoveryInt(dailyXp)
+                                        weeklyXp = updated["weeklyXp"].asRecoveryInt(weeklyXp)
+                                        level = updated["level"].asRecoveryInt(level)
+                                        @Suppress("UNCHECKED_CAST")
+                                        completedToday = updated["completedToday"] as? Set<String> ?: completedToday
+                                        selectedTaskId = null
+                                    } else {
+                                        context.showLocalizedToast(
+                                            isEnglish,
+                                            "Unable to complete task. Try again.",
+                                            "Task complete nahi hua. Dobara koshish karein.",
+                                        )
+                                    }
+                                    loadingTaskId = null
+                                }
+                            },
+                            enabled = !isThisLoading
+                        ) {
+                            if (isThisLoading) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(18.dp),
+                                    color = Color.White,
+                                    strokeWidth = 2.dp
+                                )
+                            } else {
+                                Text(
+                                    if (task.requiresAiCheckIn && !GlobalAppState.hasCheckedIn) {
+                                        if (isEnglish) "Open Check-in" else "Check-in Kholein"
+                                    } else {
+                                        if (isEnglish) "Complete Task" else "Task Complete"
+                                    }
+                                )
+                            }
+                        }
+                    }
+                },
+                dismissButton = {
+                    TextButton(
+                        onClick = { selectedTaskId = null },
+                        enabled = !isThisLoading
+                    ) {
+                        Text(if (isEnglish) "Close" else "Band Karein")
+                    }
+                }
+            )
         }
     }
 }

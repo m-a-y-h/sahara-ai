@@ -43,19 +43,24 @@ class HubertEmotionClassifier(nn.Module):
         pretrained: bool = True,
     ) -> None:
         super().__init__()
-        
-        
-        from transformers import HubertModel
+
+        # AutoModel (not HubertModel) so any speech encoder with the same
+        # `(B, T)` waveform -> `last_hidden_state` interface loads here —
+        # HuBERT base/large for the original team checkpoint, and Wav2Vec2 /
+        # XLS-R for the multilingual fine-tune we now use on Urdu. The
+        # attribute is still named `self.hubert` so state-dicts saved against
+        # the old class layout keep loading without rename.
+        from transformers import AutoModel
 
         self.config = config or DEFAULT_MODEL_CONFIG
         nc = num_classes if num_classes is not None else self.config.num_classes
         self.num_classes = nc
 
         if pretrained:
-            self.hubert = HubertModel.from_pretrained(self.config.backbone)
+            self.hubert = AutoModel.from_pretrained(self.config.backbone)
         else:
-            from transformers import HubertConfig
-            self.hubert = HubertModel(HubertConfig.from_pretrained(self.config.backbone))
+            from transformers import AutoConfig
+            self.hubert = AutoModel.from_config(AutoConfig.from_pretrained(self.config.backbone))
 
         d = self.hubert.config.hidden_size
 

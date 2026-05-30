@@ -305,7 +305,7 @@ The NGO/Admin key entry in welcome settings now distinguishes:
 - `sahara.ngo.key` or an approved `ngo_keys/{key}` value — opens the NGO dashboard.
 - An issued `counselor_keys/{key}` value — opens counselor setup/dashboard.
 
-The admin dashboard accepts pending NGO/counselor registration forms, opens their submitted evidence, launches an email contact action, issues a key after manual review, and approves/rejects submitted payment screenshots. The NGO dashboard shows aggregate latest-assessment risk averages by voluntarily recorded user region and does not infer a region where none was supplied.
+The admin dashboard accepts pending NGO/counselor registration forms, opens their submitted evidence, launches an email contact action, issues a key after manual review, and approves/rejects submitted payment screenshots. The NGO dashboard shows aggregate latest-assessment risk averages by voluntarily recorded user region and does not infer a region where none was supplied. A download button on the Regional Risk Averages section exports a CSV snapshot (header totals + per-region risk averages + counselor roster) through the Android Storage Access Framework so the NGO can save it to Downloads, Drive, or any picked location.
 
 ### Firebase Security Requirement
 
@@ -323,37 +323,43 @@ For sleep tracking, merge [`services/firebase/firestore.sahara-sleep.rules.snipp
 
 ## Sahara Lens
 
-Sahara Lens is the camera check-in feature accessed from the authenticated dashboard. It is an ML-based facial-emotion-recognition screening model targeted at the South Asian (KPK, Punjab, Sindh, Balochistan) population. The training and serving pipeline lives in [`services/sahara_lens/`](./services/sahara_lens/).
+Sahara Lens is the camera check-in feature accessed from the authenticated dashboard. It is an ML-based facial-emotion-recognition screening signal feeding the SAHARA risk pipeline. The serving pipeline lives in [`services/sahara_lens/`](./services/sahara_lens/).
 
-Planned behaviour:
+Pipeline:
 
 1. The front end captures a well-aligned, well-lit face image and rejects bad lighting, side angles, meme/troll faces, occlusions, and posture issues client-side, with minimal backend bypass guards.
-2. Once a clean capture is accepted, the image is sent to the backend, which runs the FER model to detect the negative-emotion signal cluster (stress, sadness, fear) associated with non-prescribed drug use.
-3. The output is treated as a screening signal, never a diagnosis. A converged signal (e.g. high probability of fear/sadness plus matching self-report or check-in context) is what routes the user to Sahara harm-reduction support, counselor escalation, or local emergency resources.
+2. The image is POSTed to `/v1/lens/scan`. The backend runs a server-side quality gate (face detection, blur/brightness checks), then the model, then the screening collapse onto the canonical four-class space (neutral / stress / sadness / fear).
+3. The output is treated as a screening signal, never a diagnosis. A converged signal (high probability of fear/sadness plus matching self-report or check-in context) is what routes the user to Sahara harm-reduction support, counselor escalation, or local emergency resources.
 
-Model strategy:
+Model:
 
-- Architecture: hybrid ResNet-50 + Vision Transformer (ViT), or a Swin Transformer backbone, pre-trained on ImageNet and fine-tuned for the three negative-emotion classes.
-- Primary dataset: **Mendeley "Indian face images with various expressions"** (`zfcd4bny82`); the loader maps its labels onto the canonical screening space (stress, sadness, fear). Voice screening uses **UrduSER** (`jcpfjnk5c2`). Earlier exploration referenced InFER++.
-- Training discipline: target ≥92% per-class F1 on the three negative emotions (not just aggregate top-1 accuracy), with class rebalancing, intersectional bias audits, and a multimodal fallback path so a single misread frame cannot escalate alone.
-- Ethics: outputs are screening signals, not diagnoses; human-in-the-loop counselor review for any escalation; explicit consent and on-device privacy where possible.
-
-The previous minimal Sahara Lens implementation (self-reported check-in only, no FER) has been removed from this branch and is not part of the current Android codebase.
+- **Default backend:** `dima806/facial_emotions_image_detection` — an Apache-2.0 ViT-base fine-tuned for facial emotion classification across the full 7-class set (angry, disgust, fear, happy, neutral, sad, surprise), reported at ~91.9% accuracy on its 25 k test set. Switched on by `SAHARA_LENS_BACKEND=hf` in [`services/sahara_lens/modal_deploy.py`](./services/sahara_lens/modal_deploy.py); weights are baked into the Modal image so cold starts don't re-download.
+- **Optional in-house backend** (`services/sahara_lens/train.py`, `model.py`): hybrid ResNet-50 + ViT trainable with `--select-metric val_acc` for datasets that lack the screening-distress classes (e.g. IIITM). Default model-selection metric remains the production ship-gate.
+- The Android side and the `/scan` response shape are identical whether the HF or in-house backend is loaded, so the model can be swapped without rebuilding the app.
 
 ---
 
 ## Sahara AI Protocol
 
-The `services/sahara_ai/` package contains the Sahara AI safety/router layer used by the `/v1/chat` Colab or API deployment. It handles Pakistani slang, misspellings, JSON validation, emergency escalation, and harm-reduction response constraints.
+The `services/sahara_ai/` package contains the Sahara AI safety/router layer that backs the `/v1/chat` endpoint. It handles Pakistani slang, misspellings, JSON validation, emergency escalation, and harm-reduction response constraints — and the actual token generation is routed via an injectable `text_generator(prompt) -> str`, so the protocol can run against a local model or a remote inference provider without changing the call sites.
 
-Run tests:
+The default Modal deploy ([`services/sahara_ai/modal_deploy.py`](./services/sahara_ai/modal_deploy.py)) is a thin proxy: it instantiates `huggingface_hub.InferenceClient` (provider `featherless-ai` by default), hits the Qalb instruct model (`enstazao/Qalb-1.0-8B-Instruct`), and wraps the call in the same prompt template the local model uses. Modal cold-starts in milliseconds because there are no weights to load; cost moves from per-second Modal GPU time to per-token Inference billing. The provider and model id are env-overridable so the same deploy can repoint at a different fine-tune without a redeploy.
+
+Deploy (one-time):
+
+```bash
+modal secret create huggingface-secret HF_TOKEN=<your hf token>
+cd services && modal deploy sahara_ai/modal_deploy.py
+```
+
+Run protocol tests:
 
 ```bash
 cd services
 python -m unittest tests/test_sahara_ai_protocol.py
 ```
 
-Generate seed SFT data:
+Generate seed SFT data (the curated Roman-Urdu distress scenarios used to brief the chat model):
 
 ```bash
 cd services

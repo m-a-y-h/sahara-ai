@@ -11,6 +11,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.hazeSource
 import androidx.credentials.ClearCredentialStateRequest
 import androidx.credentials.CredentialManager
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -307,22 +309,37 @@ fun SaharaApp() {
                         routeAfterAuth(emailHint = email)
                     },
                     onBiometricSuccess = {
-                        val restoredEmail =
-                            Firebase.auth.currentUser?.email?.ifBlank { null }
-                                ?: prefs.getString(KEY_USER_EMAIL, "")?.ifBlank { null }
-                                ?: prefs.getString("biometric_last_email", "") ?: ""
+                        // A successful fingerprint/face unlock only proves the
+                        // device owner is present — it cannot, on its own, revive
+                        // a Firebase session that has already been signed out (we
+                        // never persist the password). If there is no live session
+                        // to restore, keep the user on Login and ask for their
+                        // password instead of dumping them back to Welcome.
+                        if (Firebase.auth.currentUser == null) {
+                            context.showLocalizedToast(
+                                isEnglish,
+                                "Please sign in with your password to continue.",
+                                "Jari rakhne ke liye apne password se sign in karein.",
+                                android.widget.Toast.LENGTH_LONG,
+                            )
+                        } else {
+                            val restoredEmail =
+                                Firebase.auth.currentUser?.email?.ifBlank { null }
+                                    ?: prefs.getString(KEY_USER_EMAIL, "")?.ifBlank { null }
+                                    ?: prefs.getString("biometric_last_email", "") ?: ""
 
-                        val storedFull =
-                            prefs.getString(KEY_USER_FULL_NAME, "")?.ifBlank { null }
-                                ?: prefs.getString("biometric_last_name", "") ?: ""
+                            val storedFull =
+                                prefs.getString(KEY_USER_FULL_NAME, "")?.ifBlank { null }
+                                    ?: prefs.getString("biometric_last_name", "") ?: ""
 
-                        val restoredCalling =
-                            prefs.getString(KEY_USER_NAME, "")?.ifBlank { null }
-                                ?: callingName(storedFull).ifBlank { storedFull }
-                                    .ifBlank { "User" }
+                            val restoredCalling =
+                                prefs.getString(KEY_USER_NAME, "")?.ifBlank { null }
+                                    ?: callingName(storedFull).ifBlank { storedFull }
+                                        .ifBlank { "User" }
 
-                        applyUserState(restoredEmail, storedFull.ifBlank { restoredCalling })
-                        routeAfterAuth(emailHint = restoredEmail, nameHint = storedFull)
+                            applyUserState(restoredEmail, storedFull.ifBlank { restoredCalling })
+                            routeAfterAuth(emailHint = restoredEmail, nameHint = storedFull)
+                        }
                     },
                     onNavigateToRegister       = { navController.navigate("register") },
                     onNavigateToForgotPassword = { navController.navigate("forgot-password") },
@@ -409,17 +426,23 @@ fun SaharaApp() {
                 val pendingReport by weeklyReportVm.pendingPopup.collectAsState()
                 val monitoringNotice by riskMonitoringVm.pendingStartNotice.collectAsState()
                 val cumulativeReport by riskMonitoringVm.pendingCumulativeReport.collectAsState()
+                // A dedicated haze source captures the whole dashboard render so the
+                // report popups below can blur it as real glass.
+                val dashHaze = remember { HazeState() }
                 androidx.compose.foundation.layout.Box {
-                    DashboardScreen(
-                        navController = navController,
-                        isEnglish = isEnglish,
-                        userName  = userCallingName
-                    )
+                    Box(Modifier.fillMaxSize().hazeSource(state = dashHaze)) {
+                        DashboardScreen(
+                            navController = navController,
+                            isEnglish = isEnglish,
+                            userName  = userCallingName
+                        )
+                    }
                     // Monitoring start popup wins priority over the weekly
                     // listening one because the user only sees the
                     // monitoring popup once in their lifetime.
                     cumulativeReport?.let { report ->
                         pk.edu.ucp.saharaai.ui.components.CumulativeReportDialog(
+                            hazeState = dashHaze,
                             report = report,
                             isEnglish = isEnglish,
                             onViewProgress = {
@@ -432,12 +455,14 @@ fun SaharaApp() {
                         )
                     } ?: monitoringNotice?.let { notice ->
                         pk.edu.ucp.saharaai.ui.components.MonitoringStartDialog(
+                            hazeState = dashHaze,
                             notice = notice,
                             isEnglish = isEnglish,
                             onAcknowledge = riskMonitoringVm::acknowledgeStartNotice,
                         )
                     } ?: pendingReport?.takeIf { GlobalAppState.hasCompletedInitialAssessment }?.let { report ->
                         pk.edu.ucp.saharaai.ui.components.WeeklyReportPopupDialog(
+                            hazeState = dashHaze,
                             report = report,
                             isEnglish = isEnglish,
                             onOpen = {
@@ -476,11 +501,13 @@ fun SaharaApp() {
             }
 
             composable("recovery") {
-                GameRecoveryScreen(
-                    navController  = navController,
-                    onNavigateBack = { navController.popBackStack() },
-                    isEnglish = isEnglish
-                )
+                RequireCurrentAssessment {
+                    GameRecoveryScreen(
+                        navController  = navController,
+                        onNavigateBack = { navController.popBackStack() },
+                        isEnglish = isEnglish
+                    )
+                }
             }
 
             composable("profile") {
@@ -630,10 +657,12 @@ fun SaharaApp() {
             }
 
             composable("counselors") {
-                CounselorsScreen(
-                    navController = navController,
-                    isEnglish     = isEnglish
-                )
+                RequireCurrentAssessment {
+                    CounselorsScreen(
+                        navController = navController,
+                        isEnglish     = isEnglish
+                    )
+                }
             }
 
             composable("settings") {

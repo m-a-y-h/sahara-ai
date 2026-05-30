@@ -10,6 +10,7 @@ underlying model from another thread.
 from __future__ import annotations
 
 import io
+import os
 import threading
 from pathlib import Path
 from typing import Optional, Union
@@ -147,7 +148,20 @@ def get_engine(checkpoint_path: Optional[Union[str, Path]] = None) -> InferenceE
     global _engine
     with _engine_lock:
         if _engine is None:
-            _engine = InferenceEngine(checkpoint_path=checkpoint_path)
+            # Optional pretrained backend: set SAHARA_LENS_BACKEND=hf to serve a
+            # ready-made Hugging Face emotion ViT (no training/checkpoint needed).
+            # The default path is unchanged — the in-house HybridResNetViT.
+            backend = os.environ.get("SAHARA_LENS_BACKEND", "").strip().lower()
+            if backend == "hf":
+                from .hf_inference import HfLensEngine
+
+                _engine = HfLensEngine(
+                    model_id=os.environ.get(
+                        "SAHARA_LENS_HF_MODEL", "dima806/facial_emotions_image_detection"
+                    )
+                )
+            else:
+                _engine = InferenceEngine(checkpoint_path=checkpoint_path)
         return _engine
 
 

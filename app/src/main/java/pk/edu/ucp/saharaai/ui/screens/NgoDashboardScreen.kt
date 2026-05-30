@@ -2,6 +2,9 @@ package pk.edu.ucp.saharaai.ui.screens
 
 import android.content.Intent
 import android.net.Uri
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
@@ -41,6 +44,8 @@ import pk.edu.ucp.saharaai.data.model.RegionalRiskSummary
 import pk.edu.ucp.saharaai.ui.components.CardVariant
 import pk.edu.ucp.saharaai.ui.components.SaharaCard
 import pk.edu.ucp.saharaai.ui.theme.*
+import pk.edu.ucp.saharaai.util.NgoStatsExporter
+import pk.edu.ucp.saharaai.util.showLocalizedToast
 import pk.edu.ucp.saharaai.viewmodels.NgoDashboardViewModel
 
 @Composable
@@ -81,7 +86,36 @@ fun NgoDashboardScreen(
     
     val blobMotion = rememberBackdropBlobMotion()
 
-    
+    // SAF-backed CSV export. The Uri is whatever the user picks in the system
+    // file-picker (Downloads, Drive, etc.); we write the snapshot of the
+    // dashboard's current totals + regional risk + counselor table to it.
+    var pendingCsv by remember { mutableStateOf<String?>(null) }
+    val saveCsvLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("text/csv"),
+    ) { uri ->
+        val csv = pendingCsv
+        pendingCsv = null
+        if (uri == null || csv == null) return@rememberLauncherForActivityResult
+        val ok = NgoStatsExporter.writeCsvToUri(context, uri, csv)
+        context.showLocalizedToast(
+            isEnglish,
+            if (ok) "Saved regional statistics." else "Could not save the file.",
+            if (ok) "Statistics save ho gayi." else "File save nahi ho saki.",
+            if (ok) Toast.LENGTH_SHORT else Toast.LENGTH_LONG,
+        )
+    }
+    val launchDownload: () -> Unit = {
+        pendingCsv = NgoStatsExporter.buildCsv(
+            region = ngoRegion,
+            totalUsers = totalUsers,
+            totalChats = totalChats,
+            counselors = counselors,
+            regionalRisk = regionalRisk,
+        )
+        saveCsvLauncher.launch(NgoStatsExporter.buildDefaultFilename(ngoRegion))
+    }
+
+
     Box(modifier = Modifier.fillMaxSize()) {
 
         
@@ -268,15 +302,32 @@ fun NgoDashboardScreen(
 
                 Spacer(Modifier.height(8.dp))
 
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     Icon(Icons.Default.Analytics, null, tint = SaharaSky, modifier = Modifier.size(20.dp))
                     Spacer(Modifier.width(8.dp))
                     Text(
                         text = if (isEnglish) "Regional Risk Averages" else "Ilaqai Risk Average",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.ExtraBold,
-                        color = softTextColor
+                        color = softTextColor,
+                        modifier = Modifier.weight(1f),
                     )
+                    IconButton(
+                        onClick = launchDownload,
+                        enabled = !isLoading,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Download,
+                            contentDescription = if (isEnglish)
+                                "Download regional statistics (CSV)"
+                            else
+                                "Regional statistics download karein (CSV)",
+                            tint = if (isLoading) SaharaStrongGreen.copy(.4f) else SaharaStrongGreen,
+                        )
+                    }
                 }
                 Text(
                     text = if (isEnglish)

@@ -4,13 +4,21 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -57,6 +65,9 @@ fun GlassOverlay(
         Column(
             modifier = Modifier
                 .fillMaxWidth(0.88f)
+                // Cap the card height and scroll its content so a tall popup (long
+                // forms, avatar grids, time pickers) never overflows the screen.
+                .heightIn(max = 560.dp)
                 .clip(RoundedCornerShape(24.dp))
                 .hazeEffect(state = hazeState) {
                     inputScale = HazeInputScale.Auto
@@ -68,8 +79,63 @@ fun GlassOverlay(
                     RoundedCornerShape(24.dp),
                 )
                 .pointerInput(Unit) { detectTapGestures(onTap = {}) }
-                .padding(22.dp),
+                .padding(22.dp)
+                .verticalScroll(rememberScrollState()),
             content = content,
         )
+    }
+}
+
+/**
+ * A near drop-in glassmorphic replacement for Material3's [androidx.compose.material3.AlertDialog].
+ * Keeps the familiar `icon` / `title` / `text` / `confirmButton` / `dismissButton`
+ * slots, but renders through [GlassOverlay] so the popup is real glass (it blurs
+ * the screen behind it) instead of an opaque windowed dialog.
+ *
+ * Because it relies on [GlassOverlay], host it at the root of a screen whose
+ * background is a `hazeSource(hazeState)` — not nested inside a padded column,
+ * since the overlay fills the whole screen.
+ */
+@Composable
+fun GlassAlertDialog(
+    hazeState: HazeState,
+    onDismissRequest: () -> Unit,
+    confirmButton: @Composable () -> Unit,
+    dismissButton: (@Composable () -> Unit)? = null,
+    icon: (@Composable () -> Unit)? = null,
+    title: (@Composable () -> Unit)? = null,
+    text: (@Composable () -> Unit)? = null,
+    isDark: Boolean = isSystemInDarkTheme(),
+    dismissOnScrimTap: Boolean = true,
+) {
+    GlassOverlay(
+        hazeState = hazeState,
+        onDismiss = onDismissRequest,
+        isDark = isDark,
+        dismissOnScrimTap = dismissOnScrimTap,
+    ) {
+        icon?.let {
+            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { it() }
+            Spacer(Modifier.height(12.dp))
+        }
+        title?.let {
+            it()
+            Spacer(Modifier.height(10.dp))
+        }
+        text?.let {
+            it()
+            Spacer(Modifier.height(20.dp))
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            dismissButton?.let {
+                it()
+                Spacer(Modifier.width(8.dp))
+            }
+            confirmButton()
+        }
     }
 }

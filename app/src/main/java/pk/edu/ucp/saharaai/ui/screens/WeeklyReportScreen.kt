@@ -56,6 +56,7 @@ import pk.edu.ucp.saharaai.viewmodels.WeeklyReportViewModel
 import pk.edu.ucp.saharaai.ui.components.HazeBackButton
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeSource
+import pk.edu.ucp.saharaai.ui.components.GlassAlertDialog
 
 /**
  * Past weekly listening reports — list view + tap-to-expand detail.
@@ -165,7 +166,8 @@ fun WeeklyReportScreen(
     }
 
     pendingDeletion?.let { rep ->
-        AlertDialog(
+        GlassAlertDialog(
+            hazeState = hazeState,
             onDismissRequest = { pendingDeletion = null },
             title = {
                 Text(if (isEnglish) "Delete this report?" else "Ye report delete karein?")

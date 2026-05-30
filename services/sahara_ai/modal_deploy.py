@@ -1,169 +1,99 @@
-"""Modal.com deployment for the Sahara AI ``/v1/chat`` endpoint.
+"""Sahara AI chat endpoint on Modal — HuggingFace Inference API backend.
 
-Modal is the recommended host for the FYP: A10G GPUs are 24 GB VRAM (plenty
-for the 4-bit quantized 8B Qalb fine-tune), cold starts amortise across the
-``modal.Volume`` weight cache, and Modal bills per-second of GPU time so the
-endpoint is free while no one is chatting.
+This deploy is a thin proxy. The protocol layer (``sahara_ai_chat``) still
+runs on Modal — system prompt construction, language detection, risk-level
+parsing, response normalisation — but the actual token generation is sent to
+HuggingFace's Inference API (default provider: ``featherless-ai``) instead of
+loading the 8B model onto a Modal GPU. That means:
 
-Deploy
-------
+* No A10G / no quantization plumbing / no bitsandbytes.
+* Cold start is milliseconds (the function just instantiates an HTTP client).
+* Cost moves from per-second GPU time on Modal to per-token billing on HF.
 
-::
+Setup (one-time):
+    modal secret create huggingface-secret HF_TOKEN=<your hf token>
 
-    pip install modal>=0.65
-    modal token new                                       # first time only
-    modal deploy sahara_ai/modal_deploy.py
+Deploy — MUST run from the ``services/`` directory so ``add_local_python_source
+("sahara_ai")`` can import the local package, otherwise Modal errors with
+"sahara_ai has no spec - might not be installed?":
+    cd services && modal deploy sahara_ai/modal_deploy.py
 
-Modal prints a public HTTPS URL on deploy, e.g.
-``https://<user>--sahara-ai-chat-endpoint.modal.run``. Set that as
-``sahara.ai.chat.url`` in the Android app's ``local.properties``.
+Modal prints an https URL. Set it in the Android app's ``local.properties``:
+    sahara.ai.chat.url=<that url>/v1/chat
 
-Configuration
--------------
-
-The model id defaults to ``enstazao/Sahara-AI-1.0-8B-Instruct`` and is
-overridable via the ``SAHARA_AI_MODEL_ID`` Modal secret. The first request
-downloads the weights into the persistent ``sahara-ai-weights`` Volume so
-subsequent cold starts only pay for the local copy.
-
-Notes
------
-
-This file is intentionally standalone — it does NOT import ``sahara_ai.app``
-because ``modal.App`` builds its container image at deploy time and we want
-to control exactly which Python deps land there. The protocol layer is
-imported and bundled via ``image.add_local_python_source`` so the same
-``sahara_ai_chat`` / ``register_sahara_ai_routes`` code paths run on Modal as
-on any other host.
+The model id and provider are env-overridable so you can repoint without a
+redeploy: set SAHARA_AI_MODEL_ID and/or SAHARA_AI_PROVIDER on the Modal Secret
+(or as ``.env`` entries on the image).
 """
-
-from __future__ import annotations
 
 import os
 
 import modal
 
-
 APP_NAME = "sahara-ai"
-GPU_SPEC = "A10G"                   
-TIMEOUT_SECONDS = 600               
-CONTAINER_IDLE_TIMEOUT = 120        
-DEFAULT_MODEL_ID = "enstazao/Sahara-AI-1.0-8B-Instruct"
+DEFAULT_MODEL_ID = "enstazao/Qalb-1.0-8B-Instruct"
+DEFAULT_PROVIDER = "featherless-ai"
 
-
-
-weights_volume = modal.Volume.from_name("sahara-ai-weights", create_if_missing=True)
-HF_CACHE_PATH = "/root/.cache/huggingface"
-
+# Llama-3.1 chat template uses <|eot_id|> to end the assistant turn. We pass it
+# as a stop sequence so the remote provider trims cleanly; the protocol's
+# normaliser does the final cleanup of any trailing template noise.
+STOP_SEQUENCES = ["<|eot_id|>"]
 
 image = (
     modal.Image.debian_slim(python_version="3.11")
     .pip_install(
-        "torch==2.4.1",
-        "transformers==4.45.2",
-        "accelerate==0.34.2",
-        "bitsandbytes==0.44.1",
-        "sentencepiece==0.2.0",
         "fastapi==0.115.0",
         "pydantic==2.9.2",
-        "huggingface_hub==0.25.2",
+        # 0.27+ exposes provider-routed text_generation and stop_sequences cleanly.
+        "huggingface_hub>=0.27.0",
     )
-    .env(
-        {
-            "HF_HOME": HF_CACHE_PATH,
-            "TRANSFORMERS_CACHE": HF_CACHE_PATH,
-            
-            "TOKENIZERS_PARALLELISM": "false",
-        }
-    )
-    
-    
+    .env({"TOKENIZERS_PARALLELISM": "false"})
     .add_local_python_source("sahara_ai")
 )
-
 
 app = modal.App(name=APP_NAME, image=image)
 
 
-@app.cls(
-    gpu=GPU_SPEC,
-    timeout=TIMEOUT_SECONDS,
-    scaledown_window=CONTAINER_IDLE_TIMEOUT,
-    volumes={HF_CACHE_PATH: weights_volume},
-    
+@app.function(
+    timeout=120,
+    scaledown_window=300,
+    # The secret only needs HF_TOKEN. Optional: also include
+    # SAHARA_AI_MODEL_ID and SAHARA_AI_PROVIDER to repoint without redeploying.
     secrets=[modal.Secret.from_name("huggingface-secret", required_keys=["HF_TOKEN"])],
 )
-class SaharaAIService:
-    """Long-lived class so the model is loaded once per container, not per request."""
-
-    @modal.enter()
-    def load_model(self) -> None:
-        import threading
-
-        import torch
-        from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
-
-        model_id = os.environ.get("SAHARA_AI_MODEL_ID", DEFAULT_MODEL_ID)
-        print(f"[sahara-ai] loading {model_id} onto {GPU_SPEC} …", flush=True)
-
-        bnb = BitsAndBytesConfig(
-            load_in_4bit=True,
-            bnb_4bit_quant_type="nf4",
-            bnb_4bit_compute_dtype=torch.bfloat16,
-            bnb_4bit_use_double_quant=True,
-        )
-
-        self.tokenizer = AutoTokenizer.from_pretrained(model_id)
-        self.model = AutoModelForCausalLM.from_pretrained(
-            model_id,
-            quantization_config=bnb,
-            device_map={"": 0},
-            torch_dtype=torch.float16,
-            low_cpu_mem_usage=True,
-        )
-        eot_id = self.tokenizer.convert_tokens_to_ids("<|eot_id|>")
-        self.terminators = [self.tokenizer.eos_token_id]
-        if isinstance(eot_id, int) and eot_id >= 0:
-            self.terminators.append(eot_id)
-
-        self.lock = threading.Lock()
-        print("[sahara-ai] ready.", flush=True)
-
-    @modal.method()
-    def chat(self, user_input: str, language: str | None = None) -> dict:
-        """Synchronous chat call used by both the public endpoint and unit tests."""
-        
-        
-        from sahara_ai.sahara_ai_protocol import sahara_ai_chat
-
-        return sahara_ai_chat(
-            user_input,
-            tokenizer=self.tokenizer,
-            model=self.model,
-            terminators=self.terminators,
-            device="cuda",
-            preferred_language=language,
-            model_lock=self.lock,
-            bypass_model_for_critical=False,
-        )
-
-
-
-
-
-
-web_app = modal.asgi_app
-
-
-@app.function(image=image, timeout=TIMEOUT_SECONDS, scaledown_window=CONTAINER_IDLE_TIMEOUT)
 @modal.asgi_app(label="chat-endpoint")
 def fastapi_app():
-    """Mount the FastAPI app behind a public Modal URL."""
     from fastapi import FastAPI, HTTPException
+    from huggingface_hub import InferenceClient
     from pydantic import BaseModel
 
-    api = FastAPI(title="Sahara AI (Modal)", version="0.2.0")
-    service = SaharaAIService()
+    from sahara_ai.sahara_ai_protocol import sahara_ai_chat
+
+    model_id = os.environ.get("SAHARA_AI_MODEL_ID", DEFAULT_MODEL_ID)
+    provider = os.environ.get("SAHARA_AI_PROVIDER", DEFAULT_PROVIDER)
+    client = InferenceClient(provider=provider, api_key=os.environ["HF_TOKEN"])
+
+    # text_generator(prompt) -> str. Parameters mirror the local generation
+    # path in sahara_ai_protocol.generate_with_sahara_ai so the prompt
+    # engineering tuned for the local model still applies on the remote one.
+    def text_generator(prompt: str) -> str:
+        out = client.text_generation(
+            prompt,
+            model=model_id,
+            max_new_tokens=240,
+            temperature=0.15,
+            top_p=0.9,
+            repetition_penalty=1.08,
+            do_sample=True,
+            stop_sequences=STOP_SEQUENCES,
+        )
+        text = (out or "").strip()
+        for stop in STOP_SEQUENCES:
+            if text.endswith(stop):
+                text = text[: -len(stop)].rstrip()
+        return text
+
+    api = FastAPI(title="Sahara AI (Modal -> HF Inference)", version="0.3.0")
 
     class ChatRequest(BaseModel):
         user_input: str
@@ -172,7 +102,14 @@ def fastapi_app():
 
     @api.get("/")
     def root() -> dict:
-        return {"service": APP_NAME, "host": "modal", "gpu": GPU_SPEC, "endpoints": ["/v1/chat"]}
+        return {
+            "service": APP_NAME,
+            "host": "modal",
+            "backend": "hf-inference",
+            "model": model_id,
+            "provider": provider,
+            "endpoints": ["/v1/chat", "/healthz"],
+        }
 
     @api.get("/healthz")
     def healthz() -> dict:
@@ -185,45 +122,10 @@ def fastapi_app():
         preferred = req.language
         if req.is_english is True and preferred is None:
             preferred = "english"
-        
-        
-        return service.chat.remote(req.user_input, preferred)
+        return sahara_ai_chat(
+            req.user_input,
+            preferred_language=preferred,
+            text_generator=text_generator,
+        )
 
     return api
-
-
-
-
-
-
-
-
-@app.function(image=image, timeout=TIMEOUT_SECONDS, volumes={HF_CACHE_PATH: weights_volume})
-def prewarm_weights() -> dict:
-    """Pre-download model weights into the persistent volume."""
-    from huggingface_hub import snapshot_download
-
-    model_id = os.environ.get("SAHARA_AI_MODEL_ID", DEFAULT_MODEL_ID)
-    snapshot_download(model_id, cache_dir=HF_CACHE_PATH)
-    weights_volume.commit()
-    return {"prewarmed": model_id}
-
-
-
-
-
-
-
-@app.local_entrypoint()
-def main() -> None:
-    service = SaharaAIService()
-    crisis = service.chat.remote(
-        "bhai mene boht zyada aiis pii li h ab saans ni ari help",
-        "roman_urdu",
-    )
-    print("crisis ->", crisis.get("risk_level"), crisis.get("substance_detected"))
-    benign = service.chat.remote(
-        "Mere doctor ne sertraline prescribe ki hai, side effects?",
-        "roman_urdu",
-    )
-    print("prescription ->", benign.get("user_intent"))

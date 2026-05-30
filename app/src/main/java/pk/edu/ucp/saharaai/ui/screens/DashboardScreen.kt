@@ -377,9 +377,15 @@ fun DashboardScreen(
                         ) { navController.navigate("assessment") }
                     }
 
-                    QuickActionItem("Counselors", Icons.Default.Psychology, Color(0xFFEC6A45), itemModifier, isDark) {
-                        navController.navigate("counselors")
-                    }
+                    QuickActionItem(
+                        "Counselors",
+                        Icons.Default.Psychology,
+                        Color(0xFFEC6A45),
+                        itemModifier,
+                        isDark,
+                        enabled = hasCurrentAssessment,
+                        onDisabledClick = { showAssessmentRequiredToast() },
+                    ) { navController.navigate("counselors") }
 
                     QuickActionItem("Emergency", Icons.Default.Warning, SaharaCoral, itemModifier, isDark) {
                         navController.navigate("emergency")
@@ -401,12 +407,12 @@ fun DashboardScreen(
                     val itemWidth = (maxWidth - 32.dp) / 3
                     Row(modifier = Modifier.fillMaxWidth().horizontalScroll(quickActionsScrollState), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                         val itemModifier = Modifier.width(itemWidth)
-                        QuickActionItem("Sahara Lens", Icons.Default.FaceRetouchingNatural, Color(0xFF9575CD), itemModifier, isDark, enabled = hasCurrentAssessment) { openAfterAssessment("sahara-lens") }
-                        QuickActionItem("Voice AI", Icons.Default.GraphicEq, Color(0xFF9B7EBD), itemModifier, isDark, enabled = hasCurrentAssessment) { openAfterAssessment("voice-analysis") }
-                        QuickActionItem("Journal", Icons.Default.AutoStories, Color(0xFF8D6E63), itemModifier, isDark, enabled = hasCurrentAssessment) { openAfterAssessment("journal") }
-                        QuickActionItem("Community", Icons.Default.Forum, accentGreen, itemModifier, isDark, enabled = hasCurrentAssessment) { openAfterAssessment("community") }
-                        QuickActionItem("Sleep", Icons.Default.NightsStay, Color(0xFF5C6BC0), itemModifier, isDark, enabled = hasCurrentAssessment) { openAfterAssessment("sleep-tracker") }
-                        QuickActionItem("Screen Time", Icons.Default.Timer, Color(0xFF00897B), itemModifier, isDark, enabled = hasCurrentAssessment) { openAfterAssessment("screen-time") }
+                        QuickActionItem("Sahara Lens", Icons.Default.FaceRetouchingNatural, Color(0xFF9575CD), itemModifier, isDark, enabled = hasCurrentAssessment, onDisabledClick = { showAssessmentRequiredToast() }) { openAfterAssessment("sahara-lens") }
+                        QuickActionItem("Voice AI", Icons.Default.GraphicEq, Color(0xFF9B7EBD), itemModifier, isDark, enabled = hasCurrentAssessment, onDisabledClick = { showAssessmentRequiredToast() }) { openAfterAssessment("voice-analysis") }
+                        QuickActionItem("Journal", Icons.Default.AutoStories, Color(0xFF8D6E63), itemModifier, isDark, enabled = hasCurrentAssessment, onDisabledClick = { showAssessmentRequiredToast() }) { openAfterAssessment("journal") }
+                        QuickActionItem("Community", Icons.Default.Forum, accentGreen, itemModifier, isDark, enabled = hasCurrentAssessment, onDisabledClick = { showAssessmentRequiredToast() }) { openAfterAssessment("community") }
+                        QuickActionItem("Sleep", Icons.Default.NightsStay, Color(0xFF5C6BC0), itemModifier, isDark, enabled = hasCurrentAssessment, onDisabledClick = { showAssessmentRequiredToast() }) { openAfterAssessment("sleep-tracker") }
+                        QuickActionItem("Screen Time", Icons.Default.Timer, Color(0xFF00897B), itemModifier, isDark, enabled = hasCurrentAssessment, onDisabledClick = { showAssessmentRequiredToast() }) { openAfterAssessment("screen-time") }
                         if (hasCurrentAssessment) {
                             QuickActionItem(
                                 "Assessment",
