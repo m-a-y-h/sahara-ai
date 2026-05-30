@@ -261,6 +261,78 @@ object RealtimeDBService {
         db.getReference("counselor_keys").child(key).child("isOnline").setValue(isOnline).await()
     }
 
+    /** Manual "appear offline" override. Counselors are auto-online via the
+     *  Firebase presence helper below; flipping this on makes them appear
+     *  offline to users even though their app is connected. */
+    suspend fun setCounselorInvisible(key: String, invisible: Boolean): Result<Unit> = runCatching {
+        db.getReference("counselor_keys").child(key).child("isInvisible").setValue(invisible).await()
+    }
+
+    /** Firebase presence wiring for a counselor's dashboard session.
+     *
+     *  Watches `.info/connected`; when this client is connected, registers an
+     *  `onDisconnect` that flips `isOnline` to `false`, then writes `true`.
+     *  The returned closer cancels the listener and force-marks the counselor
+     *  offline — call it from the screen's `DisposableEffect.onDispose`.
+     *
+     *  Effective visibility to users is `isOnline && !isInvisible` — see
+     *  [listenToAllActiveCounselors] below. */
+    fun setupCounselorPresence(key: String): () -> Unit {
+        if (key.isBlank()) return {}
+        val onlineRef    = db.getReference("counselor_keys").child(key).child("isOnline")
+        val connectedRef = db.getReference(".info/connected")
+        val listener = object : ValueEventListener {
+            override fun onDataChange(snap: DataSnapshot) {
+                val connected = snap.value as? Boolean ?: false
+                if (connected) {
+                    onlineRef.onDisconnect().setValue(false)
+                    onlineRef.setValue(true)
+                }
+            }
+            override fun onCancelled(error: DatabaseError) {
+                Log.w("RealtimeDBService", "counselor presence listener cancelled", error.toException())
+            }
+        }
+        connectedRef.addValueEventListener(listener)
+        return {
+            connectedRef.removeEventListener(listener)
+            runCatching { onlineRef.onDisconnect().cancel() }
+            runCatching { onlineRef.setValue(false) }
+        }
+    }
+
+    /** All counselors with a complete profile and active status, REGARDLESS of
+     *  online state. Each entry carries `key`, `isOnline`, `isInvisible`, and
+     *  the derived `effectiveOnline = isOnline && !isInvisible` so callers
+     *  can sort and badge without duplicating the rule. */
+    fun listenToAllActiveCounselors(): Flow<List<Map<String, Any>>> = callbackFlow {
+        val ref = db.getReference("counselor_keys")
+        val listener = ref.addValueEventListener(object : ValueEventListener {
+            override fun onDataChange(snap: DataSnapshot) {
+                val list = mutableListOf<Map<String, Any>>()
+                for (child in snap.children) {
+                    val data = child.value as? Map<String, Any> ?: continue
+                    val isActive   = data["isActive"] as? Boolean ?: false
+                    val hasProfile = data["profileComplete"] as? Boolean ?: false
+                    if (!(isActive && hasProfile)) continue
+                    val isOnline    = data["isOnline"]    as? Boolean ?: false
+                    val isInvisible = data["isInvisible"] as? Boolean ?: false
+                    list.add(
+                        data + mapOf(
+                            "key" to (child.key ?: ""),
+                            "effectiveOnline" to (isOnline && !isInvisible),
+                        )
+                    )
+                }
+                trySend(list)
+            }
+            override fun onCancelled(error: DatabaseError) {
+                Log.w("RealtimeDBService", "RTDB listener cancelled", error.toException()); close()
+            }
+        })
+        awaitClose { ref.removeEventListener(listener) }
+    }
+
     suspend fun setCounselorCallAvailability(key: String, enabled: Boolean): Result<Unit> = runCatching {
         require(key.isNotBlank()) { "Missing counselor key." }
         db.getReference("counselor_keys").child(key).updateChildren(

@@ -42,6 +42,15 @@ class CounselorDashboardViewModel : ViewModel() {
     private val _isOnline       = MutableStateFlow(false)
     val isOnline: StateFlow<Boolean> = _isOnline.asStateFlow()
 
+    // Counselor's manual "appear offline" override. Auto-online is driven by
+    // Firebase presence (see attachPresence below); this flag lets the counselor
+    // appear offline to users even while their app is connected. Effective
+    // visibility is `isOnline && !isInvisible`.
+    private val _isInvisible = MutableStateFlow(false)
+    val isInvisible: StateFlow<Boolean> = _isInvisible.asStateFlow()
+
+    private var presenceCloser: (() -> Unit)? = null
+
     private val _callEnabled    = MutableStateFlow(false)
     val callEnabled: StateFlow<Boolean> = _callEnabled.asStateFlow()
 
@@ -112,12 +121,51 @@ class CounselorDashboardViewModel : ViewModel() {
             RealtimeDBService.listenToCounselorData(key).collect { data ->
                 _realtimeData.value = data
                 _isOnline.value = data?.get("isOnline") as? Boolean ?: false
+                _isInvisible.value = data?.get("isInvisible") as? Boolean ?: false
                 _callEnabled.value = data?.get("callEnabled") as? Boolean ?: false
             }
         }
     }
 
-    
+    /** Wire Firebase presence so this counselor is auto-online whenever the
+     *  dashboard is foregrounded and connected. Idempotent — calling it again
+     *  for the same key is harmless; calling it for a NEW key tears down the
+     *  previous listener first. Pair with [detachPresence] when the dashboard
+     *  is destroyed (or with `onCleared`, which we already call). */
+    fun attachPresence(key: String) {
+        if (key.isBlank()) return
+        presenceCloser?.invoke()
+        presenceCloser = RealtimeDBService.setupCounselorPresence(key)
+    }
+
+    fun detachPresence() {
+        presenceCloser?.invoke()
+        presenceCloser = null
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        detachPresence()
+    }
+
+    /** Counselor's manual "appear offline" toggle. Online is still driven by
+     *  presence; this flag only filters how users see the counselor. */
+    fun toggleInvisible(key: String) {
+        if (key.isBlank()) return
+        val next = !_isInvisible.value
+        _isInvisible.value = next                                // optimistic
+        viewModelScope.launch {
+            RealtimeDBService.setCounselorInvisible(key, next)
+                .onFailure {
+                    _error.value = it.message
+                    _isInvisible.value = !next                   // rollback
+                }
+        }
+    }
+
+    /** Legacy direct online toggle. Kept for back-compat with older callers
+     *  (e.g. fallback admin flows). New screens should use [toggleInvisible]
+     *  and rely on [attachPresence] for online state. */
     fun toggleOnlineStatus(key: String) {
         val newStatus = !_isOnline.value
         _isOnline.value = newStatus

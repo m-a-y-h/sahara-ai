@@ -15,8 +15,17 @@ import pk.edu.ucp.saharaai.data.remote.RealtimeDBService
 class CounselorsViewModel : ViewModel() {
     var uid by mutableStateOf("")
         private set
-    var onlineCounselors by mutableStateOf<List<Map<String, Any>>>(emptyList())
+
+    // Active counselors with profileComplete = true, ONLINE AND OFFLINE. Each
+    // map carries `effectiveOnline = isOnline && !isInvisible` so the screen
+    // can sort online-first and badge offline counselors as such.
+    var allCounselors by mutableStateOf<List<Map<String, Any>>>(emptyList())
         private set
+
+    /** Back-compat alias for callers that still ask for "onlineCounselors". */
+    val onlineCounselors: List<Map<String, Any>>
+        get() = allCounselors.filter { it["effectiveOnline"] as? Boolean == true }
+
     var paymentStatuses by mutableStateOf<List<PaymentRequest>>(emptyList())
         private set
     var isLoading by mutableStateOf(true)
@@ -27,8 +36,10 @@ class CounselorsViewModel : ViewModel() {
     fun initialize() {
         uid = Firebase.auth.currentUser?.uid.orEmpty()
         viewModelScope.launch {
-            RealtimeDBService.listenToOnlineCounselors().collect {
-                onlineCounselors = it
+            // Listen for ALL active counselors (online + offline) so offline
+            // counselors still appear, rendered with a grey status pip.
+            RealtimeDBService.listenToAllActiveCounselors().collect {
+                allCounselors = it
                 isLoading = false
             }
         }

@@ -91,16 +91,19 @@ fun CounselorsScreen(
     val submissionMessage = counselorsViewModel.submissionMessage
     val myPaymentStatuses = counselorsViewModel.paymentStatuses
     val uid = counselorsViewModel.uid
-    val onlineRawCounselors = counselorsViewModel.onlineCounselors
+    // All ACTIVE counselors (online AND offline). Each entry carries
+    // `effectiveOnline = isOnline && !isInvisible`. The UI surfaces both, with
+    // offline ones rendered with a grey status pip and sorted after the online
+    // ones so users can still discover them and queue a message.
+    val activeRawCounselors = counselorsViewModel.allCounselors
     val isLoading = counselorsViewModel.isLoading
 
     LaunchedEffect(Unit) {
         counselorsViewModel.initialize()
     }
 
-    
-    val allCounselors = remember(onlineRawCounselors) {
-        onlineRawCounselors.map { data ->
+    val allCounselors = remember(activeRawCounselors) {
+        activeRawCounselors.map { data ->
             val key        = (data["key"] as? String).orEmpty()
             val name       = (data["assignedName"] as? String)?.ifBlank { "Counselor" } ?: "Counselor"
             val attributeIds = (data["attributeIds"] as? List<*>)
@@ -124,6 +127,7 @@ fun CounselorsScreen(
                 else -> 0
             }.coerceIn(0, 5000)
             val initials   = name.split(" ").take(2).mapNotNull { it.firstOrNull()?.toString() }.joinToString("")
+            val effectiveOnline = data["effectiveOnline"] as? Boolean ?: false
             Counselor(
                 key            = key,
                 name           = name,
@@ -134,14 +138,16 @@ fun CounselorsScreen(
                 reviews        = totalRatings,
                 experienceEn   = if (sessions > 0) "$sessions sessions" else "New",
                 experienceUr   = if (sessions > 0) "$sessions sessions" else "Naya",
-                available      = true,   
+                // Drives the status pill in the counselor card: online → green
+                // "Online" pill, offline → grey "Offline" pill (see ~line 354).
+                available      = effectiveOnline,
                 avatar         = initials.ifEmpty { name.take(2).uppercase() },
-                nextAvailableEn = "Available Now",
-                nextAvailableUr = "Abhi Dastiyab",
+                nextAvailableEn = if (effectiveOnline) "Available Now" else "Currently Offline",
+                nextAvailableUr = if (effectiveOnline) "Abhi Dastiyab" else "Abhi Offline",
                 feePkr         = feePkr,
                 callEnabled    = data["callEnabled"] as? Boolean ?: false,
             )
-        }
+        }.sortedByDescending { it.available }   // online counselors first
     }
 
     val filteredCounselors = allCounselors.filter {
@@ -300,14 +306,14 @@ fun CounselorsScreen(
                                             modifier = Modifier.size(48.dp)
                                         )
                                         Text(
-                                            text = if (isEnglish) "No counselors online right now" else "Abhi koi counselor online nahi",
+                                            text = if (isEnglish) "No counselors match your search" else "Aap ke search se koi counselor match nahi hua",
                                             style = MaterialTheme.typography.bodyLarge,
                                             fontWeight = FontWeight.SemiBold,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
                                         Text(
-                                            text = if (isEnglish) "Counselors appear here when they are online. Please check back later."
-                                                   else "Jab counselor online hote hain to yahan nazar aate hain. Baad mein dobara check karein.",
+                                            text = if (isEnglish) "Try a different category or clear your search. Offline counselors are listed too so you can queue a message."
+                                                   else "Doosri category try karein ya search clear karein. Offline counselors bhi yahan dikhte hain — message queue kar sakte hain.",
                                             style = MaterialTheme.typography.bodySmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                                             textAlign = androidx.compose.ui.text.style.TextAlign.Center
@@ -351,9 +357,31 @@ fun CounselorsScreen(
                                                         Text(counselor.name, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
                                                         Text(specialty, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                                     }
-                                                    val statusColor = if (counselor.available) SaharaStrongGreen else SaharaPeach
-                                                    Box(modifier = Modifier.background(statusColor.copy(0.15f), MaterialTheme.shapes.small).padding(horizontal = 8.dp, vertical = 4.dp)) {
-                                                        Text(if (counselor.available) (if (isEnglish) "Available" else "Dastiyab") else (if (isEnglish) "Busy" else "Masroof"), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = statusColor)
+                                                    // Online presence pill: green dot + "Online" for connected
+                                                    // counselors, grey dot + "Offline" otherwise. Offline counselors
+                                                    // stay visible in the list (sorted after online ones) so users can
+                                                    // still see who's around and queue a message.
+                                                    val statusColor = if (counselor.available) SaharaStrongGreen else MaterialTheme.colorScheme.onSurfaceVariant
+                                                    Row(
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        modifier = Modifier
+                                                            .background(statusColor.copy(0.15f), MaterialTheme.shapes.small)
+                                                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                                                    ) {
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .size(8.dp)
+                                                                .clip(CircleShape)
+                                                                .background(statusColor),
+                                                        )
+                                                        Spacer(Modifier.width(6.dp))
+                                                        Text(
+                                                            text = if (counselor.available) (if (isEnglish) "Online" else "Online")
+                                                                   else (if (isEnglish) "Offline" else "Offline"),
+                                                            style = MaterialTheme.typography.labelSmall,
+                                                            fontWeight = FontWeight.Bold,
+                                                            color = statusColor,
+                                                        )
                                                     }
                                                 }
                                                 Spacer(modifier = Modifier.height(8.dp))

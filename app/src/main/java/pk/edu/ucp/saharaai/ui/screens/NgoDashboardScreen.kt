@@ -6,8 +6,6 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.*
-import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
@@ -19,18 +17,16 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -38,16 +34,17 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeSource
-import pk.edu.ucp.saharaai.R
 import pk.edu.ucp.saharaai.data.model.CounselorProfile
 import pk.edu.ucp.saharaai.data.model.RegionalRiskSummary
 import pk.edu.ucp.saharaai.ui.components.CardVariant
+import pk.edu.ucp.saharaai.ui.components.HazeBackButton
 import pk.edu.ucp.saharaai.ui.components.SaharaCard
 import pk.edu.ucp.saharaai.ui.theme.*
 import pk.edu.ucp.saharaai.util.NgoStatsExporter
 import pk.edu.ucp.saharaai.util.showLocalizedToast
 import pk.edu.ucp.saharaai.viewmodels.NgoDashboardViewModel
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NgoDashboardScreen(
     navController: NavController,
@@ -69,6 +66,8 @@ fun NgoDashboardScreen(
     val totalChats  by ngoViewModel.totalChats.collectAsState()
     val isLoading   by ngoViewModel.isLoading.collectAsState()
     val ngoRegion   by ngoViewModel.ngoRegion.collectAsState()
+    val ngoName     by ngoViewModel.ngoName.collectAsState()
+    val isRefreshing by ngoViewModel.isRefreshing.collectAsState()
     val regionalRisk by ngoViewModel.regionalRisk.collectAsState()
 
     
@@ -116,68 +115,98 @@ fun NgoDashboardScreen(
     }
 
 
+    // Match the rest of the app: gradient + animated blobs as the hazeSource,
+    // a HazeBackButton + title row instead of an image + dim + dark bar header.
+    val bgGradient = if (isDark) {
+        listOf(
+            SaharaStrongGreen.copy(alpha = 0.20f),
+            MaterialTheme.colorScheme.background.copy(alpha = 0.6f),
+            MaterialTheme.colorScheme.background,
+        )
+    } else {
+        listOf(
+            SaharaStrongGreen.copy(alpha = 0.25f),
+            SaharaSky.copy(alpha = 0.10f),
+            MaterialTheme.colorScheme.background.copy(alpha = 0.2f),
+        )
+    }
+    val blob1Color = SaharaStrongGreen.copy(alpha = if (isDark) 0.25f else 0.15f)
+    val blob2Color = SaharaSky.copy(alpha = if (isDark) 0.20f else 0.18f)
+
     Box(modifier = Modifier.fillMaxSize()) {
 
-        
-        Box(modifier = Modifier.fillMaxSize().hazeSource(bgHazeState)) {
-            Image(
-                painter = painterResource(id = R.drawable.sahara_bg5),
-                contentDescription = null,
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .hazeSource(bgHazeState)
+                .background(Brush.verticalGradient(bgGradient))
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(350.dp)
+                    .offset(x = (-80).dp, y = (-50).dp)
+                    .primaryBlobMotion(blobMotion)
+                    .background(androidx.compose.ui.graphics.Brush.radialGradient(listOf(blob1Color, Color.Transparent)))
             )
-            Box(modifier = Modifier.fillMaxSize()
-                .background(if (isDark) Color.Black.copy(.45f) else Color.White.copy(.10f)))
-            Box(Modifier.size(350.dp).offset((-80).dp, (-50).dp)
-                .primaryBlobMotion(blobMotion)
-                .background(SaharaGreen.copy(if (isDark) .15f else .2f), CircleShape)
-                .blur(80.dp))
-            Box(Modifier.size(400.dp).align(Alignment.BottomEnd).offset(100.dp, 50.dp)
-                .secondaryBlobMotion(blobMotion)
-                .background(SaharaSky.copy(if (isDark) .15f else .25f), CircleShape)
-                .blur(96.dp))
+            Box(
+                modifier = Modifier
+                    .size(400.dp)
+                    .align(Alignment.BottomEnd)
+                    .offset(x = 100.dp, y = 50.dp)
+                    .secondaryBlobMotion(blobMotion)
+                    .background(androidx.compose.ui.graphics.Brush.radialGradient(listOf(blob2Color, Color.Transparent)))
+            )
         }
 
-        Column(modifier = Modifier.fillMaxSize()) {
+        PullToRefreshBox(
+            isRefreshing = isRefreshing,
+            onRefresh = { ngoViewModel.refresh() },
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            Column(modifier = Modifier.fillMaxSize()) {
 
-            
-            Box(
-                modifier = Modifier.fillMaxWidth()
-                    .background(Color.Black.copy(.25f))
-                    .statusBarsPadding()
-                    .padding(horizontal = 24.dp, vertical = 16.dp)
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column {
+                // Header — HazeBackButton + title Column. Title is the NGO's
+                // own name when known (fallback to "NGO Dashboard"); subtext is
+                // the operating region + live indicator.
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .statusBarsPadding()
+                        .padding(horizontal = 24.dp, vertical = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    HazeBackButton(onClick = { navController.popBackStack() }, hazeState = bgHazeState)
+                    Spacer(Modifier.width(16.dp))
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = if (isEnglish) "NGO Dashboard" else "NGO Dashboard",
+                            text = ngoName.ifBlank { if (isEnglish) "NGO Dashboard" else "NGO Dashboard" },
                             style = MaterialTheme.typography.headlineSmall,
                             fontWeight = FontWeight.ExtraBold,
-                            color = titleColor
+                            color = titleColor,
+                            maxLines = 2,
                         )
                         Text(
-                            text = if (ngoRegion.isBlank()) {
-                                if (isEnglish) "Regional overview - real-time" else "Ilaqai jaiza - real-time"
-                            } else {
-                                if (isEnglish) "$ngoRegion region - aggregate data" else "$ngoRegion ilaqa - aggregate data"
+                            text = when {
+                                ngoRegion.isBlank() && isEnglish -> "Regional overview · live"
+                                ngoRegion.isBlank()              -> "Ilaqai jaiza · live"
+                                isEnglish                        -> "$ngoRegion region · live"
+                                else                             -> "$ngoRegion · live"
                             },
                             style = MaterialTheme.typography.labelSmall,
-                            color = softTextColor.copy(.6f)
+                            color = softTextColor.copy(.65f),
                         )
                     }
                 }
-            }
 
-            
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .verticalScroll(rememberScrollState())
-                    .navigationBarsPadding()
-                    .padding(horizontal = 24.dp)
-                    .padding(top = 24.dp, bottom = 40.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .verticalScroll(rememberScrollState())
+                        .navigationBarsPadding()
+                        .padding(horizontal = 24.dp)
+                        .padding(top = 8.dp, bottom = 40.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                ) {
 
                 
                 if (isLoading) {
@@ -243,38 +272,55 @@ fun NgoDashboardScreen(
                     )
                     Spacer(Modifier.height(24.dp))
 
-                    Box(
-                        modifier = Modifier.fillMaxWidth().height(180.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Canvas(modifier = Modifier.size(150.dp)) {
-                            var startAngle = -90f
-                            pieData.forEach { (pct, color) ->
-                                val sweep = (pct / 100f) * 360f
-                                drawArc(
-                                    color      = color,
-                                    startAngle = startAngle,
-                                    sweepAngle = sweep,
-                                    useCenter  = false,
-                                    style      = androidx.compose.ui.graphics.drawscope.Stroke(
-                                        width = 45.dp.toPx(),
-                                        cap   = StrokeCap.Butt
-                                    )
-                                )
-                                startAngle += sweep
-                            }
-                        }
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    // The old donut chart broke down when totalCounselors was 0
+                    // (renderers split 0/0 as 0% green + 100% red, which is a
+                    // misleading view of "we have no counselors"). A horizontal
+                    // split bar shows the real ratio AND degenerates gracefully
+                    // to a flat empty pip when the list is empty.
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                "%,d".format(totalCounselors),
-                                style = MaterialTheme.typography.titleLarge,
-                                fontWeight = FontWeight.Bold,
-                                color = softTextColor
+                                text = "%,d".format(totalCounselors),
+                                style = MaterialTheme.typography.headlineMedium,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = softTextColor,
                             )
                             Text(
-                                if (isEnglish) "Total" else "Kul",
+                                text = if (isEnglish) "Counselors total" else "Counselors total",
                                 style = MaterialTheme.typography.labelSmall,
-                                color = softTextColor.copy(.7f)
+                                color = softTextColor.copy(.65f),
+                            )
+                        }
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text(
+                                text = "%,d".format(onlineCounselors),
+                                style = MaterialTheme.typography.headlineMedium,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = SaharaStrongGreen,
+                            )
+                            Text(
+                                text = if (isEnglish) "online now" else "abhi online",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = softTextColor.copy(.65f),
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(14.dp))
+                    val safeTotal = totalCounselors.coerceAtLeast(1)
+                    val onlineFrac = (onlineCounselors.toFloat() / safeTotal).coerceIn(0f, 1f)
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(10.dp)
+                            .clip(RoundedCornerShape(5.dp))
+                            .background(SaharaCoral.copy(alpha = 0.18f)),
+                    ) {
+                        if (totalCounselors > 0 && onlineFrac > 0f) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxHeight()
+                                    .fillMaxWidth(onlineFrac)
+                                    .background(SaharaStrongGreen),
                             )
                         }
                     }
@@ -441,6 +487,7 @@ fun NgoDashboardScreen(
                         Spacer(Modifier.height(12.dp))
                     }
                 }
+            }
             }
         }
     }
@@ -672,16 +719,33 @@ fun NgoStatCard(
     SaharaCard(variant = CardVariant.GLASS, hazeState = hazeState, modifier = modifier) {
         Column(Modifier.padding(16.dp)) {
             Box(
-                modifier = Modifier.size(32.dp)
+                modifier = Modifier
+                    .size(32.dp)
                     .background(iconBgColor, RoundedCornerShape(8.dp)),
-                contentAlignment = Alignment.Center
+                contentAlignment = Alignment.Center,
             ) {
                 Icon(icon, null, tint = primaryColor, modifier = Modifier.size(18.dp))
             }
             Spacer(Modifier.height(12.dp))
-            Text(value, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold, color = textColor)
+            Text(
+                text = value,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.ExtraBold,
+                color = textColor,
+                maxLines = 1,
+            )
             Spacer(Modifier.height(2.dp))
-            Text(title, style = MaterialTheme.typography.labelSmall, color = textColor.copy(.7f))
+            // Pin to two lines so the four cards in the dashboard row end at
+            // the same height regardless of title length (Total Users / Online
+            // Now / Chat Sessions / Counselors are different widths and were
+            // misaligning the row).
+            Text(
+                text = title,
+                style = MaterialTheme.typography.labelSmall,
+                color = textColor.copy(.7f),
+                minLines = 2,
+                maxLines = 2,
+            )
         }
     }
 }

@@ -97,6 +97,7 @@ fun CounselorDashboardScreen(
     val realtimeData by dashboardViewModel.realtimeData.collectAsState()
     val openAlerts   by dashboardViewModel.openAlerts.collectAsState()
     val isOnline     by dashboardViewModel.isOnline.collectAsState()
+    val isInvisible  by dashboardViewModel.isInvisible.collectAsState()
     val callEnabled  by dashboardViewModel.callEnabled.collectAsState()
     val chatSessions by dashboardViewModel.chatSessions.collectAsState()
     val isChatSessionsLoading by dashboardViewModel.isChatSessionsLoading.collectAsState()
@@ -114,7 +115,7 @@ fun CounselorDashboardScreen(
             dashboardViewModel.listenToRealtimeProfile(counselorKey)
             dashboardViewModel.listenToChatSessionsRealtime(counselorKey)
         } else if (counselorId.isNotBlank()) {
-            
+
             dashboardViewModel.loadProfile(counselorId)
             dashboardViewModel.listenToChatSessions(counselorId)
         }
@@ -122,6 +123,18 @@ fun CounselorDashboardScreen(
             dashboardViewModel.loadOpenAlerts(counselorId)
             dashboardViewModel.loadReports()
         }
+    }
+
+    // Counselor presence: while this dashboard is composed, the counselor is
+    // auto-online via Firebase presence (the helper also registers an
+    // onDisconnect, so a crash/app-kill flips them offline). The "Visible"
+    // switch below is just an override that hides them from users without
+    // tearing down the connection.
+    DisposableEffect(counselorKey) {
+        if (counselorKey.isNotBlank()) {
+            dashboardViewModel.attachPresence(counselorKey)
+        }
+        onDispose { dashboardViewModel.detachPresence() }
     }
 
     
@@ -194,11 +207,17 @@ fun CounselorDashboardScreen(
                     
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        // The switch is the counselor's manual "appear offline"
+                        // override. Online state itself is driven by Firebase
+                        // presence (attachPresence above), so flipping this off
+                        // makes them invisible to users without dropping the
+                        // dashboard's live connection.
+                        val visible = !isInvisible
                         Switch(
-                            checked = isOnline,
+                            checked = visible,
                             onCheckedChange = {
                                 if (counselorKey.isNotBlank())
-                                    dashboardViewModel.toggleOnlineStatus(counselorKey)
+                                    dashboardViewModel.toggleInvisible(counselorKey)
                                 else if (counselorId.isNotBlank())
                                     dashboardViewModel.toggleAvailability(counselorId)
                             },
@@ -206,16 +225,16 @@ fun CounselorDashboardScreen(
                                 checkedThumbColor   = Color.White,
                                 checkedTrackColor   = SaharaStrongGreen,
                                 uncheckedThumbColor = Color.White,
-                                uncheckedTrackColor = SaharaCoral.copy(alpha = 0.6f)
+                                uncheckedTrackColor = SaharaCoral.copy(alpha = 0.6f),
                             ),
-                            modifier = Modifier.height(28.dp)
+                            modifier = Modifier.height(28.dp),
                         )
                         Text(
-                            text = if (isOnline) (if (isEnglish) "Online" else "Online")
-                                   else (if (isEnglish) "Offline" else "Offline"),
+                            text = if (visible) (if (isEnglish) "Visible" else "Visible")
+                                   else (if (isEnglish) "Invisible" else "Invisible"),
                             style = MaterialTheme.typography.labelSmall,
-                            color = if (isOnline) SaharaStrongGreen else SaharaCoral,
-                            fontWeight = FontWeight.Bold
+                            color = if (visible) SaharaStrongGreen else SaharaCoral,
+                            fontWeight = FontWeight.Bold,
                         )
                         } 
                         Spacer(modifier = Modifier.width(8.dp))
@@ -291,10 +310,24 @@ fun CounselorDashboardScreen(
                                     label = if (isEnglish) "Active Alerts" else "Naye Alerts",
                                     valueColor = SaharaCoral, softTextColor = softTextColor, hazeState = bgHazeState, modifier = Modifier.weight(1f)
                                 )
+                                // Show the EFFECTIVE status the user sees: "Online" only when
+                                // connected AND not invisible; "Hidden" when invisible but still
+                                // connected; "Offline" only on the brief presence-not-yet-set
+                                // case (also useful if the helper ever fails to attach).
+                                val effectiveLabel = when {
+                                    isInvisible -> if (isEnglish) "Hidden" else "Hidden"
+                                    isOnline    -> if (isEnglish) "Online" else "Online"
+                                    else        -> if (isEnglish) "Offline" else "Offline"
+                                }
+                                val effectiveColor = when {
+                                    isInvisible -> SaharaPeach
+                                    isOnline    -> SaharaStrongGreen
+                                    else        -> SaharaCoral
+                                }
                                 QuickStat(
-                                    value = if (isOnline) "Online" else "Offline",
+                                    value = effectiveLabel,
                                     label = if (isEnglish) "Duty Status" else "Duty Status",
-                                    valueColor = if (isOnline) SaharaStrongGreen else SaharaCoral,
+                                    valueColor = effectiveColor,
                                     softTextColor = softTextColor, hazeState = bgHazeState, modifier = Modifier.weight(1f)
                                 )
                             }

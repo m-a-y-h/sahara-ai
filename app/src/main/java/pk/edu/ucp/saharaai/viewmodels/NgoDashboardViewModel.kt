@@ -28,6 +28,14 @@ class NgoDashboardViewModel : ViewModel() {
     private val _ngoRegion = MutableStateFlow("")
     val ngoRegion: StateFlow<String> = _ngoRegion.asStateFlow()
 
+    private val _ngoName = MutableStateFlow("")
+    val ngoName: StateFlow<String> = _ngoName.asStateFlow()
+
+    private val _isRefreshing = MutableStateFlow(false)
+    val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
+
+    private var lastNgoKey: String = ""
+
     private val _regionalRisk = MutableStateFlow<List<RegionalRiskSummary>>(emptyList())
     val regionalRisk: StateFlow<List<RegionalRiskSummary>> = _regionalRisk.asStateFlow()
 
@@ -39,10 +47,16 @@ class NgoDashboardViewModel : ViewModel() {
     fun loadDashboard(ngoKey: String = "") {
         if (started) return
         started = true
+        lastNgoKey = ngoKey
         if (ngoKey.isNotBlank()) {
             viewModelScope.launch {
                 val ngoData = RealtimeDBService.getNgoKey(ngoKey).getOrNull()
                 _ngoRegion.value = ngoData?.get("region")?.toString().orEmpty()
+                _ngoName.value =
+                    (ngoData?.get("name") as? String)?.takeIf { it.isNotBlank() }
+                        ?: (ngoData?.get("displayName") as? String)?.takeIf { it.isNotBlank() }
+                        ?: (ngoData?.get("orgName") as? String)?.takeIf { it.isNotBlank() }
+                        ?: ""
                 applyRegionFilter()
             }
         }
@@ -87,6 +101,29 @@ class NgoDashboardViewModel : ViewModel() {
     
 
     
+    /** Pull-to-refresh hook. The live RTDB listeners already keep the dashboard
+     *  current; this method just re-fetches the NGO metadata (name, region in
+     *  case it was edited) and flips a brief "refreshing" state so the UI
+     *  shows feedback. Safe to call repeatedly. */
+    fun refresh() {
+        viewModelScope.launch {
+            _isRefreshing.value = true
+            if (lastNgoKey.isNotBlank()) {
+                val ngoData = RealtimeDBService.getNgoKey(lastNgoKey).getOrNull()
+                _ngoRegion.value = ngoData?.get("region")?.toString().orEmpty()
+                _ngoName.value =
+                    (ngoData?.get("name") as? String)?.takeIf { it.isNotBlank() }
+                        ?: (ngoData?.get("displayName") as? String)?.takeIf { it.isNotBlank() }
+                        ?: (ngoData?.get("orgName") as? String)?.takeIf { it.isNotBlank() }
+                        ?: _ngoName.value
+                applyRegionFilter()
+            }
+            // Hold the indicator briefly so the user actually sees it spin.
+            kotlinx.coroutines.delay(450)
+            _isRefreshing.value = false
+        }
+    }
+
     fun onlineCounselorCount(): Int = _counselors.value.count { it.isAvailable }
 
     
