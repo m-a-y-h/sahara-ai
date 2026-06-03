@@ -167,9 +167,19 @@ fun SaharaApp() {
             .remove(KEY_USER_NAME)
             .remove(KEY_USER_EMAIL)
             .remove(KEY_USER_FULL_NAME)
+            // Assessment state is per-account; wipe it on sign-out so the
+            // next account on this device doesn't inherit a "completed" flag.
+            // It'll be rehydrated from RTDB on the next sign-in.
+            .remove(KEY_ASSESSMENT_SCORE)
+            .remove(KEY_ASSESSMENT_TIMESTAMP)
+            .remove(KEY_ASSESSMENT_EVER_COMPLETED)
             .putString("biometric_last_email", emailForBiometric)
             .putString("biometric_last_name",  nameForBiometric)
             .apply()
+        GlobalAppState.dast10Score = 0
+        GlobalAppState.lastAssessmentTimestamp = 0L
+        GlobalAppState.hasEverCompletedAssessment = false
+        GlobalAppState.hasCompletedInitialAssessment = false
         counselorKey = ""
         navController.navigate("welcome") { popUpTo(0) { inclusive = true } }
     }
@@ -237,28 +247,43 @@ fun SaharaApp() {
 
                     // Rehydrate assessment state from RTDB so users who sign
                     // out + back in (especially via a different provider) on
-                    // the same account aren't shown as "first-time" and asked
-                    // to retake. Sign-out wipes SharedPreferences locally;
-                    // the canonical record lives at /assessment/{uid}.
+                    // the same account aren't shown as "first-time" and
+                    // asked to retake. Critically, when RTDB has NO record
+                    // (fresh account or wiped backend) we CLEAR local prefs
+                    // and GlobalAppState — otherwise stale flags from a
+                    // previous device user would short-circuit the
+                    // mandatory-assessment gate and let a brand-new sign-up
+                    // walk straight into the dashboard.
                     runCatching {
                         val latest = RealtimeDBService.loadLatestAssessment(currentUser.uid)
-                        if (latest != null) {
-                            val score = (latest["score"] as? Int) ?: -1
-                            val ts = (latest["timestamp"] as? Long) ?: 0L
-                            if (score >= 0) {
-                                prefs.edit()
-                                    .putInt(KEY_ASSESSMENT_SCORE, score)
-                                    .putLong(KEY_ASSESSMENT_TIMESTAMP, ts)
-                                    .putBoolean(KEY_ASSESSMENT_EVER_COMPLETED, true)
-                                    .apply()
-                                GlobalAppState.dast10Score = score
-                                GlobalAppState.lastAssessmentTimestamp = ts
-                                GlobalAppState.hasEverCompletedAssessment = true
-                                val ageMs = if (ts > 0) System.currentTimeMillis() - ts else 0L
-                                if (ts == 0L || ageMs <= ASSESSMENT_VALIDITY_MS) {
-                                    GlobalAppState.hasCompletedInitialAssessment = true
-                                }
-                            }
+                        val cloudScore = (latest?.get("score") as? Int) ?: -1
+                        val cloudTs    = (latest?.get("timestamp") as? Long) ?: 0L
+                        if (latest != null && cloudScore >= 0) {
+                            prefs.edit()
+                                .putInt(KEY_ASSESSMENT_SCORE, cloudScore)
+                                .putLong(KEY_ASSESSMENT_TIMESTAMP, cloudTs)
+                                .putBoolean(KEY_ASSESSMENT_EVER_COMPLETED, true)
+                                .apply()
+                            GlobalAppState.dast10Score = cloudScore
+                            GlobalAppState.lastAssessmentTimestamp = cloudTs
+                            GlobalAppState.hasEverCompletedAssessment = true
+                            val ageMs = if (cloudTs > 0) System.currentTimeMillis() - cloudTs else 0L
+                            GlobalAppState.hasCompletedInitialAssessment =
+                                cloudTs == 0L || ageMs <= ASSESSMENT_VALIDITY_MS
+                        } else {
+                            // No cloud record for this UID — this is either a
+                            // fresh account or a backend wipe. Either way,
+                            // local state belongs to whoever was on this
+                            // device before, NOT this user.
+                            prefs.edit()
+                                .remove(KEY_ASSESSMENT_SCORE)
+                                .remove(KEY_ASSESSMENT_TIMESTAMP)
+                                .remove(KEY_ASSESSMENT_EVER_COMPLETED)
+                                .apply()
+                            GlobalAppState.dast10Score = 0
+                            GlobalAppState.lastAssessmentTimestamp = 0L
+                            GlobalAppState.hasEverCompletedAssessment = false
+                            GlobalAppState.hasCompletedInitialAssessment = false
                         }
                     }
 
