@@ -66,9 +66,16 @@ object ChatRepository {
         }
     }
 
-    
+
     suspend fun markRead(messageId: String): Result<Unit> =
         FirestoreService.markMessageRead(messageId)
+
+    suspend fun updateMessageContent(messageId: String, newContent: String): Result<Unit> =
+        FirestoreService.updateMessageContent(messageId, newContent)
+
+    /** Nukes every message in [sessionId]. Used by the "New chat" action. */
+    suspend fun clearSession(sessionId: String): Result<Unit> =
+        FirestoreService.deleteAllMessages(sessionId)
 
     
     

@@ -103,6 +103,27 @@ object FirestoreService {
             .await()
     }
 
+    suspend fun updateMessageContent(messageId: String, newContent: String): Result<Unit> = runCatching {
+        db.collection(COL_MESSAGES)
+            .document(messageId)
+            .update("content", newContent)
+            .await()
+    }
+
+    suspend fun deleteAllMessages(sessionId: String): Result<Unit> = runCatching {
+        val snap = db.collection(COL_MESSAGES)
+            .whereEqualTo("sessionId", sessionId)
+            .get()
+            .await()
+        if (snap.isEmpty) return@runCatching
+        // Firestore caps batches at 500 writes; chunk to stay well under it.
+        snap.documents.chunked(400).forEach { chunk ->
+            val batch = db.batch()
+            chunk.forEach { batch.delete(it.reference) }
+            batch.commit().await()
+        }
+    }
+
     suspend fun getMessagesOnce(sessionId: String): Result<List<FirestoreMessage>> = runCatching {
         db.collection(COL_MESSAGES)
             .whereEqualTo("sessionId", sessionId)

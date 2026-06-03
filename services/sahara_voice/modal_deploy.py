@@ -23,7 +23,12 @@ for ``gpu="T4"`` (or remove ``gpu`` entirely — CPU works for HuBERT-base at
 ~3 s per request).
 """
 
-from __future__ import annotations
+# NB: deliberately NO `from __future__ import annotations` here.
+# FastAPI inspects parameter annotations at decorator time; when annotations
+# are lazy strings (PEP 563) and the symbols (UploadFile, File) are imported
+# inside the endpoint factory rather than at module level, FastAPI can't
+# resolve the ForwardRef and crash-loops with "Invalid args for response
+# field! ... ForwardRef('UploadFile')". Resolved types fix it cleanly.
 
 import os
 

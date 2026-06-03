@@ -318,14 +318,24 @@ private fun ChatConversationScreen(
 
     val uid      = remember(chatViewModel) { chatViewModel.signedInUserId }
     val isAiMode = counselorId.isBlank()
+    // Computed up here so we can pass it to initSession for seeding the
+    // first persisted bubble. The screen also still reads `welcomeMsg`
+    // below for the signed-out fallback path.
+    val seedWelcomeText: String = if (isAiMode) {
+        if (isEnglish)
+            "Hello, $userName! I'm SAHARA, your AI companion. How are you feeling today?"
+        else
+            "Salam $userName! Main SAHARA, aapka AI assistant. Aaj aap kaisa feel kar rahe hain?"
+    } else ""
     LaunchedEffect(uid, isAiMode, counselorId, forUserId) {
         if (uid.isNotBlank())
             chatViewModel.initSession(
-                userId      = uid,
-                isAiChat    = isAiMode,
-                counselorId = counselorId,
-                targetUserId = forUserId,
+                userId        = uid,
+                isAiChat      = isAiMode,
+                counselorId   = counselorId,
+                targetUserId  = forUserId,
                 counselorName = counselorName,
+                aiWelcomeText = seedWelcomeText,
             )
     }
     val vibrator = remember {
@@ -341,12 +351,7 @@ private fun ChatConversationScreen(
     var isTyping by remember { mutableStateOf(false) }
     var isRecording by remember { mutableStateOf(false) }
     var recordingDuration by remember { mutableIntStateOf(0) }
-    val welcomeMsg = if (isAiMode) {
-        if (isEnglish)
-            "Hello, $userName! I'm SAHARA, your AI companion. How are you feeling today?"
-        else
-            "Salam $userName! Main SAHARA, aapka AI assistant. Aaj aap kaisa feel kar rahe hain?"
-    } else {
+    val welcomeMsg = if (isAiMode) seedWelcomeText else {
         if (isEnglish)
             "Hello! I'm $counselorName. How can I help you today?"
         else
@@ -528,6 +533,7 @@ private fun ChatConversationScreen(
     }
     val isCounselorSide = forUserId.isNotBlank()
     var showBlockConfirm by remember { mutableStateOf(false) }
+    var showNewChatConfirm by remember { mutableStateOf(false) }
     val openCounselorCall: (Boolean) -> Unit = { video ->
         if (counselorId.isBlank()) {
             context.showLocalizedToast(
@@ -614,6 +620,7 @@ private fun ChatConversationScreen(
                     identityVisible = identityVisible,
                     onAvatarClick = { if (!isAiMode) showProfileSheet = true },
                     onHistory = { showHistorySheet = true },
+                    onNewChat = { showNewChatConfirm = true },
                     onReport = {
                         chatViewModel.reportCurrentChat(
                             reason = "Chat concern",
@@ -725,35 +732,39 @@ private fun ChatConversationScreen(
                         if (secondsRecorded <= 0) return@lambda
                         val clip = voiceRecorder.stop().getOrNull()
                         if (clip == null || clip.bytes.isEmpty()) {
-                            transientMessages.add(
-                                ChatMessage(
-                                    text = if (isEnglish)
-                                        "Voice note was too short to analyse — try a slightly longer clip."
-                                    else
-                                        "Voice note bohat choti thi — thora lamba clip try karein.",
-                                    isBot = true,
-                                )
+                            context.showLocalizedToast(
+                                isEnglish,
+                                "Voice note was too short to analyse - try a slightly longer clip.",
+                                "Voice note bohat choti thi - thora lamba clip try karein.",
                             )
                             return@lambda
                         }
-                        val bubbleId = java.util.UUID.randomUUID().toString()
-                        transientMessages.add(
-                            ChatMessage(
-                                id = bubbleId,
-                                text = "Voice note ($secondsRecorded sec)",
-                                isBot = false,
-                                type = MessageType.VOICE_NOTE,
+                        // Voice flow lives entirely in the VM now: the user
+                        // bubble + analysis + AI reply all land in Firestore,
+                        // so a Force-Quit or navigation away no longer loses
+                        // the voice exchange (the old transientMessages path
+                        // was per-screen-instance state).
+                        if (isAiMode && uid.isNotBlank()) {
+                            isTyping = true
+                            chatViewModel.sendVoiceNoteToAI(
+                                secondsRecorded = secondsRecorded,
+                                audioBytes      = clip.bytes,
+                                mimeType        = clip.mimeType,
+                                isEnglish       = isEnglish,
                             )
-                        )
-
-                        isTyping = true
-                        chatViewModel.analyzeVoiceNote(
-                            bubbleId = bubbleId,
-                            secondsRecorded = secondsRecorded,
-                            audioBytes = clip.bytes,
-                            mimeType = clip.mimeType,
-                            isEnglish = isEnglish,
-                        )
+                        } else {
+                            // Counselor mode / signed-out fallback: keep old
+                            // local-bubble behaviour for now.
+                            val bubbleId = java.util.UUID.randomUUID().toString()
+                            transientMessages.add(
+                                ChatMessage(
+                                    id = bubbleId,
+                                    text = "Voice note ($secondsRecorded sec)",
+                                    isBot = false,
+                                    type = MessageType.VOICE_NOTE,
+                                )
+                            )
+                        }
                     },
                     isEnglish = isEnglish,
                     isDark = isDark
@@ -798,6 +809,33 @@ private fun ChatConversationScreen(
                 onDismiss = { showProfileSheet = false },
             )
         }
+    }
+
+    if (showNewChatConfirm) {
+        GlassAlertDialog(
+            hazeState = hazeState,
+            onDismissRequest = { showNewChatConfirm = false },
+            title = { Text(if (isEnglish) "Start a new chat?" else "Nayi chat shuru karein?") },
+            text = {
+                Text(
+                    if (isEnglish)
+                        "This clears the current AI conversation on this device and on the cloud. Your counselor chats and journal entries aren't affected."
+                    else
+                        "Is se AI ki maujooda guftugu device aur cloud dono se hat jayegi. Counselor ki chat aur journal mehfooz rahenge."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showNewChatConfirm = false
+                    chatViewModel.startNewAiChat()
+                }) { Text(if (isEnglish) "New chat" else "Nayi chat", color = SaharaCoral) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showNewChatConfirm = false }) {
+                    Text(if (isEnglish) "Cancel" else "Cancel")
+                }
+            }
+        )
     }
 
     if (showBlockConfirm) {
@@ -1452,6 +1490,7 @@ fun ChatTopBar(
     identityVisible: Boolean,
     onAvatarClick: () -> Unit,
     onHistory: () -> Unit,
+    onNewChat: () -> Unit = {},
     onReport: () -> Unit,
     onBlock: () -> Unit,
     onVoiceCall: () -> Unit,
@@ -1513,6 +1552,14 @@ fun ChatTopBar(
                                 onHistory()
                             },
                             leadingIcon = { Icon(Icons.Default.History, null) }
+                        )
+                        DropdownMenuItem(
+                            text = { Text(if (isEnglish) "New chat" else "Nayi chat") },
+                            onClick = {
+                                showMenu = false
+                                onNewChat()
+                            },
+                            leadingIcon = { Icon(Icons.Default.Refresh, null) }
                         )
                     } else {
                         DropdownMenuItem(

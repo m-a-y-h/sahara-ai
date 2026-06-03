@@ -318,7 +318,139 @@ fun SettingsScreen(
                 Spacer(Modifier.height(40.dp))
             }
         }
+
+        BiometricEnrollmentDialog(
+            state = settingsViewModel.biometricEnrollmentState,
+            isEnglish = isEnglish,
+            hazeState = hazeState,
+            onSubmit = { pwd -> settingsViewModel.completeBiometricEnrollment(context, pwd) },
+            onDismiss = { settingsViewModel.cancelBiometricEnrollment() },
+        )
     }
+}
+
+@Composable
+private fun BiometricEnrollmentDialog(
+    state: SettingsViewModel.BiometricEnrollmentState,
+    isEnglish: Boolean,
+    hazeState: HazeState,
+    onSubmit: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    if (state is SettingsViewModel.BiometricEnrollmentState.Idle) return
+
+    var password by remember(state) { mutableStateOf("") }
+    var passwordVisible by remember(state) { mutableStateOf(false) }
+    val submitting = state is SettingsViewModel.BiometricEnrollmentState.Submitting
+    val errorState = state as? SettingsViewModel.BiometricEnrollmentState.Error
+    val request = (state as? SettingsViewModel.BiometricEnrollmentState.Requested)
+    val submittingState = state as? SettingsViewModel.BiometricEnrollmentState.Submitting
+
+    // If we only have an Error and no prior context, treat dismiss as the only action.
+    if (errorState != null && request == null && submittingState == null) {
+        GlassAlertDialog(
+            hazeState = hazeState,
+            onDismissRequest = onDismiss,
+            title = { Text(if (isEnglish) "Can't enable biometric" else "Biometric on nahi ho saka") },
+            text = { Text(errorState.message) },
+            confirmButton = {
+                TextButton(onClick = onDismiss) {
+                    Text(if (isEnglish) "OK" else "Theek hai")
+                }
+            },
+        )
+        return
+    }
+
+    val email = request?.email ?: submittingState?.email ?: ""
+    val needsLink = request?.needsLink ?: true
+
+    GlassAlertDialog(
+        hazeState = hazeState,
+        onDismissRequest = { if (!submitting) onDismiss() },
+        title = {
+            Text(
+                if (isEnglish) "Enable fingerprint login"
+                else "Fingerprint login enable karein"
+            )
+        },
+        text = {
+            Column {
+                Text(
+                    text = if (needsLink) {
+                        if (isEnglish)
+                            "You signed in with Google. Set a password to seal behind your fingerprint — you'll still be able to sign in with Google as before."
+                        else
+                            "Aap Google se sign in hain. Fingerprint ke peeche rakhne ke liye ek password set karein — Google sign-in pehle ki tarah chalti rahegi."
+                    } else {
+                        if (isEnglish)
+                            "Re-enter your account password so we can seal it behind your fingerprint on this device."
+                        else
+                            "Apne account ka password dobara likhein takay hum ise device par fingerprint ke peeche rakh sakein."
+                    }
+                )
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    text = email,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it },
+                    singleLine = true,
+                    enabled = !submitting,
+                    label = {
+                        Text(if (isEnglish) "Password" else "Password")
+                    },
+                    visualTransformation = if (passwordVisible) {
+                        androidx.compose.ui.text.input.VisualTransformation.None
+                    } else {
+                        androidx.compose.ui.text.input.PasswordVisualTransformation()
+                    },
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                        keyboardType = androidx.compose.ui.text.input.KeyboardType.Password,
+                        imeAction = androidx.compose.ui.text.input.ImeAction.Done,
+                    ),
+                    trailingIcon = {
+                        IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                            Icon(
+                                if (passwordVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                contentDescription = null,
+                            )
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                if (errorState != null) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = errorState.message,
+                        color = SaharaCoral,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = !submitting && password.isNotBlank(),
+                onClick = { onSubmit(password) },
+            ) {
+                Text(
+                    if (submitting) (if (isEnglish) "Working..." else "Ho raha hai...")
+                    else (if (isEnglish) "Enable" else "Enable"),
+                    color = SaharaStrongGreen,
+                )
+            }
+        },
+        dismissButton = {
+            TextButton(enabled = !submitting, onClick = onDismiss) {
+                Text(if (isEnglish) "Cancel" else "Cancel")
+            }
+        },
+    )
 }
 
 @Composable

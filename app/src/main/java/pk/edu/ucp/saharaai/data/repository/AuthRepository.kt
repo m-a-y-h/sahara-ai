@@ -1,8 +1,10 @@
 package pk.edu.ucp.saharaai.data.repository
 
 import com.google.firebase.FirebaseNetworkException
+import com.google.firebase.auth.EmailAuthProvider
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseAuthException
+import kotlinx.coroutines.tasks.await
 
 enum class FirebaseAuthFailure {
     EMAIL_ALREADY_IN_USE,
@@ -43,6 +45,42 @@ class AuthRepository(
     fun currentUserEmail(): String? = auth.currentUser?.email
 
     fun hasAuthenticatedSession(): Boolean = auth.currentUser != null
+
+    /** True if the signed-in Firebase user has an email/password credential
+     *  attached. Google-only users return false until they link a password
+     *  via the biometric-enable flow. */
+    fun hasPasswordProvider(): Boolean =
+        auth.currentUser?.providerData?.any { it.providerId == EmailAuthProvider.PROVIDER_ID } == true
+
+    /** Adds an email/password credential to the currently signed-in user
+     *  (e.g. a Google account that has no password yet). After this returns
+     *  successfully the same Firebase user can sign in with either provider.
+     *  Maps Firebase failures into the existing [FirebaseAuthFailure] enum so
+     *  callers don't need to deal with raw exception types. */
+    suspend fun linkEmailPassword(email: String, password: String): FirebaseAuthFailure? {
+        val user = auth.currentUser ?: return FirebaseAuthFailure.UNKNOWN
+        return try {
+            val cred = EmailAuthProvider.getCredential(email, password)
+            user.linkWithCredential(cred).await()
+            null
+        } catch (e: Exception) {
+            mapFailure(e)
+        }
+    }
+
+    /** Re-verifies the user's password without doing a full sign-out/in. Used
+     *  when re-arming the biometric vault for a user who already has a
+     *  password provider but cleared the vault earlier. */
+    suspend fun reauthenticateWithPassword(email: String, password: String): FirebaseAuthFailure? {
+        val user = auth.currentUser ?: return FirebaseAuthFailure.UNKNOWN
+        return try {
+            val cred = EmailAuthProvider.getCredential(email, password)
+            user.reauthenticate(cred).await()
+            null
+        } catch (e: Exception) {
+            mapFailure(e)
+        }
+    }
 
     private fun mapFailure(error: Exception?): FirebaseAuthFailure {
         val message = error?.message.orEmpty()

@@ -102,13 +102,17 @@ class ChatViewModel : ViewModel() {
     
     private var counselorDisplayName: String = ""
 
-    
+    /** Last welcome text that was seeded into the AI session, so `startNewAiChat()`
+     *  can re-seed an identical opener without the screen having to remember it. */
+    private var lastAiWelcomeText: String = ""
+
     fun initSession(
         userId: String,
         isAiChat: Boolean,
         counselorId: String = "",
-        targetUserId: String = "",     
-        counselorName: String = ""     
+        targetUserId: String = "",
+        counselorName: String = "",
+        aiWelcomeText: String = "",
     ) {
         messageListenJob?.cancel()
         identityListenJob?.cancel()
@@ -130,6 +134,26 @@ class ChatViewModel : ViewModel() {
         if (isAiChat) {
             isRealtimeChat = false
             currentSessionId = ChatRepository.aiSessionId(userId)
+            lastAiWelcomeText = aiWelcomeText
+            // Seed the welcome bubble as the first persisted message if the
+            // session is empty. Doing it here (not in Compose) means the
+            // welcome survives screen recreation, app restart, and the
+            // Firestore snapshot can't blow it away on the first real send.
+            if (aiWelcomeText.isNotBlank()) {
+                viewModelScope.launch {
+                    val existing = ChatRepository.getMessagesOnce(currentSessionId)
+                        .getOrDefault(emptyList())
+                    if (existing.isEmpty()) {
+                        ChatRepository.sendMessage(
+                            sessionId   = currentSessionId,
+                            senderId    = "ai",
+                            receiverId  = userId,
+                            content     = aiWelcomeText,
+                            isFromAI    = true,
+                        )
+                    }
+                }
+            }
             messageListenJob = viewModelScope.launch {
                 ChatRepository.getMessagesFlow(currentSessionId)
                     .catch { e -> Log.w(TAG, "AI messages flow error", e) }
@@ -396,6 +420,135 @@ class ChatViewModel : ViewModel() {
         }
     }
 
+    /** Wipes the current AI session's messages from Firestore and re-seeds the
+     *  welcome bubble. Used by the chat top-bar "New chat" action. */
+    fun startNewAiChat() {
+        if (isRealtimeChat || currentSessionId.isBlank()) return
+        val uid = currentUserId
+        if (uid.isBlank()) return
+        val welcome = lastAiWelcomeText
+        viewModelScope.launch {
+            _uiState.value = ChatUiState.Sending
+            ChatRepository.clearSession(currentSessionId)
+                .onSuccess {
+                    _aiMetadata.value = emptyMap()
+                    _saharaUnreachable.value = false
+                    if (welcome.isNotBlank()) {
+                        ChatRepository.sendMessage(
+                            sessionId  = currentSessionId,
+                            senderId   = "ai",
+                            receiverId = uid,
+                            content    = welcome,
+                            isFromAI   = true,
+                        )
+                    }
+                    _uiState.value = ChatUiState.Idle
+                }
+                .onFailure {
+                    _uiState.value = ChatUiState.Error(it.message ?: "Could not reset chat.")
+                }
+        }
+    }
+
+    /** Records a user voice note as a real Firestore message (so it survives
+     *  navigation + app restart), runs the analyzer, then either rewrites the
+     *  user bubble with the tone label and writes an AI reply, or writes a
+     *  failure reply if the analyzer is unreachable.
+     *
+     *  Returns immediately; updates flow through the existing messages
+     *  listener.
+     *
+     *  Replaces the old `analyzeVoiceNote(bubbleId, ...)` flow that kept voice
+     *  notes in Compose `transientMessages` only and lost them on navigation.
+     */
+    fun sendVoiceNoteToAI(
+        secondsRecorded: Int,
+        audioBytes: ByteArray,
+        mimeType: String,
+        isEnglish: Boolean,
+    ) {
+        val uid = auth.currentUser?.uid ?: return
+        if (currentSessionId.isBlank()) return
+        viewModelScope.launch {
+            _isTyping.value = true
+            val placeholderText = if (isEnglish)
+                "Voice note ($secondsRecorded sec) - analyzing..."
+            else
+                "Voice note ($secondsRecorded sec) - sun raha hoon..."
+            val userMsgIdResult = ChatRepository.sendMessage(
+                sessionId   = currentSessionId,
+                senderId    = uid,
+                receiverId  = "ai",
+                content     = placeholderText,
+                isFromAI    = false,
+                messageType = "VOICE_NOTE",
+            )
+            val userMsgId = userMsgIdResult.getOrNull()
+
+            SaharaVoiceRepository.analyze(audioBytes, mimeType).fold(
+                onSuccess = { response ->
+                    val level = VoiceLevel.fromWire(response.screening?.level)
+                    val topClass = response.screening?.topScreeningClass ?: "neutral"
+                    val labelSuffix = when (level) {
+                        VoiceLevel.HIGH -> if (isEnglish) "tone: $topClass (high distress)" else "tone: $topClass (zyada distress)"
+                        VoiceLevel.ELEVATED -> if (isEnglish) "tone: $topClass (elevated)" else "tone: $topClass (barhi hui)"
+                        VoiceLevel.NEUTRAL -> if (isEnglish) "tone: steady" else "tone: theek"
+                        VoiceLevel.UNCERTAIN -> if (isEnglish) "tone: couldn't read" else "tone: saaf nahi pata laga"
+                        VoiceLevel.UNKNOWN -> if (isEnglish) "tone: unknown" else "tone: pata nahi"
+                    }
+                    val reply = when (level) {
+                        VoiceLevel.HIGH -> if (isEnglish)
+                            "Your voice sounds heavy right now. Sahara counselors are available, or call 1122/115 if it's urgent. Want me to open the counselor list?"
+                        else
+                            "Awaz mein boj sun raha hoon. Sahara counselor available hain, ya urgent ho to 1122/115 call karein. Counselor list kholoon?"
+                        VoiceLevel.ELEVATED -> if (isEnglish)
+                            "I can hear some tension. Want to try a 60-second breathing exercise, or tell me what's on your mind?"
+                        else
+                            "Thori tension sun raha hoon. 60-second saans ki mashq try karein ya batayein kya chal raha hai?"
+                        VoiceLevel.NEUTRAL -> if (isEnglish)
+                            "Your voice sounds steady. Tell me more about today - anything I should know?"
+                        else
+                            "Awaz steady lag rahi hai. Aaj ke baray mein batayein - kuch important?"
+                        VoiceLevel.UNCERTAIN, VoiceLevel.UNKNOWN -> if (isEnglish)
+                            "I couldn't read the clip cleanly. Try a quieter spot, or just type what's going on."
+                        else
+                            "Clip saaf nahi samjhi. Khamosh jagah mein dobara try karein, ya type kar dein."
+                    }
+                    val finalUserBubble = "Voice note ($secondsRecorded sec) - $labelSuffix"
+                    if (userMsgId != null) {
+                        ChatRepository.updateMessageContent(userMsgId, finalUserBubble)
+                    }
+                    ChatRepository.sendMessage(
+                        sessionId   = currentSessionId,
+                        senderId    = "ai",
+                        receiverId  = uid,
+                        content     = reply,
+                        isFromAI    = true,
+                    )
+                },
+                onFailure = {
+                    val failureUserBubble = "Voice note ($secondsRecorded sec)"
+                    if (userMsgId != null) {
+                        ChatRepository.updateMessageContent(userMsgId, failureUserBubble)
+                    }
+                    val failureReply = if (isEnglish)
+                        "Couldn't reach the voice analyser right now. Please type how you're feeling."
+                    else
+                        "Voice analyser tak abhi raabta nahi ho saka. Type kar ke batayein."
+                    ChatRepository.sendMessage(
+                        sessionId   = currentSessionId,
+                        senderId    = "ai",
+                        receiverId  = uid,
+                        content     = failureReply,
+                        isFromAI    = true,
+                    )
+                },
+            )
+            _isTyping.value = false
+        }
+    }
+
+    @Deprecated("Use sendVoiceNoteToAI which persists voice notes to Firestore.")
     fun analyzeVoiceNote(
         bubbleId: String,
         secondsRecorded: Int,
