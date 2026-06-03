@@ -52,11 +52,11 @@ fun GlassOverlay(
     dismissOnScrimTap: Boolean = true,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    val glassStyle = SaharaHazeMaterials.defaultGlass(isDark)
+    val glassStyle = SaharaHazeMaterials.popupGlass(isDark)
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.35f))
+            .background(Color.Black.copy(alpha = 0.45f))
             .pointerInput(dismissOnScrimTap) {
                 detectTapGestures(onTap = { if (dismissOnScrimTap) onDismiss() })
             },
@@ -69,13 +69,23 @@ fun GlassOverlay(
                 // forms, avatar grids, time pickers) never overflows the screen.
                 .heightIn(max = 560.dp)
                 .clip(RoundedCornerShape(24.dp))
+                // Opaque fallback layer so the card still reads as a real
+                // surface on devices where the hardware blur path falls back
+                // to a no-op. On devices that DO blur, this colour sits
+                // behind the haze effect and just tints it slightly more —
+                // matching how Material 3's `surfaceContainerHigh` looks at
+                // a high tonal elevation.
+                .background(
+                    if (isDark) Color(0xFF1A1F22).copy(alpha = 0.75f)
+                    else Color.White.copy(alpha = 0.75f)
+                )
                 .hazeEffect(state = hazeState) {
                     inputScale = HazeInputScale.Auto
                     blurEffect { style = glassStyle }
                 }
                 .border(
                     1.dp,
-                    Color.White.copy(alpha = if (isDark) 0.18f else 0.35f),
+                    Color.White.copy(alpha = if (isDark) 0.18f else 0.55f),
                     RoundedCornerShape(24.dp),
                 )
                 .pointerInput(Unit) { detectTapGestures(onTap = {}) }

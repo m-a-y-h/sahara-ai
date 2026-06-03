@@ -200,26 +200,33 @@ fun ProfileScreen(
                     .verticalScroll(rememberScrollState()),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
+                // Header layout matches the canonical pattern used elsewhere
+                // (e.g. GameRecoveryScreen / ActivityLogScreen): back button
+                // sits inline with the title at the top, and the optional
+                // subtitle drops to its own row below — so the back arrow
+                // no longer slides downward to center between two text lines.
+                Spacer(Modifier.statusBarsPadding())
                 Row(
-                    modifier = Modifier.fillMaxWidth().statusBarsPadding(),
+                    modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     HazeBackButton(onClick = onNavigateBack, hazeState = hazeState)
                     Spacer(Modifier.width(16.dp))
-                    Column {
-                        Text(
-                            text = if (isEnglish) "Profile" else "Profile",
-                            style = MaterialTheme.typography.headlineMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = SaharaStrongGreen
-                        )
-                        Text(
-                            text = if (isEnglish) "Account and safety preferences" else "Account aur safety preferences",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
+                    Text(
+                        text = if (isEnglish) "Profile" else "Profile",
+                        style = MaterialTheme.typography.headlineMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = SaharaStrongGreen
+                    )
                 }
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    text = if (isEnglish) "Account and safety preferences"
+                           else "Account aur safety preferences",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.fillMaxWidth().padding(start = 56.dp),
+                )
                 Spacer(Modifier.height(18.dp))
 
                 ProfileAvatarSection(

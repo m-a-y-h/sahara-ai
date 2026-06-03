@@ -23,6 +23,24 @@ object SaharaHazeMaterials {
         )
     }
 
+    /** A heavier, more opaque variant for modal popups. Bigger blur radius
+     *  and a stronger tint so the card reads as proper frosted glass — and so
+     *  the popup still looks like a real surface on devices where the
+     *  hardware blur path falls back to a tint-only render. */
+    @Composable
+    fun popupGlass(isDark: Boolean = isSystemInDarkTheme()): HazeBlurStyle {
+        return HazeBlurStyle(
+            blurRadius = 45.dp,
+            noiseFactor = 0.06f,
+            colorEffects = listOf(
+                HazeColorEffect.tint(
+                    if (isDark) Color.Black.copy(alpha = 0.55f)
+                    else Color.White.copy(alpha = 0.70f)
+                )
+            )
+        )
+    }
+
     @Composable
     fun selectedGlass(isDark: Boolean = isSystemInDarkTheme()): HazeBlurStyle {
         return HazeBlurStyle(

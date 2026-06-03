@@ -377,7 +377,11 @@ private fun ChatConversationScreen(
         ChatMessage(
             id = msg.messageId,
             text = msg.content,
-            isBot = if (isAiMode) msg.isFromAI else msg.senderId != uid,
+            // Treat the seeded welcome and every AI reply as bot-side
+            // regardless of how Firestore deserialised `isFromAI`. senderId
+            // == "ai" is always assistant-sourced — written by the VM, never
+            // by a real user — so it's a safe ground truth here.
+            isBot = if (isAiMode) (msg.isFromAI || msg.senderId == "ai") else msg.senderId != uid,
             timestamp = tsMillis,
             type = localType,
             options = storedMetadata?.quickReplies?.takeIf { it.isNotEmpty() },
@@ -1217,12 +1221,15 @@ private fun TwoFingerGestureHintOverlay(
             val transition = rememberInfiniteTransition(label = "twoFingerHint")
             val start = if (isAiMode) 34f else -34f
             val end = -start
+            // Reverse (not Restart) so the dots actually slide back and
+            // forth — Restart snaps them to the start each cycle which made
+            // the animation look static at 60fps.
             val offset by transition.animateFloat(
                 initialValue = start,
                 targetValue = end,
                 animationSpec = infiniteRepeatable(
                     animation = tween(900, easing = FastOutSlowInEasing),
-                    repeatMode = RepeatMode.Restart,
+                    repeatMode = RepeatMode.Reverse,
                 ),
                 label = "twoFingerHintOffset",
             )
