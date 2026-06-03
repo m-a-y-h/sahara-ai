@@ -210,7 +210,11 @@ fun SaharaApp() {
         navController.navigate("welcome") { popUpTo(0) { inclusive = true } }
     }
 
-    fun routeAfterAuth(emailHint: String = "", nameHint: String = "") {
+    fun routeAfterAuth(
+        emailHint: String = "",
+        nameHint: String = "",
+        skipBackupPasswordCheck: Boolean = false,
+    ) {
         val currentUser = Firebase.auth.currentUser
         if (currentUser == null) {
             navController.navigate("welcome") { popUpTo(0) { inclusive = true } }
@@ -230,8 +234,58 @@ fun SaharaApp() {
                     applyUserState(dbEmail, dbName)
                     runCatching { Firebase.messaging.token.await() }
                         .onSuccess { token -> RealtimeDBService.saveDeviceToken(currentUser.uid, token) }
-                    navController.navigate(if (state.onboardingCompleted) "dashboard" else "onboarding") {
-                        popUpTo("welcome") { inclusive = true }
+
+                    // Rehydrate assessment state from RTDB so users who sign
+                    // out + back in (especially via a different provider) on
+                    // the same account aren't shown as "first-time" and asked
+                    // to retake. Sign-out wipes SharedPreferences locally;
+                    // the canonical record lives at /assessment/{uid}.
+                    runCatching {
+                        val latest = RealtimeDBService.loadLatestAssessment(currentUser.uid)
+                        if (latest != null) {
+                            val score = (latest["score"] as? Int) ?: -1
+                            val ts = (latest["timestamp"] as? Long) ?: 0L
+                            if (score >= 0) {
+                                prefs.edit()
+                                    .putInt(KEY_ASSESSMENT_SCORE, score)
+                                    .putLong(KEY_ASSESSMENT_TIMESTAMP, ts)
+                                    .putBoolean(KEY_ASSESSMENT_EVER_COMPLETED, true)
+                                    .apply()
+                                GlobalAppState.dast10Score = score
+                                GlobalAppState.lastAssessmentTimestamp = ts
+                                GlobalAppState.hasEverCompletedAssessment = true
+                                val ageMs = if (ts > 0) System.currentTimeMillis() - ts else 0L
+                                if (ts == 0L || ageMs <= ASSESSMENT_VALIDITY_MS) {
+                                    GlobalAppState.hasCompletedInitialAssessment = true
+                                }
+                            }
+                        }
+                    }
+
+                    // Google-only accounts have no password attached, so the
+                    // keystore vault has nothing to seal and the biometric
+                    // chip on LoginScreen never appears. Detour them once to
+                    // a "set a backup password" screen — linkWithCredential
+                    // adds the password to the SAME Firebase user, so Google
+                    // sign-in keeps working AND email/password + biometric
+                    // become available. Skippable.
+                    val hasPasswordProvider = currentUser.providerData.any {
+                        it.providerId == com.google.firebase.auth.EmailAuthProvider.PROVIDER_ID
+                    }
+                    val needsBackupPassword =
+                        !skipBackupPasswordCheck &&
+                        !hasPasswordProvider &&
+                        dbEmail.isNotBlank()
+                    if (needsBackupPassword) {
+                        navController.navigate(
+                            "backup-password-setup/${state.onboardingCompleted}"
+                        ) {
+                            popUpTo("welcome") { inclusive = true }
+                        }
+                    } else {
+                        navController.navigate(if (state.onboardingCompleted) "dashboard" else "onboarding") {
+                            popUpTo("welcome") { inclusive = true }
+                        }
                     }
                 }
                 .onFailure {
@@ -407,6 +461,21 @@ fun SaharaApp() {
                     },
                     onNavigateBack = { navController.popBackStack() },
                     isEnglish = isEnglish
+                )
+            }
+
+            composable("backup-password-setup/{onboardingCompleted}") { backStackEntry ->
+                val onboardingCompleted = backStackEntry.arguments
+                    ?.getString("onboardingCompleted")?.toBoolean() ?: false
+                BackupPasswordSetupScreen(
+                    email = userEmail.ifBlank { Firebase.auth.currentUser?.email.orEmpty() },
+                    onboardingCompleted = onboardingCompleted,
+                    isEnglish = isEnglish,
+                    onContinue = { onbDone ->
+                        navController.navigate(if (onbDone) "dashboard" else "onboarding") {
+                            popUpTo("welcome") { inclusive = true }
+                        }
+                    },
                 )
             }
 
