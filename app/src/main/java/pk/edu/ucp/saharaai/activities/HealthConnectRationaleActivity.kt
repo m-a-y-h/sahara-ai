@@ -1,4 +1,4 @@
-package pk.edu.ucp.saharaai
+package pk.edu.ucp.saharaai.activities
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity

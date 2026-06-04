@@ -12,7 +12,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import android.R as AndroidR
-import pk.edu.ucp.saharaai.MainActivity
+import pk.edu.ucp.saharaai.activities.MainActivity
 
 
 object NotificationHelper {

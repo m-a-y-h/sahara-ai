@@ -1,4 +1,4 @@
-package pk.edu.ucp.saharaai
+package pk.edu.ucp.saharaai.activities
 
 import android.content.Intent
 import android.os.Bundle
@@ -13,6 +13,7 @@ import androidx.fragment.app.FragmentActivity
 import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
 import eightbitlab.com.blurview.BlurTarget
+import pk.edu.ucp.saharaai.SaharaApp
 import pk.edu.ucp.saharaai.ui.theme.SaharaAiTheme
 import pk.edu.ucp.saharaai.utils.AssessmentCache
 import pk.edu.ucp.saharaai.utils.BlueskyOAuthCallbackStore

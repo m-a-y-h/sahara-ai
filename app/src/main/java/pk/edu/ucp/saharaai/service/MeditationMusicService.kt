@@ -15,7 +15,7 @@ import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
-import pk.edu.ucp.saharaai.MainActivity
+import pk.edu.ucp.saharaai.activities.MainActivity
 
 
 class MeditationMusicService : Service() {

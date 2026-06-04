@@ -70,7 +70,7 @@
         </service>
 
         <activity
-            android:name=".MainActivity"
+            android:name=".activities.MainActivity"
             android:exported="true"
             android:launchMode="singleTask"
             android:theme="@style/Theme.SaharaAi"
@@ -119,7 +119,7 @@
         </activity>
 
         <activity
-            android:name=".HealthConnectRationaleActivity"
+            android:name=".activities.HealthConnectRationaleActivity"
             android:exported="true">
             <intent-filter>
                 <action android:name="androidx.health.ACTION_SHOW_PERMISSIONS_RATIONALE" />
@@ -130,7 +130,7 @@
             android:name=".ViewPermissionUsageActivity"
             android:exported="true"
             android:permission="android.permission.START_VIEW_PERMISSION_USAGE"
-            android:targetActivity=".HealthConnectRationaleActivity">
+            android:targetActivity=".activities.HealthConnectRationaleActivity">
             <intent-filter>
                 <action android:name="android.intent.action.VIEW_PERMISSION_USAGE" />
                 <category android:name="android.intent.category.HEALTH_PERMISSIONS" />

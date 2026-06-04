@@ -26,7 +26,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import pk.edu.ucp.saharaai.MainActivity
+import pk.edu.ucp.saharaai.activities.MainActivity
 import pk.edu.ucp.saharaai.data.repository.AutomaticSleepLogRepository
 import pk.edu.ucp.saharaai.data.repository.SLEEP_ACTIGRAPHY_NOTIFICATION_CHANNEL_ID
 import pk.edu.ucp.saharaai.data.repository.SleepActigraphyEstimator
