@@ -1,7 +1,11 @@
-package pk.edu.ucp.saharaai
+package pk.edu.ucp.saharaai.utils
 
 import android.content.Context
 import android.content.SharedPreferences
+import pk.edu.ucp.saharaai.ASSESSMENT_VALIDITY_MS
+import pk.edu.ucp.saharaai.KEY_ASSESSMENT_EVER_COMPLETED
+import pk.edu.ucp.saharaai.KEY_ASSESSMENT_SCORE
+import pk.edu.ucp.saharaai.KEY_ASSESSMENT_TIMESTAMP
 import pk.edu.ucp.saharaai.ui.screens.GlobalAppState
 
 data class CachedAssessment(

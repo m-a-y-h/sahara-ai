@@ -8,7 +8,7 @@ import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
 import kotlinx.coroutines.launch
 import pk.edu.ucp.saharaai.ASSESSMENT_VALIDITY_MS
-import pk.edu.ucp.saharaai.AssessmentCache
+import pk.edu.ucp.saharaai.utils.AssessmentCache
 import pk.edu.ucp.saharaai.data.remote.RealtimeDBService
 import pk.edu.ucp.saharaai.data.repository.RiskProfileRepository
 import pk.edu.ucp.saharaai.ui.screens.GlobalAppState
