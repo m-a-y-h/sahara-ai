@@ -1,7 +1,11 @@
 package pk.edu.ucp.saharaai.data.remote
 
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.net.Uri
+import android.util.Base64
 import android.util.Log
+import com.google.firebase.FirebaseApp
 import com.google.firebase.database.DataSnapshot
 import com.google.firebase.database.DatabaseError
 import com.google.firebase.database.DatabaseReference
@@ -10,7 +14,10 @@ import com.google.firebase.database.MutableData
 import com.google.firebase.database.ServerValue
 import com.google.firebase.database.Transaction
 import com.google.firebase.database.ValueEventListener
-import com.google.firebase.storage.FirebaseStorage
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.io.ByteArrayOutputStream
+import java.io.IOException
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
@@ -2685,10 +2692,64 @@ object RealtimeDBService {
         return digest.joinToString("") { "%02x".format(it) }
     }
 
+    /**
+     * Inlines an upload as a `data:image/jpeg;base64,...` URI stored
+     * directly in the surrounding RTDB record.
+     *
+     * Why not Firebase Storage: Storage was moved behind the Blaze
+     * pricing plan in 2024, and this is a free-tier (Spark) FYP. We
+     * still want the same call sites (`uploadEvidence(path, uri)`) to
+     * return a single string that downstream readers (admin dashboard
+     * AsyncImage, etc.) can render as an image, so we keep the
+     * signature and swap the implementation.
+     *
+     * Anatomy:
+     *  - Decode the user-selected image, downscale to <= 1280px on the
+     *    longest edge, JPEG-compress at quality 60. A typical phone
+     *    photo lands at ~300-600 KB raw and ~400-800 KB base64 —
+     *    comfortably under RTDB's 10 MB per-value limit and well below
+     *    the per-request 16 MB write cap even when several documents
+     *    are attached to the same record.
+     *  - Coil's `AsyncImage` natively understands `data:` URIs, so the
+     *    admin dashboard / profile screens don't need any rendering
+     *    changes — they were already loading whatever-string the
+     *    Storage version returned.
+     *  - PDFs and other non-image MIME types are NOT supported on this
+     *    path. Callers should validate input at pick-time; if a non-
+     *    image slips through, BitmapFactory will return null and we
+     *    surface an IOException so the form-level error UX kicks in.
+     *
+     * The [path] argument is kept for source-compat with old call
+     * sites and is currently ignored (records live inline now, not
+     * keyed by path). Drop the argument once all callers are updated.
+     */
     private suspend fun uploadEvidence(path: String, uri: Uri): String {
-        val reference = FirebaseStorage.getInstance().reference.child("$path/upload")
-        reference.putFile(uri).await()
-        return reference.downloadUrl.await().toString()
+        return encodeImageAsDataUri(uri)
+    }
+
+    private suspend fun encodeImageAsDataUri(uri: Uri): String = withContext(Dispatchers.IO) {
+        val ctx = FirebaseApp.getInstance().applicationContext
+        val raw = ctx.contentResolver.openInputStream(uri)
+            ?.use { it.readBytes() }
+            ?: throw IOException("Could not open upload stream.")
+        val source = BitmapFactory.decodeByteArray(raw, 0, raw.size)
+            ?: throw IOException("Unsupported file type — please upload an image (JPEG/PNG).")
+        val maxDim = 1280
+        val scaled = if (source.width <= maxDim && source.height <= maxDim) {
+            source
+        } else {
+            val ratio = maxDim.toFloat() / maxOf(source.width, source.height)
+            val w = (source.width * ratio).toInt().coerceAtLeast(1)
+            val h = (source.height * ratio).toInt().coerceAtLeast(1)
+            Bitmap.createScaledBitmap(source, w, h, true).also {
+                if (it !== source) source.recycle()
+            }
+        }
+        val baos = ByteArrayOutputStream()
+        scaled.compress(Bitmap.CompressFormat.JPEG, 60, baos)
+        if (scaled !== source) scaled.recycle()
+        val b64 = Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP)
+        "data:image/jpeg;base64,$b64"
     }
 
     private fun paymentRequestsFlow(
