@@ -38,6 +38,13 @@ object RealtimeDBService {
     private val db get() = FirebaseDatabase.getInstance()
     private const val YOUTUBE_API_DATA_RETENTION_MS = 30L * 24L * 60L * 60L * 1000L
 
+    // Characters Firebase Realtime Database forbids inside a path segment.
+    // When validation fails the SDK throws "Invalid Firebase database
+    // path: ... Firebase Database paths must not contain '.', '#', '$',
+    // '[', or ']'" — the source of the cryptic "invalid token in path"
+    // crash the assessment save was hitting.
+    private val CHARS_INVALID_IN_RTDB_KEY = setOf('.', '#', '$', '[', ']', '/')
+
     data class PostAuthUserState(
         val isBlocked: Boolean,
         val blockReason: String = "",
@@ -1423,11 +1430,24 @@ object RealtimeDBService {
 
     
     private suspend fun requireRealtimeConnection() {
-        val connected = db.getReference(".info/connected")
-            .get()
-            .await()
-            .getValue(Boolean::class.java) == true
-        require(connected) { "Internet connection is required to save the assessment." }
+        // Best-effort online check. Keep it non-fatal: RTDB has its own offline
+        // queue so a transient null/false reading from .info/connected
+        // shouldn't block a save that would otherwise succeed once the
+        // socket reconnects. We only throw when the check itself raised a
+        // real exception (e.g. project misconfigured).
+        val ok = runCatching {
+            db.getReference(".info/connected")
+                .get()
+                .await()
+                .getValue(Boolean::class.java) == true
+        }.onFailure {
+            Log.w("RealtimeDBService", ".info/connected probe threw", it)
+        }.getOrNull()
+        if (ok == false) {
+            // Probe returned a definitive "not connected". Surface that with a
+            // clear message; the snackbar will read it back as-is.
+            throw IllegalStateException("Internet connection is required to save the assessment.")
+        }
     }
 
     private fun parseAssessmentEntry(child: DataSnapshot): Map<String, Any>? {
@@ -1452,11 +1472,22 @@ object RealtimeDBService {
         score: Int,
         riskLevel: String,
         date: String,
-        answers: Map<Int, Triple<String, String, Boolean>>   
+        answers: Map<Int, Triple<String, String, Boolean>>
     ): Result<Long> = runCatching {
         require(uid.isNotBlank()) { "Missing user id." }
+        // Reject UIDs containing characters RTDB forbids in path keys.
+        // Real Firebase UIDs are alphanumeric-only, but a corrupted auth
+        // state could otherwise surface as the cryptic "invalid token in
+        // path" Firebase error which gave us no clue where to look.
+        require(uid.none { it in CHARS_INVALID_IN_RTDB_KEY }) {
+            "Sign-in returned an invalid user id; please sign out and back in."
+        }
         requireRealtimeConnection()
-        val latest = loadLatestAssessmentResult(uid).getOrThrow()
+        // Best-effort 6-month-lock pre-check. If the read itself fails for
+        // any reason, just skip the gate and let the write attempt proceed —
+        // we'd rather permit an extra save than block the user behind a
+        // network hiccup.
+        val latest = loadLatestAssessmentResult(uid).getOrNull()
         val latestTimestamp = latest?.get("timestamp") as? Long ?: 0L
         if (latestTimestamp > 0L && System.currentTimeMillis() - latestTimestamp <= ASSESSMENT_VALIDITY_MS) {
             throw IllegalStateException(
@@ -1489,9 +1520,13 @@ object RealtimeDBService {
         val savedTimestamp = ref.child("timestamp").get().await().getValue(Long::class.java) ?: 0L
         check(savedTimestamp > 0L) { "Server timestamp could not be verified." }
         savedTimestamp
+    }.onFailure {
+        // Log the full path + exception so the next "invalid token in path"
+        // (or whatever Firebase throws) is diagnosable from logcat instead
+        // of just the snackbar's truncated string.
+        Log.e("RealtimeDBService", "saveAssessment failed (uid='$uid', quizType='$quizType')", it)
     }
 
-    
     suspend fun loadLatestAssessmentResult(uid: String): Result<Map<String, Any>?> = runCatching {
         val snap = db.getReference("assessment").child(uid)
             .orderByChild("timestamp").limitToLast(1).get().await()

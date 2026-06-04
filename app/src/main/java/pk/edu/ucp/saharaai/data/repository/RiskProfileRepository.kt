@@ -64,6 +64,13 @@ object RiskProfileRepository {
             val startsIso = isoUtc(startsAt)
             val endsIso = isoUtc(endsAt)
 
+            // Document IDs must avoid characters that have tripped "invalid
+            // token in path" on some Firestore SDK paths — notably `:` and
+            // `+` from the ISO-8601 timezone suffix (`2026-06-04T01:11:32+00:00`).
+            // Pure epoch-millis strings are guaranteed to be safe.
+            val historyDocId = completedAt.toString()
+            val cycleDocId = startsAt.toString()
+
             val userRef = firestore.collection("users").document(uid)
             val batch = firestore.batch()
             batch.set(
@@ -110,7 +117,7 @@ object RiskProfileRepository {
                 SetOptions.merge(),
             )
             batch.set(
-                userRef.collection("risk_history").document(completedIso),
+                userRef.collection("risk_history").document(historyDocId),
                 mapOf(
                     "user_id" to uid,
                     "week_index" to 0,
@@ -133,7 +140,8 @@ object RiskProfileRepository {
                 userRef.collection("lifecycle").document("current"),
                 mapOf(
                     "assessment_required" to false,
-                    "active_cycle_id" to startsIso,
+                    "active_cycle_id" to cycleDocId,
+                    "active_cycle_iso" to startsIso,
                     "monitoring_starts_at" to startsIso,
                     "monitoring_ends_at" to endsIso,
                     "updated_at" to isoUtc(System.currentTimeMillis()),
@@ -142,7 +150,7 @@ object RiskProfileRepository {
             )
             batch.commit().await()
             Unit
-        }
+        }.onFailure { android.util.Log.e("RiskProfileRepo", "registerAssessmentCycle failed", it) }
     }
 
     suspend fun loadProfile(): Result<RiskProfile?> {
