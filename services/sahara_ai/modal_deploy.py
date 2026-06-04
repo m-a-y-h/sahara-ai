@@ -29,11 +29,23 @@ import re
 import modal
 
 APP_NAME = "sahara-ai"
-DEFAULT_MODEL_ID = "enstazao/Qalb-1.0-8B-Instruct"
-# featherless-ai is the only HF provider that lists Qalb-1.0-8B-Instruct as
-# `live` in the model's inferenceProviderMapping; the hf-inference router
-# and every other provider return 400 "Model not supported". Hit featherless
-# through HF's router so we still authenticate with the HF token.
+# Default model swapped from enstazao/Qalb-1.0-8B-Instruct to Meta's
+# Llama-3.1-70B-Instruct (also served by featherless via HF's router).
+# Qalb is an 8B Urdu fine-tune that was getting genuinely confused by
+# colloquial Roman Urdu — it interpreted "khrab" (bad/broken) as a
+# reference to a broken shop ("Aap kis dukaan me ja rahay hain?"). The
+# 70B Llama gives coherent, empathic Roman Urdu replies on the exact
+# same input in side-by-side tests:
+#   Qalb-8B   : "Aap kis dukaan me ja rahay hain? Khrab karna bura nahi..."
+#   Llama-70B : "samajh aya, tumhein lagta hai ke tum theek nahi ho aur
+#                tumhara gala kharab hai. Kya yeh kuch dinon se ho raha
+#                hai ya achanak se shuru hua hai?"
+# Override via SAHARA_AI_MODEL_ID on the Modal Secret if needed.
+DEFAULT_MODEL_ID = "meta-llama/Meta-Llama-3.1-70B-Instruct"
+# featherless-ai serves both Llama-3.1-70B-Instruct and the Qalb fine-tune
+# through HF's router. We use the same chat-completions endpoint and just
+# swap the model id, so failing back to Qalb (or any other featherless-
+# hosted model) is just a Modal Secret edit.
 FEATHERLESS_URL = (
     "https://router.huggingface.co/featherless-ai/v1/chat/completions"
 )
