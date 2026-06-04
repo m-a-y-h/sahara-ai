@@ -67,11 +67,31 @@ class RegistrationRequestViewModel : ViewModel() {
                         .getFromLocation(location.latitude, location.longitude, 1)
                         ?.firstOrNull()
                 } ?: error("No address was found for this location.")
-                val city = address.locality.orEmpty().ifBlank { address.subAdminArea.orEmpty() }
-                    .ifBlank { address.adminArea.orEmpty() }
-                val district = address.subAdminArea.orEmpty().ifBlank { address.locality.orEmpty() }
-                    .ifBlank { address.adminArea.orEmpty() }
-                require(city.isNotBlank() && district.isNotBlank()) { "Could not determine city or district." }
+                // Geocoder returns layered admin levels; the previous version
+                // fell back to subAdminArea for BOTH city and district which
+                // collapses to "Lahore, Lahore" for a Bahria Town address
+                // (Pakistan's geocoder typically reports
+                // locality=Lahore / subAdminArea=Lahore / subLocality=Bahria
+                // Town). New mapping prefers the most-specific layer for
+                // district and de-duplicates against city.
+                val locality = address.locality.orEmpty()
+                val subLocality = address.subLocality.orEmpty()
+                val subAdmin = address.subAdminArea.orEmpty()
+                val admin = address.adminArea.orEmpty()
+                val feature = address.featureName.orEmpty()
+                val thoroughfare = address.thoroughfare.orEmpty()
+
+                val city = locality
+                    .ifBlank { subAdmin }
+                    .ifBlank { admin }
+                val districtCandidates = listOf(subLocality, feature, thoroughfare, subAdmin)
+                val district = districtCandidates.firstOrNull {
+                    it.isNotBlank() && !it.equals(city, ignoreCase = true)
+                }.orEmpty()
+                require(city.isNotBlank()) { "Could not determine city." }
+                // district may legitimately be blank (rural address, unmapped
+                // neighbourhood). The form lets the user type it in; we
+                // don't fail the geocode for that.
                 PreciseApplicationLocation(city, district, location.accuracy)
             }.onSuccess(onLocated).onFailure {
                 locationError = if (isEnglish) {

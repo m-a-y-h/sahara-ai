@@ -1,0 +1,67 @@
+rules_version = '2';
+
+// Firebase Storage rules for Sahara AI.
+//
+// Why this file exists: the Android client (RealtimeDBService.uploadEvidence)
+// calls `reference.putFile(uri).await()` then `reference.downloadUrl.await()`
+// for every uploaded document (counselor/NGO registration evidence, custom
+// avatar request, payment proof / review note, bug-report screenshot).
+// `downloadUrl` performs a metadata read on the storage object — which
+// requires READ permission. With no `storage.rules` deployed, Storage falls
+// back to its locked-down default (deny all reads) and the SDK returns the
+// security-obfuscated message "Object does not exist at location" instead of
+// "permission denied." Result: the upload succeeded but the followup
+// downloadUrl call failed, and the user saw the wrong error in the
+// registration form.
+//
+// Deploy via Firebase Console -> Storage -> Rules tab, or via CLI:
+//     firebase deploy --only storage
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // Counselor / NGO registration evidence. Any authenticated user can
+    // upload (anyone signing up for review needs to attach docs) and
+    // download the URL of what they just uploaded; admins downloading
+    // these for review are authenticated too.
+    match /application_documents/{requestId}/{file=**} {
+      allow write: if request.auth != null
+                   && request.resource.size < 10 * 1024 * 1024
+                   && request.resource.contentType.matches('image/.*|application/pdf');
+      allow read: if request.auth != null;
+    }
+
+    // Custom-avatar review queue (uploads gated on the avatar approval
+    // workflow). User can only write under their own UID; any auth user
+    // can read (admins viewing for approval).
+    match /avatar_requests/{uid}/{file=**} {
+      allow write: if request.auth != null && request.auth.uid == uid
+                   && request.resource.size < 5 * 1024 * 1024
+                   && request.resource.contentType.matches('image/.*');
+      allow read: if request.auth != null;
+    }
+
+    // Bug-report screenshot attachments. User-scoped writes, auth reads
+    // (admin queue).
+    match /bug_reports/{uid}/{file=**} {
+      allow write: if request.auth != null && request.auth.uid == uid
+                   && request.resource.size < 5 * 1024 * 1024
+                   && request.resource.contentType.matches('image/.*');
+      allow read: if request.auth != null;
+    }
+
+    // Payment proof / admin review notes for counselor payment workflow.
+    match /payment_proofs/{uid}/{file=**} {
+      allow write: if request.auth != null && request.auth.uid == uid
+                   && request.resource.size < 5 * 1024 * 1024
+                   && request.resource.contentType.matches('image/.*|application/pdf');
+      allow read: if request.auth != null;
+    }
+    match /payment_review_notes/{ownerUid}/{file=**} {
+      // Admins (any signed-in user with admin priv via the app UI) write
+      // notes here; the original user reads them.
+      allow read, write: if request.auth != null;
+    }
+
+    // Everything else stays denied by default — explicit > implicit.
+  }
+}
