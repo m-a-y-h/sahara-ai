@@ -34,6 +34,13 @@
     "blocked_users":          { ".read": "auth != null", ".write": "auth != null" },
     "blocked_emails":         { ".read": "auth != null", ".write": "auth != null" },
 
-    "email_otps":             { ".read": true, ".write": true }
+    "email_otps":             { ".read": true, ".write": true },
+
+    "email_password_index": {
+      ".read": true,
+      "$emailKey": {
+        ".write": "auth != null && (newData.val() == auth.uid || newData.val() == null)"
+      }
+    }
   }
 }

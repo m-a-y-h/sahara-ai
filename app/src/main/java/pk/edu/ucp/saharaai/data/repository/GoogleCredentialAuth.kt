@@ -16,6 +16,7 @@ import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.GoogleAuthProvider
 import kotlinx.coroutines.tasks.await
 import pk.edu.ucp.saharaai.R
+import pk.edu.ucp.saharaai.data.remote.RealtimeDBService
 
 /**
  * Possible outcomes of a Google sign-in attempt.
@@ -87,15 +88,28 @@ object GoogleCredentialAuth {
             return@runCatching GoogleSignInOutcome.Signed(auth.signInWithCredential(firebaseCred).await())
         }
 
-        // Not signed in. Probe whether the email already has a password
-        // account on this project. If it does, defer — otherwise plain
-        // Google sign-in is safe.
-        val methods = runCatching {
+        // Not signed in. Detecting whether this email already has a password
+        // account is critical — if Firebase auto-links Google to an
+        // unverified password account, the password provider is dropped
+        // and the user can no longer sign in with their original password.
+        //
+        // Two detection paths, either one is sufficient:
+        //  (a) fetchSignInMethodsForEmail (returns empty when Email
+        //      Enumeration Protection is on, Firebase's post-2023 default).
+        //  (b) our own RTDB email_password_index registry, populated when
+        //      a user successfully registers/signs-in with email+password.
+        //      Public-read so a not-yet-signed-in caller can hit it.
+        val firebaseMethods = runCatching {
             auth.fetchSignInMethodsForEmail(email).await().signInMethods.orEmpty()
         }.onFailure { Log.w(TAG, "fetchSignInMethodsForEmail($email) failed", it) }
             .getOrDefault(emptyList())
 
-        if (EmailAuthProvider.EMAIL_PASSWORD_SIGN_IN_METHOD in methods) {
+        val passwordViaFirebase =
+            EmailAuthProvider.EMAIL_PASSWORD_SIGN_IN_METHOD in firebaseMethods
+        val passwordViaRegistry = !passwordViaFirebase &&
+            RealtimeDBService.lookupEmailHasPassword(email) != null
+
+        if (passwordViaFirebase || passwordViaRegistry) {
             return@runCatching GoogleSignInOutcome.NeedsPasswordLink(
                 email = email,
                 pendingGoogleCredential = firebaseCred,

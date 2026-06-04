@@ -60,6 +60,37 @@ object RealtimeDBService {
     suspend fun saveUser(uid: String, name: String, email: String): Result<Unit> =
         ensureUserRecord(uid, name, email).map { }
 
+    /**
+     * Public, world-readable registry of "this email has a password account
+     * on this project." Used by [GoogleCredentialAuth.signIn] to detect a
+     * collision before consuming the Google credential, because Firebase's
+     * Email Enumeration Protection (the post-2023 default) makes
+     * `fetchSignInMethodsForEmail` return empty and silently lets the
+     * Google sign-in replace the password provider on an unverified email.
+     *
+     * Stored as a hash of the email (SHA-256 via [emailKey]) so the
+     * registry doesn't leak the raw addresses to anyone snooping the DB.
+     * The recorded value is the UID, so a single read tells us both
+     * "this email has a password" and "which Firebase user it belongs to."
+     */
+    suspend fun recordEmailHasPassword(uid: String, email: String): Result<Unit> = runCatching {
+        require(uid.isNotBlank()) { "Missing user id." }
+        val key = emailKey(email)
+        if (key.isBlank()) return@runCatching
+        db.getReference("email_password_index").child(key).setValue(uid).await()
+    }.onFailure { Log.w("RealtimeDBService", "recordEmailHasPassword($email) failed", it) }
+
+    /** @return the UID associated with the email's password account, or null
+     *  if no record exists. Readable without auth (the rule sets `.read=true`),
+     *  so the Google sign-in path can call this BEFORE a user is signed in. */
+    suspend fun lookupEmailHasPassword(email: String): String? = runCatching {
+        val key = emailKey(email)
+        if (key.isBlank()) return@runCatching null
+        val snap = db.getReference("email_password_index").child(key).get().await()
+        snap.getValue(String::class.java)?.takeIf { it.isNotBlank() }
+    }.onFailure { Log.w("RealtimeDBService", "lookupEmailHasPassword($email) failed", it) }
+        .getOrNull()
+
     suspend fun ensureUserRecord(uid: String, name: String, email: String): Result<Map<String, Any>> = runCatching {
         require(uid.isNotBlank()) { "Missing user id." }
         val ref = db.getReference("users").child(uid)

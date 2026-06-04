@@ -4,7 +4,10 @@ import com.google.firebase.FirebaseNetworkException
 import com.google.firebase.auth.EmailAuthProvider
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseAuthException
+import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import pk.edu.ucp.saharaai.data.remote.RealtimeDBService
 
 enum class FirebaseAuthFailure {
     EMAIL_ALREADY_IN_USE,
@@ -24,6 +27,14 @@ class AuthRepository(
     fun signIn(email: String, password: String, onResult: (FirebaseAuthFailure?) -> Unit) {
         auth.signInWithEmailAndPassword(email, password)
             .addOnCompleteListener { task ->
+                if (task.isSuccessful) {
+                    // Backfill the email->has_password registry that
+                    // GoogleCredentialAuth consults to detect collisions
+                    // (Firebase's Email Enumeration Protection blocks
+                    // fetchSignInMethodsForEmail). Best-effort fire-and-forget.
+                    val uid = auth.currentUser?.uid.orEmpty()
+                    if (uid.isNotBlank()) recordPasswordIndexAsync(uid, email)
+                }
                 onResult(if (task.isSuccessful) null else mapFailure(task.exception))
             }
     }
@@ -31,8 +42,19 @@ class AuthRepository(
     fun register(email: String, password: String, onResult: (FirebaseAuthFailure?) -> Unit) {
         auth.createUserWithEmailAndPassword(email, password)
             .addOnCompleteListener { task ->
+                if (task.isSuccessful) {
+                    val uid = auth.currentUser?.uid.orEmpty()
+                    if (uid.isNotBlank()) recordPasswordIndexAsync(uid, email)
+                }
                 onResult(if (task.isSuccessful) null else mapFailure(task.exception))
             }
+    }
+
+    @OptIn(kotlinx.coroutines.DelicateCoroutinesApi::class)
+    private fun recordPasswordIndexAsync(uid: String, email: String) {
+        GlobalScope.launch {
+            runCatching { RealtimeDBService.recordEmailHasPassword(uid, email) }
+        }
     }
 
     fun sendPasswordResetLink(email: String, onResult: (FirebaseAuthFailure?) -> Unit) {
@@ -62,6 +84,9 @@ class AuthRepository(
         return try {
             val cred = EmailAuthProvider.getCredential(email, password)
             user.linkWithCredential(cred).await()
+            // The user just added a password — record it in our registry so a
+            // future Google sign-in correctly hits the collision branch.
+            runCatching { RealtimeDBService.recordEmailHasPassword(user.uid, email) }
             null
         } catch (e: Exception) {
             mapFailure(e)
