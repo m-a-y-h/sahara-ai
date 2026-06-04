@@ -84,6 +84,7 @@ import pk.edu.ucp.saharaai.data.model.SaharaMessageType
 import pk.edu.ucp.saharaai.data.remote.RealtimeDBService
 import pk.edu.ucp.saharaai.utils.PermissionCopy
 import pk.edu.ucp.saharaai.utils.VoiceRecorder
+import pk.edu.ucp.saharaai.utils.VoiceTranscriber
 import pk.edu.ucp.saharaai.utils.rememberAppPermissionRequester
 import pk.edu.ucp.saharaai.utils.showLocalizedToast
 import java.text.SimpleDateFormat
@@ -725,8 +726,14 @@ private fun ChatConversationScreen(
                         }
                     }
                 }
-                val voiceRecorder = remember { VoiceRecorder(context) }
-                DisposableEffect(Unit) { onDispose { voiceRecorder.release() } }
+                // Voice-to-text: hold the mic, speak, release, the
+                // transcript drops into the chat input field. User can edit
+                // it then tap send — the message goes through Gemini like
+                // any typed turn. The previous Modal `sahara-voice`
+                // emotion-analysis path is intentionally retired here; chat
+                // is about words, not vocal-tone signalling.
+                val voiceTranscriber = remember { VoiceTranscriber(context) }
+                DisposableEffect(Unit) { onDispose { voiceTranscriber.release() } }
 
                 ChatInputArea(
                     input = input,
@@ -735,65 +742,43 @@ private fun ChatConversationScreen(
                     isRecording = isRecording,
                     recordingDuration = recordingDuration,
                     onRecordStart = {
-                        when {
-                            microphonePermissionRequester.hasPermission() -> {
-                                voiceRecorder.start().fold(
-                                    onSuccess = {
-                                        isRecording = true
-                                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
-                                            vibrator.vibrate(VibrationEffect.createOneShot(50, VibrationEffect.DEFAULT_AMPLITUDE))
-                                    },
-                                    onFailure = {
-                                        context.showLocalizedToast(
-                                            isEnglish,
-                                            "Could not start voice recording. Please try again.",
-                                            "Voice recording shuru nahi ho saki. Dobara koshish karein.",
-                                        )
-                                    },
-                                )
-                            }
-                            else -> microphonePermissionRequester.request()
+                        if (!microphonePermissionRequester.hasPermission()) {
+                            microphonePermissionRequester.request()
+                            return@ChatInputArea
                         }
+                        isRecording = true
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                            vibrator.vibrate(
+                                VibrationEffect.createOneShot(50, VibrationEffect.DEFAULT_AMPLITUDE)
+                            )
+                        }
+                        voiceTranscriber.start(
+                            isEnglish = isEnglish,
+                            callbacks = object : VoiceTranscriber.Callbacks {
+                                override fun onPartial(text: String) {
+                                    // Live partial: replace whatever's in
+                                    // the field with the latest recognised
+                                    // text so the user sees their words
+                                    // appearing as they speak.
+                                    input = text
+                                }
+                                override fun onFinal(text: String) {
+                                    isRecording = false
+                                    if (text.isNotBlank()) input = text
+                                }
+                                override fun onError(message: String) {
+                                    isRecording = false
+                                    context.showLocalizedToast(isEnglish, message, message)
+                                }
+                            },
+                        )
                     },
                     onRecordEnd = lambda@{
-                        val secondsRecorded = recordingDuration
-                        isRecording = false
-                        if (secondsRecorded <= 0) return@lambda
-                        val clip = voiceRecorder.stop().getOrNull()
-                        if (clip == null || clip.bytes.isEmpty()) {
-                            context.showLocalizedToast(
-                                isEnglish,
-                                "Voice note was too short to analyse - try a slightly longer clip.",
-                                "Voice note bohat choti thi - thora lamba clip try karein.",
-                            )
-                            return@lambda
-                        }
-                        // Voice flow lives entirely in the VM now: the user
-                        // bubble + analysis + AI reply all land in Firestore,
-                        // so a Force-Quit or navigation away no longer loses
-                        // the voice exchange (the old transientMessages path
-                        // was per-screen-instance state).
-                        if (isAiMode && uid.isNotBlank()) {
-                            isTyping = true
-                            chatViewModel.sendVoiceNoteToAI(
-                                secondsRecorded = secondsRecorded,
-                                audioBytes      = clip.bytes,
-                                mimeType        = clip.mimeType,
-                                isEnglish       = isEnglish,
-                            )
-                        } else {
-                            // Counselor mode / signed-out fallback: keep old
-                            // local-bubble behaviour for now.
-                            val bubbleId = java.util.UUID.randomUUID().toString()
-                            transientMessages.add(
-                                ChatMessage(
-                                    id = bubbleId,
-                                    text = "Voice note ($secondsRecorded sec)",
-                                    isBot = false,
-                                    type = MessageType.VOICE_NOTE,
-                                )
-                            )
-                        }
+                        // Press release: stop listening; onFinal will flush
+                        // the recognised text into `input` for the user to
+                        // review + send. isRecording is cleared inside the
+                        // callbacks above.
+                        voiceTranscriber.stop()
                     },
                     isEnglish = isEnglish,
                     isDark = isDark
