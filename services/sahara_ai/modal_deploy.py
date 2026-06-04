@@ -3,7 +3,7 @@
 This deploy is a thin proxy. The protocol layer (``sahara_ai_chat``) still
 runs on Modal — system prompt construction, language detection, risk-level
 parsing, response normalisation — but the actual token generation is sent to
-HuggingFace's Inference API (default provider: ``featherless-ai``) instead of
+HuggingFace's Inference API (default provider: ``hf-inference``) instead of
 loading the 8B model onto a Modal GPU. That means:
 
 * No A10G / no quantization plumbing / no bitsandbytes.
@@ -32,7 +32,15 @@ import modal
 
 APP_NAME = "sahara-ai"
 DEFAULT_MODEL_ID = "enstazao/Qalb-1.0-8B-Instruct"
-DEFAULT_PROVIDER = "featherless-ai"
+# HF's built-in serverless API ("hf-inference") serves any public model that
+# HF marks `inference: warm` — Qalb-1.0-8B-Instruct does. featherless-ai
+# (the previous default) does NOT have this fine-tune in its catalog, so
+# every chat request was failing with a "model not deployed" error from
+# Featherless. hf-inference is rate-limited and cold-starts can be 10–30s
+# on a sleeping model, but it's free, and Qalb stays warm enough for an
+# FYP demo. Override via the Modal Secret if a different provider ever
+# adds Qalb (SAHARA_AI_PROVIDER env var below picks this up at boot).
+DEFAULT_PROVIDER = "hf-inference"
 
 # Llama-3.1 chat template uses <|eot_id|> to end the assistant turn. We pass it
 # as a stop sequence so the remote provider trims cleanly; the protocol's
