@@ -86,16 +86,24 @@ def fastapi_app():
     # path in sahara_ai_protocol.generate_with_sahara_ai so the prompt
     # engineering tuned for the local model still applies on the remote one.
     def text_generator(prompt: str, max_new_tokens: int = 512) -> str:
-        # 512 default (was 240). Llama-3.1 chat-template replies frequently
-        # ran into the old cap mid-sentence, especially for the bilingual
-        # safety boilerplate. Summarisation prompts also need this room.
+        # Sampling tuned to keep Qalb (Llama-3.1-8B fine-tune) out of the
+        # "Aaj sharam hain? Aaj rata hain? Aaj subah hain?" repetition
+        # collapse it falls into at low temperature. The previous values
+        # (T=0.15, rep_pen=1.08) reliably produced a sensible opening then
+        # latched onto a 4-5 token cycle until max_new_tokens ran out.
+        #   - temperature 0.6: warm enough to break out of token-cycles
+        #     while staying coherent for the bilingual safety context.
+        #   - repetition_penalty 1.2: typical for Llama-3.1 chat tunes;
+        #     1.08 was too gentle to interrupt the loop once it started.
+        #   - top_p 0.95: slight relax so the sampler doesn't get
+        #     monomaniacal on the top-of-distribution token.
         out = client.text_generation(
             prompt,
             model=model_id,
             max_new_tokens=max_new_tokens,
-            temperature=0.15,
-            top_p=0.9,
-            repetition_penalty=1.08,
+            temperature=0.6,
+            top_p=0.95,
+            repetition_penalty=1.20,
             do_sample=True,
             stop_sequences=STOP_SEQUENCES,
         )
@@ -194,7 +202,7 @@ def fastapi_app():
             f"{transcript}<|eot_id|>"
             "<|start_header_id|>assistant<|end_header_id|>\n\n"
         )
-        summary = text_generator(prompt, max_new_tokens=512).strip()
+        summary = text_generator(prompt, max_new_tokens=320).strip()
         return {"summary": summary}
 
     return api

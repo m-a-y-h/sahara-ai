@@ -2190,10 +2190,14 @@ def build_llama31_prompt(
                     f"<|start_header_id|>user<|end_header_id|>\n\n{content}<|eot_id|>"
                 )
 
+    # Llama-3.1's official chat template puts TWO newlines after the
+    # assistant header; a single-newline variant nudges Qalb into a slightly
+    # different output distribution that's been observed to collapse into
+    # the "Aaj rata hain? Aaj subah hain?" repetition loop.
     parts.append(
         "<|start_header_id|>user<|end_header_id|>\n\n"
         f"{clean_user_input}"
-        "<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n"
+        "<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n"
     )
     return "".join(parts)
 
