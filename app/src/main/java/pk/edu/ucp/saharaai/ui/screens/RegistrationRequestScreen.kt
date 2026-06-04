@@ -30,10 +30,12 @@ import dev.chrisbanes.haze.hazeSource
 import pk.edu.ucp.saharaai.ui.components.ButtonVariant
 import pk.edu.ucp.saharaai.ui.components.HazeBackButton
 import pk.edu.ucp.saharaai.ui.components.SaharaButton
+import pk.edu.ucp.saharaai.ui.theme.SaharaCoral
 import pk.edu.ucp.saharaai.ui.theme.SaharaStrongGreen
 import pk.edu.ucp.saharaai.utils.ObservePermissionState
 import pk.edu.ucp.saharaai.utils.PermissionCopy
 import pk.edu.ucp.saharaai.utils.rememberAppPermissionRequester
+import pk.edu.ucp.saharaai.utils.showLocalizedToast
 import pk.edu.ucp.saharaai.viewmodels.RegistrationRequestViewModel
 
 private data class EvidenceRequirement(
@@ -82,10 +84,30 @@ fun RegistrationRequestScreen(
     val hazeState = remember { dev.chrisbanes.haze.HazeState() }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         val key = activeDocumentKey
-        if (uri != null && key != null) {
-            documentUris = documentUris + (key to uri)
-        }
         activeDocumentKey = null
+        if (uri == null || key == null) return@rememberLauncherForActivityResult
+        // Belt-and-suspenders MIME check. We pass "image/*" to the system
+        // picker so most pickers already filter, but file managers on
+        // Android can ignore that hint — re-check the resolved content
+        // type and refuse anything that isn't a JPEG or PNG. Uploads are
+        // base64'd through BitmapFactory downstream and PDF/Doc/etc would
+        // simply fail there with a less useful error.
+        val mime = context.contentResolver.getType(uri).orEmpty().lowercase()
+        val allowed = mime == "image/jpeg" || mime == "image/jpg" || mime == "image/png"
+        if (!allowed) {
+            context.showLocalizedToast(
+                isEnglish,
+                "Only JPG or PNG images are accepted as evidence.",
+                "Sirf JPG ya PNG image evidence ke liye qabool hai.",
+                android.widget.Toast.LENGTH_LONG,
+            )
+            requestViewModel.reportError(
+                if (isEnglish) "Only JPG / PNG files are allowed for evidence uploads."
+                else "Evidence ke liye sirf JPG ya PNG file lagai ja sakti hai."
+            )
+            return@rememberLauncherForActivityResult
+        }
+        documentUris = documentUris + (key to uri)
     }
     val applyPreciseLocation: () -> Unit = {
         requestViewModel.fetchPreciseLocation(context, isEnglish) { result ->
@@ -326,6 +348,15 @@ fun RegistrationRequestScreen(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            // Note about accepted formats — surfaced once for the whole
+            // evidence block instead of repeating on every row.
+            Text(
+                text = if (isEnglish) "Only JPG or PNG images are accepted. Other formats (PDF, DOC, etc.) will be refused."
+                       else "Sirf JPG ya PNG image qabool hai. PDF / DOC ya doosri format radd ho jayegi.",
+                style = MaterialTheme.typography.labelSmall,
+                color = SaharaCoral,
+                modifier = Modifier.padding(top = 4.dp, bottom = 4.dp),
+            )
             evidenceRequirements.forEach { requirement ->
                 EvidenceUploadRow(
                     requirement = requirement,
@@ -333,7 +364,10 @@ fun RegistrationRequestScreen(
                     isEnglish = isEnglish,
                     onClick = {
                         activeDocumentKey = requirement.key
-                        picker.launch("*/*")
+                        // Hint the system picker; we still re-validate in
+                        // the result handler in case a file manager
+                        // returns something off-type.
+                        picker.launch("image/*")
                     }
                 )
             }
@@ -431,16 +465,35 @@ private fun EvidenceUploadRow(
             )
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                Text(
-                    text = if (isEnglish) requirement.titleEn else requirement.titleUr,
-                    fontWeight = FontWeight.Bold
-                )
+                // Title with a trailing red asterisk when the document is
+                // required — gives the same hard-required affordance as a
+                // form field. Optional docs keep the existing "Optional…"
+                // subtext.
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = if (isEnglish) requirement.titleEn else requirement.titleUr,
+                        fontWeight = FontWeight.Bold
+                    )
+                    if (requirement.required) {
+                        Text(
+                            text = " *",
+                            color = SaharaCoral,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                }
                 Text(
                     text = if (isEnglish) requirement.descEn else requirement.descUr,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                if (!requirement.required) {
+                if (requirement.required) {
+                    Text(
+                        if (isEnglish) "Required" else "Lazmi",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = SaharaCoral,
+                    )
+                } else {
                     Text(
                         if (isEnglish) "Optional where not applicable" else "Jahan apply na ho optional",
                         style = MaterialTheme.typography.labelSmall,

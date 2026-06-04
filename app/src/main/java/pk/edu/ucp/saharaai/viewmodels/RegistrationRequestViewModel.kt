@@ -124,6 +124,26 @@ class RegistrationRequestViewModel : ViewModel() {
         error = ""
         isSubmitting = true
         viewModelScope.launch {
+            // Cheap collision check against the public email_password_index
+            // populated by AuthRepository on every email/password signup,
+            // signin, and linkEmailPassword. If the applicant's email is
+            // already attached to a Sahara account we bail before the
+            // upload kicks in — saves the user a long compress/base64
+            // path that would only fail later when the admin tries to
+            // mint the counselor's Firebase user. Google-only accounts
+            // (no password provider attached) won't be in the index;
+            // those collisions get caught at the admin-approval step.
+            val cleanEmail = email.trim().lowercase()
+            val existingUid = runCatching {
+                RealtimeDBService.lookupEmailHasPassword(cleanEmail)
+            }.getOrNull()
+            if (!existingUid.isNullOrBlank()) {
+                error = "This email is already linked to a Sahara account. " +
+                    "If you are the owner, please contact support — counselors must apply with a different email."
+                isSubmitting = false
+                return@launch
+            }
+
             // Grab this device's FCM token (best-effort) so the admin's later
             // approval can push the issued key straight back to this device.
             // Failure is non-fatal — the email channel still works.
@@ -135,7 +155,7 @@ class RegistrationRequestViewModel : ViewModel() {
                 applicantType = applicantType,
                 applicantName = name.trim(),
                 organizationName = organization.trim(),
-                email = email.trim(),
+                email = cleanEmail,
                 phone = phone.trim(),
                 region = region.trim(),
                 city = city.trim(),
