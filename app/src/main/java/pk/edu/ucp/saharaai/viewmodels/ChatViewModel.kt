@@ -397,16 +397,27 @@ class ChatViewModel : ViewModel() {
             val session = _aiSessions.value.firstOrNull { it.sessionId == sessionId }
             val priorSummaries = session?.batchSummaries.orEmpty()
             val summarizedThroughMs = session?.summarizedThroughMs ?: 0L
-            val historyTurns = _messages.value
+            // Drop the seeded welcome bubble out of the assistant history.
+            // It's a UI greeting, not a real model turn — feeding it in as
+            // `{role: "assistant", content: "Salam..."}` makes Qalb think the
+            // pattern is "the assistant introduces itself first," so on the
+            // user's first message it re-greets instead of engaging.
+            // Heuristic: skip every AI message that arrives BEFORE any user
+            // message in the live window — that span is, by construction,
+            // the seeded welcome (we seed exactly one AI bubble per new
+            // session before the user has spoken).
+            val sortedLive = _messages.value
                 .filter { (it.timestamp.seconds * 1000L + it.timestamp.nanoseconds / 1_000_000L) > summarizedThroughMs }
                 .sortedBy { (it.timestamp.seconds * 1000L + it.timestamp.nanoseconds / 1_000_000L) }
-                .map {
-                    SaharaAiClient.HistoryTurn(
-                        role = if (it.isFromAI) "assistant" else "user",
-                        content = it.content,
-                        timestampMs = (it.timestamp.seconds * 1000L + it.timestamp.nanoseconds / 1_000_000L),
-                    )
-                }
+            val firstUserIdx = sortedLive.indexOfFirst { !it.isFromAI }
+            val realDialogue = if (firstUserIdx >= 0) sortedLive.drop(firstUserIdx) else emptyList()
+            val historyTurns = realDialogue.map {
+                SaharaAiClient.HistoryTurn(
+                    role = if (it.isFromAI) "assistant" else "user",
+                    content = it.content,
+                    timestampMs = (it.timestamp.seconds * 1000L + it.timestamp.nanoseconds / 1_000_000L),
+                )
+            }
 
             val sendResult = ChatRepository.sendMessage(
                 sessionId   = sessionId,
