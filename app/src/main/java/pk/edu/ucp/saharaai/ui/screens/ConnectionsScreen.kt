@@ -62,9 +62,9 @@ import pk.edu.ucp.saharaai.ui.components.SaharaButton
 import pk.edu.ucp.saharaai.ui.components.SaharaCard
 import pk.edu.ucp.saharaai.ui.components.HazeBackButton
 import pk.edu.ucp.saharaai.ui.theme.*
-import pk.edu.ucp.saharaai.util.BlueskyOAuthCallbackStore
-import pk.edu.ucp.saharaai.util.SpotifyOAuthCallbackStore
-import pk.edu.ucp.saharaai.util.SteamOpenIdCallbackStore
+import pk.edu.ucp.saharaai.utils.BlueskyOAuthCallbackStore
+import pk.edu.ucp.saharaai.utils.SpotifyOAuthCallbackStore
+import pk.edu.ucp.saharaai.utils.SteamOpenIdCallbackStore
 import pk.edu.ucp.saharaai.viewmodels.SocialConnectionsViewModel
 
 private const val BLUESKY_CONSENT_VERSION = "bluesky-public-analysis-v1"

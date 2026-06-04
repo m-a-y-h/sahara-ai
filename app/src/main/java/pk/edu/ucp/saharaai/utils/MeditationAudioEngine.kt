@@ -1,4 +1,4 @@
-package pk.edu.ucp.saharaai.util
+package pk.edu.ucp.saharaai.utils
 
 import android.media.AudioAttributes
 import android.media.AudioFormat

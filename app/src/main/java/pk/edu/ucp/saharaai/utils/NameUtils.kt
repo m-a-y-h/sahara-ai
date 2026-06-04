@@ -1,4 +1,4 @@
-package pk.edu.ucp.saharaai.util
+package pk.edu.ucp.saharaai.utils
 
 // Honorifics, caste/clan titles, and religious prefixes that should never be used
 // as a person's calling name in greetings. Kept lowercase for case-insensitive match.

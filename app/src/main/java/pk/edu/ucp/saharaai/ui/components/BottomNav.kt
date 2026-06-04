@@ -36,7 +36,7 @@ import pk.edu.ucp.saharaai.ui.screens.rememberFrameOscillation
 import pk.edu.ucp.saharaai.ui.theme.SaharaGreenLight
 import pk.edu.ucp.saharaai.ui.theme.SaharaHazeMaterials
 import pk.edu.ucp.saharaai.ui.theme.SaharaStrongGreen
-import pk.edu.ucp.saharaai.util.showAssessmentRequiredToast
+import pk.edu.ucp.saharaai.utils.showAssessmentRequiredToast
 
 data class NavItem(
     val label: String,

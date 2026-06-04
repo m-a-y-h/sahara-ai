@@ -97,8 +97,8 @@ import pk.edu.ucp.saharaai.ui.theme.SaharaPeach
 import pk.edu.ucp.saharaai.ui.theme.SaharaSky
 import pk.edu.ucp.saharaai.ui.theme.SaharaStrongGreen
 import pk.edu.ucp.saharaai.ui.theme.SaharaWarning
-import pk.edu.ucp.saharaai.util.PermissionCopy
-import pk.edu.ucp.saharaai.util.rememberAppPermissionRequester
+import pk.edu.ucp.saharaai.utils.PermissionCopy
+import pk.edu.ucp.saharaai.utils.rememberAppPermissionRequester
 import pk.edu.ucp.saharaai.viewmodels.LensUiState
 import pk.edu.ucp.saharaai.viewmodels.LensViewModel
 import java.util.concurrent.Executors

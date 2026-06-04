@@ -38,8 +38,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.delay
 import pk.edu.ucp.saharaai.ui.components.*
 import pk.edu.ucp.saharaai.ui.theme.*
-import pk.edu.ucp.saharaai.util.PermissionCopy
-import pk.edu.ucp.saharaai.util.rememberAppPermissionRequester
+import pk.edu.ucp.saharaai.utils.PermissionCopy
+import pk.edu.ucp.saharaai.utils.rememberAppPermissionRequester
 import pk.edu.ucp.saharaai.viewmodels.OnboardingViewModel
 
 @OptIn(ExperimentalAnimationApi::class)

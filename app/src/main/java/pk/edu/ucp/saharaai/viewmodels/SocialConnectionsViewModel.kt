@@ -160,9 +160,9 @@ class SocialConnectionsViewModel : ViewModel() {
                     // against the rule-based substance / recovery deny-lists and
                     // persist the summary alongside the raw list. Failure here
                     // is non-fatal — the raw connection still goes in.
-                    val report = pk.edu.ucp.saharaai.util.YouTubeSubscriptionClassifier
+                    val report = pk.edu.ucp.saharaai.utils.YouTubeSubscriptionClassifier
                         .classify(data.subscriptions)
-                    val recoveryCount = pk.edu.ucp.saharaai.util.YouTubeSubscriptionClassifier
+                    val recoveryCount = pk.edu.ucp.saharaai.utils.YouTubeSubscriptionClassifier
                         .recoveryChannelCount(data.subscriptions)
                     val flaggedPayload = report.flagged.map {
                         mapOf(

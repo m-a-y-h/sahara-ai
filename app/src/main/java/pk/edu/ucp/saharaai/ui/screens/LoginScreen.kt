@@ -137,7 +137,7 @@ fun LoginScreen(
     // sign-out the vault is intentionally NOT cleared, so this stays true and
     // they can come back in with a fingerprint.
     val showBiometric = remember {
-        pk.edu.ucp.saharaai.util.BiometricCredentialVault.isArmed(context)
+        pk.edu.ucp.saharaai.utils.BiometricCredentialVault.isArmed(context)
     }
 
     val primaryGreen = if (isDark) SaharaStrongGreen else SaharaGreen
@@ -257,7 +257,7 @@ fun LoginScreen(
                                 // each successful login, so a password change always re-arms.
                                 val capturedPassword = password
                                 loginViewModel.signIn(email, password, isEnglish) { cleanEmail ->
-                                    pk.edu.ucp.saharaai.util.BiometricCredentialVault.save(
+                                    pk.edu.ucp.saharaai.utils.BiometricCredentialVault.save(
                                         context, cleanEmail, capturedPassword
                                     )
                                     prefs.edit().putBoolean("biometric_enabled", true).apply()
@@ -316,7 +316,7 @@ fun LoginScreen(
                                     // and run a real Firebase sign-in. No vault entry =
                                     // biometric is "armed" only after a successful manual
                                     // login, so this path is guaranteed to have creds.
-                                    val creds = pk.edu.ucp.saharaai.util.BiometricCredentialVault
+                                    val creds = pk.edu.ucp.saharaai.utils.BiometricCredentialVault
                                         .load(context)
                                     if (creds == null) {
                                         loginViewModel.reportError(

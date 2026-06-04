@@ -57,8 +57,8 @@ import pk.edu.ucp.saharaai.ui.components.BottomNav
 import pk.edu.ucp.saharaai.ui.components.SaharaCard
 import pk.edu.ucp.saharaai.ui.components.CardVariant
 import pk.edu.ucp.saharaai.ui.theme.*
-import pk.edu.ucp.saharaai.util.showAssessmentRequiredToast as showAssessmentToast
-import pk.edu.ucp.saharaai.util.showLocalizedToast
+import pk.edu.ucp.saharaai.utils.showAssessmentRequiredToast as showAssessmentToast
+import pk.edu.ucp.saharaai.utils.showLocalizedToast
 import pk.edu.ucp.saharaai.viewmodels.DashboardViewModel
 import pk.edu.ucp.saharaai.viewmodels.NotificationsViewModel
 import java.util.Calendar
@@ -133,7 +133,7 @@ fun DashboardScreen(
         val latestUnread = notifications.filter { !it.isRead }
         if (latestUnread.size > previousNotifCount && previousNotifCount > 0) {
             val newest = latestUnread.first()
-            pk.edu.ucp.saharaai.util.NotificationHelper.run {
+            pk.edu.ucp.saharaai.utils.NotificationHelper.run {
                 if (newest.type == "COUNSELOR") {
                     showCounselorNotification(
                         context,

@@ -36,7 +36,7 @@ import pk.edu.ucp.saharaai.data.repository.FirebaseAuthFailure
 import pk.edu.ucp.saharaai.ui.components.ButtonVariant
 import pk.edu.ucp.saharaai.ui.components.SaharaButton
 import pk.edu.ucp.saharaai.ui.theme.*
-import pk.edu.ucp.saharaai.util.BiometricCredentialVault
+import pk.edu.ucp.saharaai.utils.BiometricCredentialVault
 
 /**
  * Shown once after a successful Google sign-in for users whose Firebase

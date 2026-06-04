@@ -11,7 +11,7 @@ import com.google.firebase.auth.auth
 import kotlinx.coroutines.launch
 import pk.edu.ucp.saharaai.data.remote.RealtimeDBService
 import pk.edu.ucp.saharaai.ui.screens.GlobalAppState
-import pk.edu.ucp.saharaai.util.callingName
+import pk.edu.ucp.saharaai.utils.callingName
 
 class FaceRecognitionViewModel : ViewModel() {
     var biometricEnabled by mutableStateOf(false)

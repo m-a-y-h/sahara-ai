@@ -10,7 +10,7 @@ import kotlinx.coroutines.launch
 import pk.edu.ucp.saharaai.ASSESSMENT_VALIDITY_MS
 import pk.edu.ucp.saharaai.data.remote.RealtimeDBService
 import pk.edu.ucp.saharaai.data.repository.ChatRepository
-import pk.edu.ucp.saharaai.util.callingName
+import pk.edu.ucp.saharaai.utils.callingName
 import pk.edu.ucp.saharaai.ui.screens.GlobalAppState
 import pk.edu.ucp.saharaai.ui.theme.*
 import java.util.Calendar

@@ -1,11 +1,11 @@
-package pk.edu.ucp.saharaai.util
+package pk.edu.ucp.saharaai.utils
 
-import pk.edu.ucp.saharaai.util.Constants.MESSAGE_MAX_LENGTH
-import pk.edu.ucp.saharaai.util.Constants.MESSAGE_MIN_LENGTH
-import pk.edu.ucp.saharaai.util.Constants.PASSWORD_MAX_LENGTH
-import pk.edu.ucp.saharaai.util.Constants.PASSWORD_MIN_LENGTH
-import pk.edu.ucp.saharaai.util.Constants.VOICE_MAX_DURATION_SECONDS
-import pk.edu.ucp.saharaai.util.Constants.VOICE_MIN_DURATION_SECONDS
+import pk.edu.ucp.saharaai.utils.Constants.MESSAGE_MAX_LENGTH
+import pk.edu.ucp.saharaai.utils.Constants.MESSAGE_MIN_LENGTH
+import pk.edu.ucp.saharaai.utils.Constants.PASSWORD_MAX_LENGTH
+import pk.edu.ucp.saharaai.utils.Constants.PASSWORD_MIN_LENGTH
+import pk.edu.ucp.saharaai.utils.Constants.VOICE_MAX_DURATION_SECONDS
+import pk.edu.ucp.saharaai.utils.Constants.VOICE_MIN_DURATION_SECONDS
 
 
 sealed class PasswordValidationResult {

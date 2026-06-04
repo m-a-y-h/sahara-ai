@@ -1,4 +1,4 @@
-package pk.edu.ucp.saharaai.util
+package pk.edu.ucp.saharaai.utils
 
 import android.util.Log
 import com.google.firebase.database.FirebaseDatabase

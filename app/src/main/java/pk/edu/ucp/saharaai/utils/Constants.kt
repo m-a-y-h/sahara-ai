@@ -1,4 +1,4 @@
-package pk.edu.ucp.saharaai.util
+package pk.edu.ucp.saharaai.utils
 
 object Constants {
 

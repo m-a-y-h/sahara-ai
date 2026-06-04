@@ -40,8 +40,8 @@ import pk.edu.ucp.saharaai.ui.components.CardVariant
 import pk.edu.ucp.saharaai.ui.components.HazeBackButton
 import pk.edu.ucp.saharaai.ui.components.SaharaCard
 import pk.edu.ucp.saharaai.ui.theme.*
-import pk.edu.ucp.saharaai.util.NgoStatsExporter
-import pk.edu.ucp.saharaai.util.showLocalizedToast
+import pk.edu.ucp.saharaai.utils.NgoStatsExporter
+import pk.edu.ucp.saharaai.utils.showLocalizedToast
 import pk.edu.ucp.saharaai.viewmodels.NgoDashboardViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)

@@ -14,11 +14,11 @@ import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
 import eightbitlab.com.blurview.BlurTarget
 import pk.edu.ucp.saharaai.ui.theme.SaharaAiTheme
-import pk.edu.ucp.saharaai.util.BlueskyOAuthCallbackStore
-import pk.edu.ucp.saharaai.util.NotificationHelper
-import pk.edu.ucp.saharaai.util.NotificationRouteStore
-import pk.edu.ucp.saharaai.util.SpotifyOAuthCallbackStore
-import pk.edu.ucp.saharaai.util.SteamOpenIdCallbackStore
+import pk.edu.ucp.saharaai.utils.BlueskyOAuthCallbackStore
+import pk.edu.ucp.saharaai.utils.NotificationHelper
+import pk.edu.ucp.saharaai.utils.NotificationRouteStore
+import pk.edu.ucp.saharaai.utils.SpotifyOAuthCallbackStore
+import pk.edu.ucp.saharaai.utils.SteamOpenIdCallbackStore
 
 class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {

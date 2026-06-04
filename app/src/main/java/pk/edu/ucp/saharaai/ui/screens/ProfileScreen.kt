@@ -47,9 +47,9 @@ import dev.chrisbanes.haze.hazeSource
 import pk.edu.ucp.saharaai.ui.components.GlassAlertDialog
 import pk.edu.ucp.saharaai.ui.components.*
 import pk.edu.ucp.saharaai.ui.theme.*
-import pk.edu.ucp.saharaai.util.PermissionCopy
-import pk.edu.ucp.saharaai.util.rememberAppPermissionRequester
-import pk.edu.ucp.saharaai.util.showLocalizedToast
+import pk.edu.ucp.saharaai.utils.PermissionCopy
+import pk.edu.ucp.saharaai.utils.rememberAppPermissionRequester
+import pk.edu.ucp.saharaai.utils.showLocalizedToast
 import pk.edu.ucp.saharaai.viewmodels.ProfileViewModel
 
 @Composable

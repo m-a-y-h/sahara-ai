@@ -52,7 +52,7 @@ import pk.edu.ucp.saharaai.ui.components.SaharaButton
 import pk.edu.ucp.saharaai.ui.components.SaharaCard
 import pk.edu.ucp.saharaai.ui.components.HazeBackButton
 import pk.edu.ucp.saharaai.ui.theme.*
-import pk.edu.ucp.saharaai.util.showLocalizedToast
+import pk.edu.ucp.saharaai.utils.showLocalizedToast
 import pk.edu.ucp.saharaai.viewmodels.CounselorsViewModel
 
 data class Counselor(

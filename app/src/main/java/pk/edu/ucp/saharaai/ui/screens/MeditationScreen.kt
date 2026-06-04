@@ -55,7 +55,7 @@ import pk.edu.ucp.saharaai.service.rememberMeditationMusicController
 import pk.edu.ucp.saharaai.ui.components.BottomNav
 import pk.edu.ucp.saharaai.ui.components.HazeBackButton
 import pk.edu.ucp.saharaai.ui.theme.*
-import pk.edu.ucp.saharaai.util.MeditationAudioEngine
+import pk.edu.ucp.saharaai.utils.MeditationAudioEngine
 import pk.edu.ucp.saharaai.viewmodels.MeditationViewModel
 
 

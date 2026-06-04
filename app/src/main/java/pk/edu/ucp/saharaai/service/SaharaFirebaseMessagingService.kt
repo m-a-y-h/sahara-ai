@@ -10,7 +10,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import pk.edu.ucp.saharaai.data.remote.RealtimeDBService
-import pk.edu.ucp.saharaai.util.NotificationHelper
+import pk.edu.ucp.saharaai.utils.NotificationHelper
 
 class SaharaFirebaseMessagingService : FirebaseMessagingService() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)

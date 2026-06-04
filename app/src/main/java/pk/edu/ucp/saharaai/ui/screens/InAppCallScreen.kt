@@ -38,8 +38,8 @@ import pk.edu.ucp.saharaai.data.remote.RealtimeDBService
 import pk.edu.ucp.saharaai.ui.theme.SaharaCoral
 import pk.edu.ucp.saharaai.ui.theme.SaharaSky
 import pk.edu.ucp.saharaai.ui.theme.SaharaStrongGreen
-import pk.edu.ucp.saharaai.util.PermissionCopy
-import pk.edu.ucp.saharaai.util.rememberAppPermissionsRequester
+import pk.edu.ucp.saharaai.utils.PermissionCopy
+import pk.edu.ucp.saharaai.utils.rememberAppPermissionsRequester
 
 @Composable
 fun InAppCallScreen(

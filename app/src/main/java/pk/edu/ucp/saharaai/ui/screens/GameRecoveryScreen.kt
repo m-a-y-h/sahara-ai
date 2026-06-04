@@ -58,9 +58,9 @@ import pk.edu.ucp.saharaai.ui.components.SaharaCard
 import pk.edu.ucp.saharaai.ui.components.GlassAlertDialog
 import pk.edu.ucp.saharaai.ui.components.HazeBackButton
 import pk.edu.ucp.saharaai.ui.theme.*
-import pk.edu.ucp.saharaai.util.PermissionCopy
-import pk.edu.ucp.saharaai.util.rememberAppPermissionRequester
-import pk.edu.ucp.saharaai.util.showLocalizedToast
+import pk.edu.ucp.saharaai.utils.PermissionCopy
+import pk.edu.ucp.saharaai.utils.rememberAppPermissionRequester
+import pk.edu.ucp.saharaai.utils.showLocalizedToast
 import pk.edu.ucp.saharaai.viewmodels.GameRecoveryViewModel
 import java.text.SimpleDateFormat
 import java.time.LocalDate

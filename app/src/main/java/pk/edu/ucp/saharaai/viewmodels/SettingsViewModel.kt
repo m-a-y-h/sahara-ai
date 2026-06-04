@@ -14,7 +14,7 @@ import kotlinx.coroutines.launch
 import pk.edu.ucp.saharaai.data.remote.RealtimeDBService
 import pk.edu.ucp.saharaai.data.repository.AuthRepository
 import pk.edu.ucp.saharaai.data.repository.FirebaseAuthFailure
-import pk.edu.ucp.saharaai.util.BiometricCredentialVault
+import pk.edu.ucp.saharaai.utils.BiometricCredentialVault
 
 class SettingsViewModel : ViewModel() {
     private val authRepository = AuthRepository()

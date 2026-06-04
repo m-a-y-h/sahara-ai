@@ -7,7 +7,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.launch
 import pk.edu.ucp.saharaai.BuildConfig
-import pk.edu.ucp.saharaai.util.EmailOtpService
+import pk.edu.ucp.saharaai.utils.EmailOtpService
 
 class EmailVerificationViewModel : ViewModel() {
     var isLoading by mutableStateOf(false)

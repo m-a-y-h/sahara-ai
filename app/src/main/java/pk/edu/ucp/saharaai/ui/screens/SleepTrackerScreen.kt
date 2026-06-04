@@ -49,8 +49,8 @@ import pk.edu.ucp.saharaai.viewmodels.SleepLog
 import pk.edu.ucp.saharaai.viewmodels.SleepTrackerViewModel
 import pk.edu.ucp.saharaai.viewmodels.HealthSleepImportState
 import pk.edu.ucp.saharaai.viewmodels.SLEEP_SOURCE_HEALTH_CONNECT
-import pk.edu.ucp.saharaai.util.PermissionCopy
-import pk.edu.ucp.saharaai.util.rememberAppPermissionsRequester
+import pk.edu.ucp.saharaai.utils.PermissionCopy
+import pk.edu.ucp.saharaai.utils.rememberAppPermissionsRequester
 
 
 
