@@ -1,64 +1,75 @@
-"""Sahara AI chat endpoint on Modal — HuggingFace Inference API backend.
+"""Sahara AI chat endpoint on Modal — direct featherless chat-completions.
 
-This deploy is a thin proxy. The protocol layer (``sahara_ai_chat``) still
-runs on Modal — system prompt construction, language detection, risk-level
-parsing, response normalisation — but the actual token generation is sent to
-HuggingFace's Inference API (auto-routed via the ``:fastest`` suffix so HF
-picks the live provider and fails over if one rate-limits) instead of
-loading the 8B model onto a Modal GPU. That means:
-
-* No A10G / no quantization plumbing / no bitsandbytes.
-* Cold start is milliseconds (the function just instantiates an HTTP client).
-* Cost moves from per-second GPU time on Modal to per-token billing on HF.
+Token generation goes straight to featherless-ai's chat-completions endpoint
+through HuggingFace's router, with a tight system prompt and the per-session
+conversation history. The heavyweight ``sahara_ai_protocol.sahara_ai_chat``
+pipeline (assessment -> system-prompt builder -> normaliser) was suppressing
+Qalb's actual replies on the FYP timeline: substance keywords routed to a
+canned acknowledgement, and the response normaliser would frequently drop
+Qalb's output for failing one of its many heuristic checks. This rewrite
+keeps Qalb's NLP front-and-centre and only adds a minimal heuristic for
+``trigger_counselor`` so the in-app "Talk to a counselor" attachment still
+fires on explicit crisis text.
 
 Setup (one-time):
     modal secret create huggingface-secret HF_TOKEN=<your hf token>
 
-Deploy — MUST run from the ``services/`` directory so ``add_local_python_source
-("sahara_ai")`` can import the local package, otherwise Modal errors with
-"sahara_ai has no spec - might not be installed?":
+Deploy — from the ``services/`` directory so ``add_local_python_source
+("sahara_ai")`` can still resolve the protocol module (kept around for the
+summariser):
     cd services && modal deploy sahara_ai/modal_deploy.py
 
 Modal prints an https URL. Set it in the Android app's ``local.properties``:
     sahara.ai.chat.url=<that url>/v1/chat
-
-The model id and provider are env-overridable so you can repoint without a
-redeploy: set SAHARA_AI_MODEL_ID and/or SAHARA_AI_PROVIDER on the Modal Secret
-(or as ``.env`` entries on the image).
 """
 
 import os
+import re
 
 import modal
 
 APP_NAME = "sahara-ai"
-# `:fastest` is HF's auto-routing suffix. Combined with provider="auto"
-# below, the InferenceClient asks HF's router to pick the fastest live
-# provider for the model and transparently fail over if the first one
-# rate-limits or 5xxes. Featherless-ai is currently the only listed
-# provider for this model, but the auto path still survives a transient
-# featherless outage (e.g. the per-IP free-tier rate cap that knocked
-# out the second turn during testing) where a hard-coded provider
-# wouldn't. Override via SAHARA_AI_MODEL_ID / SAHARA_AI_PROVIDER env
-# vars on the Modal Secret if needed.
-DEFAULT_MODEL_ID = "enstazao/Qalb-1.0-8B-Instruct:fastest"
-DEFAULT_PROVIDER = "auto"
+DEFAULT_MODEL_ID = "enstazao/Qalb-1.0-8B-Instruct"
+# featherless-ai is the only HF provider that lists Qalb-1.0-8B-Instruct as
+# `live` in the model's inferenceProviderMapping; the hf-inference router
+# and every other provider return 400 "Model not supported". Hit featherless
+# through HF's router so we still authenticate with the HF token.
+FEATHERLESS_URL = (
+    "https://router.huggingface.co/featherless-ai/v1/chat/completions"
+)
 
-# Llama-3.1 chat template uses <|eot_id|> to end the assistant turn. We pass it
-# as a stop sequence so the remote provider trims cleanly; the protocol's
-# normaliser does the final cleanup of any trailing template noise.
-STOP_SEQUENCES = ["<|eot_id|>"]
+# Crisis vocabulary; if any term matches the user's latest message, the
+# response flips trigger_counselor=true so the Android chat UI attaches the
+# "Talk to a counselor" inline crisis card to the bot bubble. Bilingual on
+# purpose — the user types Roman Urdu freely.
+CRISIS_TERMS = (
+    "suicide", "khudkushi", "khud kushi", "self harm", "self-harm", "kill myself",
+    "marna chahta", "marna chahti", "marna chahti hoon", "marna chahta hoon",
+    "overdose", "od kiya", "blue lips", "neelay hont", "neele hont",
+    "fainting", "behosh", "behoshi", "saans nahi", "saans nahi aa",
+    "chest pain", "seene mein dard", "fit aya", "fit aaya",
+    "withdrawal", "withdrawals", "shaking", "kaanp",
+)
+
+# Substance vocabulary, used to populate `substance_detected` for analytics
+# / dashboard. Doesn't gate the reply.
+SUBSTANCE_TERMS = {
+    "alcohol": ("sharab", "shrb", "shrab", "alcohol", "wine", "beer", "vodka", "whisky", "whiskey", "rum"),
+    "cannabis": ("charas", "chrs", "weed", "cannabis", "ganja", "hashish", "marijuana", "joint"),
+    "ice": ("ice", "crystal meth", "meth", "shabu"),
+    "heroin": ("heroin", "smack", "brown sugar"),
+    "cocaine": ("cocaine", "coke", "blow"),
+    "pills": ("xanax", "valium", "rohypnol", "tramadol", "tablet", "pills"),
+}
 
 image = (
     modal.Image.debian_slim(python_version="3.11")
     .pip_install(
         "fastapi==0.115.0",
         "pydantic==2.9.2",
-        # 0.27+ exposes provider-routed text_generation and stop_sequences cleanly.
-        "huggingface_hub>=0.27.0",
+        "httpx==0.27.2",
     )
     .env({"TOKENIZERS_PARALLELISM": "false"})
-    .add_local_python_source("sahara_ai")
 )
 
 app = modal.App(name=APP_NAME, image=image)
@@ -67,79 +78,115 @@ app = modal.App(name=APP_NAME, image=image)
 @app.function(
     timeout=120,
     scaledown_window=300,
-    # The secret only needs HF_TOKEN. Optional: also include
-    # SAHARA_AI_MODEL_ID and SAHARA_AI_PROVIDER to repoint without redeploying.
     secrets=[modal.Secret.from_name("huggingface-secret", required_keys=["HF_TOKEN"])],
 )
 @modal.asgi_app(label="chat-endpoint")
 def fastapi_app():
+    import time
+
+    import httpx
     from fastapi import FastAPI, HTTPException
-    from huggingface_hub import InferenceClient
     from pydantic import BaseModel
 
-    from sahara_ai.sahara_ai_protocol import sahara_ai_chat
-
     model_id = os.environ.get("SAHARA_AI_MODEL_ID", DEFAULT_MODEL_ID)
-    provider = os.environ.get("SAHARA_AI_PROVIDER", DEFAULT_PROVIDER)
-    client = InferenceClient(provider=provider, api_key=os.environ["HF_TOKEN"])
+    hf_token = os.environ["HF_TOKEN"]
 
-    # text_generator(prompt) -> str. Parameters mirror the local generation
-    # path in sahara_ai_protocol.generate_with_sahara_ai so the prompt
-    # engineering tuned for the local model still applies on the remote one.
-    def text_generator(prompt: str, max_new_tokens: int = 512) -> str:
-        # Sampling tuned to keep Qalb (Llama-3.1-8B fine-tune) out of the
-        # "Aaj sharam hain? Aaj rata hain? Aaj subah hain?" repetition
-        # collapse it falls into at low temperature. Previous values
-        # (T=0.15, rep_pen=1.08) reliably produced a sensible opening then
-        # latched onto a 4-5 token cycle until max_new_tokens ran out.
-        #   - temperature 0.6: warm enough to break out of token-cycles
-        #     while staying coherent for the bilingual safety context.
-        #   - repetition_penalty 1.2: typical for Llama-3.1 chat tunes;
-        #     1.08 was too gentle to interrupt the loop once it started.
-        #   - top_p 0.95: slight relax so the sampler doesn't get
-        #     monomaniacal on the top-of-distribution token.
-        kwargs = dict(
-            prompt=prompt,
-            model=model_id,
-            max_new_tokens=max_new_tokens,
-            temperature=0.6,
-            top_p=0.95,
-            repetition_penalty=1.20,
-            do_sample=True,
-            stop_sequences=STOP_SEQUENCES,
-        )
-        # One automatic retry on transient provider failures (rate-limit
-        # / 5xx). Featherless's free tier reliably 429s on the second back-
-        # to-back request in our testing, which had been surfacing as the
-        # in-app "Main yahin hoon..." local-fallback message every other
-        # turn. A short backoff is usually enough for the provider to
-        # let us through; with provider="auto" the second attempt may
-        # even hop to a different live provider.
-        import time
+    # One shared httpx client so connection pooling is reused across
+    # cold-start-warm container lifetime.
+    http = httpx.Client(timeout=60.0)
+
+    def call_qalb(messages: list, max_tokens: int = 512) -> str:
+        """POST to featherless via HF router with one retry on transient failure."""
+        body = {
+            "model": model_id,
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "temperature": 0.6,
+            "top_p": 0.95,
+            "frequency_penalty": 0.5,  # OpenAI-style; better cycle breaker than repetition_penalty
+            "presence_penalty": 0.3,
+            "stream": False,
+        }
+        headers = {
+            "Authorization": f"Bearer {hf_token}",
+            "Content-Type": "application/json",
+        }
         last_exc: Exception | None = None
         for attempt in range(2):
             try:
-                out = client.text_generation(**kwargs)
-                text = (out or "").strip()
-                for stop in STOP_SEQUENCES:
-                    if text.endswith(stop):
-                        text = text[: -len(stop)].rstrip()
-                if text:
-                    return text
+                resp = http.post(FEATHERLESS_URL, headers=headers, json=body)
+                if resp.status_code == 429 or 500 <= resp.status_code < 600:
+                    raise httpx.HTTPStatusError(
+                        f"upstream {resp.status_code}: {resp.text[:300]}",
+                        request=resp.request, response=resp,
+                    )
+                resp.raise_for_status()
+                data = resp.json()
+                content = (
+                    data.get("choices", [{}])[0]
+                        .get("message", {})
+                        .get("content", "")
+                ) or ""
+                content = content.strip()
+                if content:
+                    return content
+                last_exc = RuntimeError("empty content from upstream")
             except Exception as exc:
                 last_exc = exc
-                if attempt == 0:
-                    time.sleep(1.2)
-                    continue
-                raise
-        # Empty text and no exception — bubble up so the caller's
-        # normalize_model_response can fall back to canned guidance.
-        raise RuntimeError("Qalb returned an empty completion after retry")
+            if attempt == 0:
+                time.sleep(1.2)
+        raise RuntimeError(f"Qalb upstream failed: {last_exc}")
 
-    api = FastAPI(title="Sahara AI (Modal -> HF Inference)", version="0.4.0")
+    def detect_substance(text: str) -> str:
+        low = text.lower()
+        for key, terms in SUBSTANCE_TERMS.items():
+            if any(re.search(rf"\b{re.escape(t)}\b", low) for t in terms):
+                return key
+        return ""
+
+    def detect_crisis(text: str) -> bool:
+        low = text.lower()
+        return any(term in low for term in CRISIS_TERMS)
+
+    def system_prompt(language_hint: str, prior_summaries: list[str]) -> str:
+        parts = [
+            "You are SAHARA, a warm bilingual companion for Pakistani users who may be "
+            "dealing with substance use, stress, or low mood.",
+            "Reply briefly (2 to 4 short sentences). Match the user's language exactly — "
+            "Roman Urdu if they wrote Roman Urdu, English if English, mix if they mix. Do NOT use formal Urdu script.",
+            "Be empathetic and curious. Ask one gentle follow-up question that invites the user "
+            "to say a bit more. NEVER give medical advice, dosages, diagnoses, or recovery protocols. "
+            "NEVER moralise or lecture about substance use.",
+            "If the user mentions an emergency (chest pain, fainting, blue lips, fit, no breathing, "
+            "suicidal thoughts, self-harm), still reply warmly but add ONE short line that asks them "
+            "to use the Emergency button or open the counselor list right now.",
+            "Do not say 'I am an AI'. Do not greet them again after the first turn — stay in conversation.",
+        ]
+        if language_hint == "english":
+            parts.append("Reply in English this turn.")
+        elif language_hint == "roman_urdu":
+            parts.append("Reply in Roman Urdu this turn (Hindi-Urdu in Latin letters).")
+        if prior_summaries:
+            joined = " | ".join(s.strip() for s in prior_summaries if s.strip())
+            if joined:
+                parts.append(
+                    "Earlier in this conversation (compressed summaries, oldest first): " + joined
+                )
+        return "\n\n".join(parts)
+
+    def summarise_system_prompt(language_hint: str) -> str:
+        return (
+            "You are compressing a Sahara mental-health chat into 3-5 short sentences. "
+            "Preserve: any substance mentioned (name, frequency, context), risk signals "
+            "(suicidal thoughts, withdrawal, self-harm), the user's emotional state, and "
+            "the assistant's last guidance. Use the same language the user used "
+            f"({language_hint or 'auto'}). No new advice — just the compressed factual summary."
+        )
+
+    api = FastAPI(title="Sahara AI (Modal -> featherless)", version="0.5.0")
 
     class HistoryTurn(BaseModel):
-        role: str            # "user" or "assistant"
+        role: str
         content: str
         timestamp_ms: int | None = None
 
@@ -147,16 +194,10 @@ def fastapi_app():
         user_input: str
         language: str | None = None
         is_english: bool | None = None
-        # Unsummarised live history of the current chat session, oldest-
-        # first. Does NOT include `user_input`; we add it server-side.
         history: list[HistoryTurn] | None = None
-        # Already-collapsed batch summaries (oldest-first). Prepended to
-        # the prompt as "Earlier context" so continuity survives past the
-        # live-history window.
         prior_summaries: list[str] | None = None
 
     class SummarizeRequest(BaseModel):
-        # Full 16-message batch (8 user + 8 assistant) to compress.
         messages: list[HistoryTurn]
         language: str | None = None
 
@@ -165,9 +206,8 @@ def fastapi_app():
         return {
             "service": APP_NAME,
             "host": "modal",
-            "backend": "hf-inference",
+            "backend": "featherless-via-hf-router",
             "model": model_id,
-            "provider": provider,
             "endpoints": ["/v1/chat", "/v1/summarize", "/healthz"],
         }
 
@@ -177,28 +217,48 @@ def fastapi_app():
 
     @api.post("/v1/chat")
     def chat(req: ChatRequest) -> dict:
-        if not req.user_input or not req.user_input.strip():
+        text = (req.user_input or "").strip()
+        if not text:
             raise HTTPException(status_code=400, detail="user_input must not be empty.")
-        preferred = req.language
-        if req.is_english is True and preferred is None:
-            preferred = "english"
-        history = [
-            {"role": t.role, "content": t.content, "timestamp_ms": t.timestamp_ms}
-            for t in (req.history or [])
-        ]
-        prior_summaries = list(req.prior_summaries or [])
-        return sahara_ai_chat(
-            req.user_input,
-            preferred_language=preferred,
-            text_generator=text_generator,
-            history=history,
-            prior_summaries=prior_summaries,
-        )
+
+        language_hint = (req.language or "").strip().lower()
+        if req.is_english is True and not language_hint:
+            language_hint = "english"
+
+        messages = [{"role": "system", "content": system_prompt(language_hint, list(req.prior_summaries or []))}]
+        for turn in (req.history or []):
+            role = turn.role if turn.role in ("user", "assistant") else "user"
+            content = (turn.content or "").strip()
+            if content:
+                messages.append({"role": role, "content": content})
+        messages.append({"role": "user", "content": text})
+
+        try:
+            reply = call_qalb(messages, max_tokens=512)
+        except Exception as exc:
+            # Hand back an empty reply field — the Android client falls
+            # back to its localised "couldn't reach Sahara AI" line in
+            # that case (better than synthesising fake guidance here).
+            return {"reply": "", "error": str(exc)[:200], "trigger_counselor": False}
+
+        substance = detect_substance(text)
+        is_crisis = detect_crisis(text)
+        return {
+            "reply": reply,
+            "trigger_counselor": is_crisis,
+            "substance_detected": substance,
+            "substances_detected": [substance] if substance else [],
+            "risk_level": "high" if is_crisis else ("elevated" if substance else "low"),
+            "message_type": "CRISIS_CARD" if is_crisis else "TEXT",
+            "action_destination": "counselors" if is_crisis else None,
+            "quick_replies": [],
+            "safety_flags": (["crisis"] if is_crisis else []) + ([substance] if substance else []),
+            "detected_symptoms": [],
+            "user_intent": "support_request",
+        }
 
     @api.post("/v1/summarize")
     def summarize(req: SummarizeRequest) -> dict:
-        # We don't import sahara_ai_chat's full protocol for summarisation
-        # — it just needs a faithful compression. Build the prompt inline.
         if not req.messages:
             raise HTTPException(status_code=400, detail="messages must not be empty.")
         language_hint = (req.language or "").strip().lower()
@@ -207,25 +267,14 @@ def fastapi_app():
             speaker = "User" if t.role == "user" else "Assistant"
             transcript_lines.append(f"{speaker}: {t.content}")
         transcript = "\n".join(transcript_lines)
-        instruction = (
-            "You are helping the Sahara mental-health app keep continuity across "
-            "long conversations. Summarise the following exchange in 3-5 short "
-            "sentences. Preserve: any substance the user mentioned (drug name, "
-            "frequency, context), risk signals (suicidal ideation, withdrawal, "
-            "fainting, self-harm), the assistant's last guidance, and the user's "
-            "current emotional state. Use the same language the user was using "
-            f"({language_hint or 'auto-detect'}). Do NOT add new advice or extra "
-            "framing — just the compressed factual summary."
-        )
-        # Use Llama-3.1 chat template manually for the summariser.
-        prompt = (
-            "<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n"
-            f"{instruction}<|eot_id|>"
-            "<|start_header_id|>user<|end_header_id|>\n\n"
-            f"{transcript}<|eot_id|>"
-            "<|start_header_id|>assistant<|end_header_id|>\n\n"
-        )
-        summary = text_generator(prompt, max_new_tokens=320).strip()
+        messages = [
+            {"role": "system", "content": summarise_system_prompt(language_hint)},
+            {"role": "user", "content": transcript},
+        ]
+        try:
+            summary = call_qalb(messages, max_tokens=320)
+        except Exception as exc:
+            return {"summary": "", "error": str(exc)[:200]}
         return {"summary": summary}
 
     return api
