@@ -47,6 +47,7 @@ import dev.chrisbanes.haze.hazeSource
 import pk.edu.ucp.saharaai.ui.components.GlassAlertDialog
 import pk.edu.ucp.saharaai.ui.components.*
 import pk.edu.ucp.saharaai.ui.theme.*
+import pk.edu.ucp.saharaai.utils.ObservePermissionState
 import pk.edu.ucp.saharaai.utils.PermissionCopy
 import pk.edu.ucp.saharaai.utils.rememberAppPermissionRequester
 import pk.edu.ucp.saharaai.utils.showLocalizedToast
@@ -90,7 +91,7 @@ fun ProfileScreen(
     val regionLoading = profileViewModel.isUpdatingRegion
     var showAvatarPickerDialog by remember { mutableStateOf(false) }
     val regionPermissionRequester = rememberAppPermissionRequester(
-        permission = Manifest.permission.ACCESS_FINE_LOCATION,
+        permission = Manifest.permission.ACCESS_COARSE_LOCATION,
         isEnglish = isEnglish,
         copy = PermissionCopy(
             deniedEn = "Location permission was denied.",
@@ -110,6 +111,11 @@ fun ProfileScreen(
             }
         },
     )
+    ObservePermissionState(regionPermissionRequester) { granted ->
+        if (granted && resolvedRegion.isBlank() && !regionLoading) {
+            profileViewModel.refreshRegionFromDevice(context)
+        }
+    }
     val avatarPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         val metadata = context.readAvatarUploadMetadata(uri)
@@ -200,27 +206,15 @@ fun ProfileScreen(
                     .verticalScroll(rememberScrollState()),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // Canonical "back arrow + title" header used by GameRecovery,
-                // ActivityLog, etc. The descriptive subtitle was removed —
-                // every other screen has just the title on this line and the
-                // explanatory copy lives in the body (here: the avatar block
-                // immediately below).
-                Row(
+                Spacer(Modifier.height(24.dp))
+                Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .statusBarsPadding(),
-                    verticalAlignment = Alignment.CenterVertically
+                        .statusBarsPadding()
                 ) {
                     HazeBackButton(onClick = onNavigateBack, hazeState = hazeState)
-                    Spacer(Modifier.width(16.dp))
-                    Text(
-                        text = if (isEnglish) "Profile" else "Profile",
-                        style = MaterialTheme.typography.headlineMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = SaharaStrongGreen
-                    )
                 }
-                Spacer(Modifier.height(18.dp))
+                Spacer(Modifier.height(12.dp))
 
                 ProfileAvatarSection(
                     name           = resolvedName,

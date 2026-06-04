@@ -71,6 +71,7 @@ import pk.edu.ucp.saharaai.ui.theme.SaharaPeach
 import pk.edu.ucp.saharaai.ui.theme.SaharaSky
 import pk.edu.ucp.saharaai.ui.theme.SaharaStrongGreen
 import pk.edu.ucp.saharaai.ui.theme.SaharaWarning
+import pk.edu.ucp.saharaai.utils.ObservePermissionState
 import pk.edu.ucp.saharaai.utils.PermissionCopy
 import pk.edu.ucp.saharaai.utils.VoiceRecorder
 import pk.edu.ucp.saharaai.utils.rememberAppPermissionRequester
@@ -111,6 +112,9 @@ fun VoiceAnalysisScreen(
         onGranted = { audioGranted.value = true },
         onDenied = { audioGranted.value = false },
     )
+    ObservePermissionState(audioPermissionRequester) {
+        audioGranted.value = it
+    }
 
     LaunchedEffect(Unit) {
         if (!audioGranted.value) audioPermissionRequester.request()

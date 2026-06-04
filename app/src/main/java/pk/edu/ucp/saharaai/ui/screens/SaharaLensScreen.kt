@@ -15,7 +15,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -74,11 +73,11 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import kotlinx.coroutines.launch
@@ -97,6 +96,7 @@ import pk.edu.ucp.saharaai.ui.theme.SaharaPeach
 import pk.edu.ucp.saharaai.ui.theme.SaharaSky
 import pk.edu.ucp.saharaai.ui.theme.SaharaStrongGreen
 import pk.edu.ucp.saharaai.ui.theme.SaharaWarning
+import pk.edu.ucp.saharaai.utils.ObservePermissionState
 import pk.edu.ucp.saharaai.utils.PermissionCopy
 import pk.edu.ucp.saharaai.utils.rememberAppPermissionRequester
 import pk.edu.ucp.saharaai.viewmodels.LensUiState
@@ -136,6 +136,9 @@ fun SaharaLensScreen(
         onGranted = { cameraGranted.value = true },
         onDenied = { cameraGranted.value = false },
     )
+    ObservePermissionState(cameraPermissionRequester) {
+        cameraGranted.value = it
+    }
 
     LaunchedEffect(Unit) {
         if (!cameraGranted.value) cameraPermissionRequester.request()

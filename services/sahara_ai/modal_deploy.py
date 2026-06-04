@@ -3,8 +3,8 @@
 This deploy is a thin proxy. The protocol layer (``sahara_ai_chat``) still
 runs on Modal — system prompt construction, language detection, risk-level
 parsing, response normalisation — but the actual token generation is sent to
-HuggingFace's Inference API (default provider: ``featherless-ai``, which is
-the only provider hosting Qalb-1.0-8B-Instruct on HF's router) instead of
+HuggingFace's Inference API (auto-routed via the ``:fastest`` suffix so HF
+picks the live provider and fails over if one rate-limits) instead of
 loading the 8B model onto a Modal GPU. That means:
 
 * No A10G / no quantization plumbing / no bitsandbytes.
@@ -32,16 +32,17 @@ import os
 import modal
 
 APP_NAME = "sahara-ai"
-DEFAULT_MODEL_ID = "enstazao/Qalb-1.0-8B-Instruct"
-# Qalb's HF inferenceProviderMapping has exactly ONE provider listed live:
-# featherless-ai. The router endpoint
-#   POST router.huggingface.co/featherless-ai/v1/chat/completions
-# returns a valid completion with the Qalb model id; the same call against
-# `hf-inference` returns 400 "Model not supported by provider hf-inference"
-# (despite the model card saying `inference: warm` — HF's serverless
-# default doesn't host obscure community fine-tunes). Switching to
-# featherless-ai here matches the only working route.
-DEFAULT_PROVIDER = "featherless-ai"
+# `:fastest` is HF's auto-routing suffix. Combined with provider="auto"
+# below, the InferenceClient asks HF's router to pick the fastest live
+# provider for the model and transparently fail over if the first one
+# rate-limits or 5xxes. Featherless-ai is currently the only listed
+# provider for this model, but the auto path still survives a transient
+# featherless outage (e.g. the per-IP free-tier rate cap that knocked
+# out the second turn during testing) where a hard-coded provider
+# wouldn't. Override via SAHARA_AI_MODEL_ID / SAHARA_AI_PROVIDER env
+# vars on the Modal Secret if needed.
+DEFAULT_MODEL_ID = "enstazao/Qalb-1.0-8B-Instruct:fastest"
+DEFAULT_PROVIDER = "auto"
 
 # Llama-3.1 chat template uses <|eot_id|> to end the assistant turn. We pass it
 # as a stop sequence so the remote provider trims cleanly; the protocol's
@@ -88,7 +89,7 @@ def fastapi_app():
     def text_generator(prompt: str, max_new_tokens: int = 512) -> str:
         # Sampling tuned to keep Qalb (Llama-3.1-8B fine-tune) out of the
         # "Aaj sharam hain? Aaj rata hain? Aaj subah hain?" repetition
-        # collapse it falls into at low temperature. The previous values
+        # collapse it falls into at low temperature. Previous values
         # (T=0.15, rep_pen=1.08) reliably produced a sensible opening then
         # latched onto a 4-5 token cycle until max_new_tokens ran out.
         #   - temperature 0.6: warm enough to break out of token-cycles
@@ -97,8 +98,8 @@ def fastapi_app():
         #     1.08 was too gentle to interrupt the loop once it started.
         #   - top_p 0.95: slight relax so the sampler doesn't get
         #     monomaniacal on the top-of-distribution token.
-        out = client.text_generation(
-            prompt,
+        kwargs = dict(
+            prompt=prompt,
             model=model_id,
             max_new_tokens=max_new_tokens,
             temperature=0.6,
@@ -107,11 +108,33 @@ def fastapi_app():
             do_sample=True,
             stop_sequences=STOP_SEQUENCES,
         )
-        text = (out or "").strip()
-        for stop in STOP_SEQUENCES:
-            if text.endswith(stop):
-                text = text[: -len(stop)].rstrip()
-        return text
+        # One automatic retry on transient provider failures (rate-limit
+        # / 5xx). Featherless's free tier reliably 429s on the second back-
+        # to-back request in our testing, which had been surfacing as the
+        # in-app "Main yahin hoon..." local-fallback message every other
+        # turn. A short backoff is usually enough for the provider to
+        # let us through; with provider="auto" the second attempt may
+        # even hop to a different live provider.
+        import time
+        last_exc: Exception | None = None
+        for attempt in range(2):
+            try:
+                out = client.text_generation(**kwargs)
+                text = (out or "").strip()
+                for stop in STOP_SEQUENCES:
+                    if text.endswith(stop):
+                        text = text[: -len(stop)].rstrip()
+                if text:
+                    return text
+            except Exception as exc:
+                last_exc = exc
+                if attempt == 0:
+                    time.sleep(1.2)
+                    continue
+                raise
+        # Empty text and no exception — bubble up so the caller's
+        # normalize_model_response can fall back to canned guidance.
+        raise RuntimeError("Qalb returned an empty completion after retry")
 
     api = FastAPI(title="Sahara AI (Modal -> HF Inference)", version="0.4.0")
 

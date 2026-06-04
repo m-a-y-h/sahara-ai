@@ -53,6 +53,20 @@ class GameRecoveryViewModel : ViewModel() {
         viewModelScope.launch { RealtimeDBService.saveGameAlias(uid, alias, location) }
     }
 
+    fun startRecovery(
+        alias: String,
+        location: String,
+        onComplete: (Result<Map<String, Any>>) -> Unit,
+    ) {
+        if (uid.isBlank()) {
+            onComplete(Result.failure(IllegalStateException("Please sign in again before starting Game Recovery.")))
+            return
+        }
+        viewModelScope.launch {
+            onComplete(RealtimeDBService.startGameRecovery(uid, alias, location))
+        }
+    }
+
     fun completeTask(
         taskId: String,
         xp: Int,
@@ -125,7 +139,7 @@ class GameRecoveryViewModel : ViewModel() {
                 "Zarda", "Pakora", "Chargha", "GolGappa", "Paparh", "Broast", "Shawarma",
                 "DahiBhalla", "Naan", "Kulcha", "Taftan", "Katakat", "GolaGanda",
                 "AndaShami", "Pathoora", "Sandal", "RoohAfza", "Naurus", "JamEShireen",
-                "Talbeena", "Sattu", "LimoPani", "Kaju", "Badam", "Akhrot", "Pista",
+                "Talbeena", "Sattu", "LimuPani", "Kaju", "Badam", "Akhrot", "Pista",
                 "Chilghoza", "Makhaana", "Gurh", "Falooda", "Halwa", "Patisa",
                 "SohanHalwa", "Pera", "DoodhSoda", "Qorma", "Keema", "Saag", "SiriPaaye",
                 "Bong", "Anda", "GannayKaRas", "Gajrela", "Amrood", "Aam", "Falsa",
@@ -142,7 +156,7 @@ class GameRecoveryViewModel : ViewModel() {
             ) to listOf(
                 "Chutni", "Biryani", "Lassi", "Khashkhash", "Sewiyaan", "Nihari",
                 "Karahi", "Haleem", "Sajji", "Chaat", "FruitChaat", "DahiPhulki",
-                "Papri", "Boondi", "Golgappi", "Challi", "Makai", "ShamiTikki",
+                "Papri", "Boondi", "Golgappi", "Chhalli", "Makai", "ShamiTikki",
                 "DaalMash", "Kachori", "Nimko", "Mungphali", "Rewari", "Khajoor",
                 "Supari", "Saunf", "Panjeeri", "DoodhPati", "KashmiriChai", "PeshawariChai",
                 "Jalebi", "Kulfi", "Kheer", "Firni", "Barfi", "Gajak", "ChanaChaat",

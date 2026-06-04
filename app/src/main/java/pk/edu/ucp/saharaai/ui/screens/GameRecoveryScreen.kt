@@ -58,6 +58,8 @@ import pk.edu.ucp.saharaai.ui.components.SaharaCard
 import pk.edu.ucp.saharaai.ui.components.GlassAlertDialog
 import pk.edu.ucp.saharaai.ui.components.HazeBackButton
 import pk.edu.ucp.saharaai.ui.theme.*
+import pk.edu.ucp.saharaai.utils.NetworkUtils
+import pk.edu.ucp.saharaai.utils.ObservePermissionState
 import pk.edu.ucp.saharaai.utils.PermissionCopy
 import pk.edu.ucp.saharaai.utils.rememberAppPermissionRequester
 import pk.edu.ucp.saharaai.utils.showLocalizedToast
@@ -351,6 +353,9 @@ fun GameRecoveryScreen(
     
     var loadingTaskId by remember { mutableStateOf<String?>(null) }
     var selectedTaskId by remember { mutableStateOf<String?>(null) }
+    var isStartingRecovery by remember { mutableStateOf(false) }
+    var pendingRecoveryStart by remember { mutableStateOf(false) }
+    var locationGranted by remember { mutableStateOf(false) }
 
     
     fun Map<String, Any>.toUser(rank: Int, xpField: String): LeaderboardUser = LeaderboardUser(
@@ -361,8 +366,24 @@ fun GameRecoveryScreen(
         isCurrentUser = this["uid"]?.toString() == uid
     )
 
+    fun applyGameProfile(profile: Map<String, Any>) {
+        totalXp = profile["totalXp"].asRecoveryInt()
+        dailyXp = profile["dailyXp"].asRecoveryInt()
+        weeklyXp = profile["weeklyXp"].asRecoveryInt()
+        level = profile["level"].asRecoveryInt(default = 1)
+        profile["alias"]?.toString()?.takeIf { it.isNotBlank() }?.let {
+            GlobalAppState.anonymousUsername = it
+        }
+        profile["location"]?.toString()?.takeIf { it.isNotBlank() }?.let {
+            GlobalAppState.userLocation = it
+            GlobalAppState.hasGrantedLocation = true
+        }
+        @Suppress("UNCHECKED_CAST")
+        completedToday = profile["completedToday"] as? Set<String> ?: emptySet()
+    }
+
     
-    LaunchedEffect(uid, GlobalAppState.hasGrantedLocation) {
+    LaunchedEffect(uid) {
         if (uid.isBlank()) {
             isLoadingProfile     = false
             isLoadingLeaderboard = false
@@ -374,19 +395,7 @@ fun GameRecoveryScreen(
             thisWeek,
             onProfileLoaded = { profile ->
                 if (profile != null) {
-                    totalXp = profile["totalXp"].asRecoveryInt()
-                    dailyXp = profile["dailyXp"].asRecoveryInt()
-                    weeklyXp = profile["weeklyXp"].asRecoveryInt()
-                    level = profile["level"].asRecoveryInt(default = 1)
-                    profile["alias"]?.toString()?.takeIf { it.isNotBlank() }?.let {
-                        GlobalAppState.anonymousUsername = it
-                    }
-                    profile["location"]?.toString()?.takeIf { it.isNotBlank() }?.let {
-                        GlobalAppState.userLocation = it
-                        GlobalAppState.hasGrantedLocation = true
-                    }
-                    @Suppress("UNCHECKED_CAST")
-                    completedToday = profile["completedToday"] as? Set<String> ?: emptySet()
+                    applyGameProfile(profile)
                 }
                 isLoadingProfile = false
             },
@@ -410,6 +419,52 @@ fun GameRecoveryScreen(
     val levelProgress  = (totalXp % xpPerLevel).toFloat() / xpPerLevel
     val xpToNextLevel  = xpPerLevel - (totalXp % xpPerLevel)
 
+    fun startRecoveryWithLockedAlias() {
+        if (isStartingRecovery) return
+        if (!NetworkUtils.isNetworkAvailable(context)) {
+            pendingRecoveryStart = false
+            context.showLocalizedToast(
+                isEnglish,
+                "Internet connection is required to start Game Recovery.",
+                "Game Recovery shuru karne ke liye internet zaroori hai.",
+                Toast.LENGTH_LONG,
+            )
+            return
+        }
+        val lm = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+        val gps = lm.isProviderEnabled(LocationManager.GPS_PROVIDER) ||
+            lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+        if (!gps) {
+            context.showLocalizedToast(
+                isEnglish,
+                "Please turn on GPS in settings.",
+                "Please settings mein GPS on karein.",
+                Toast.LENGTH_LONG,
+            )
+            context.startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
+            return
+        }
+        pendingRecoveryStart = false
+        isStartingRecovery = true
+        fetchRealLocation(context) { realLoc ->
+            GlobalAppState.userLocation = realLoc
+            gameViewModel.startRecovery(tempAlias, realLoc) { result ->
+                isStartingRecovery = false
+                result.onSuccess { profile ->
+                    applyGameProfile(profile)
+                    NotificationManager.logUsername(profile["alias"]?.toString().orEmpty().ifBlank { tempAlias })
+                }.onFailure { error ->
+                    context.showLocalizedToast(
+                        isEnglish,
+                        error.message ?: "Could not start Game Recovery. Try again.",
+                        error.message ?: "Game Recovery shuru nahi ho saki. Dobara koshish karein.",
+                        Toast.LENGTH_LONG,
+                    )
+                }
+            }
+        }
+    }
+
     
     val locationPermissionRequester = rememberAppPermissionRequester(
         permission = Manifest.permission.ACCESS_FINE_LOCATION,
@@ -421,19 +476,31 @@ fun GameRecoveryScreen(
             settingsUr = "Local leaderboards join karne ke liye App settings mein location ki ijazat dein.",
         ),
         onGranted = {
-            GlobalAppState.hasGrantedLocation  = true
-            GlobalAppState.anonymousUsername   = tempAlias
-            NotificationManager.logUsername(tempAlias)
-            fetchRealLocation(context) { realLoc ->
-                GlobalAppState.userLocation = realLoc
-                gameViewModel.saveAlias(tempAlias, realLoc)
-            }
+            locationGranted = true
+            if (pendingRecoveryStart) startRecoveryWithLockedAlias()
+        },
+        onDenied = {
+            locationGranted = false
+            pendingRecoveryStart = false
         },
     )
 
+    fun onStartRecoveryClick() {
+        if (locationGranted || locationPermissionRequester.hasPermission()) {
+            startRecoveryWithLockedAlias()
+        } else {
+            pendingRecoveryStart = true
+            locationPermissionRequester.request()
+        }
+    }
+
     val finalAlias    = GlobalAppState.anonymousUsername.ifEmpty { tempAlias }
     val finalLocation = GlobalAppState.userLocation.ifEmpty { "Locating…" }
-    val hasRecoveryAccess = GlobalAppState.hasGrantedLocation || GlobalAppState.userLocation.isNotBlank()
+    val hasRecoveryAccess = GlobalAppState.anonymousUsername.isNotBlank()
+    ObservePermissionState(locationPermissionRequester) { granted ->
+        locationGranted = granted
+        if (granted && pendingRecoveryStart) startRecoveryWithLockedAlias()
+    }
     val displayRank   = if (myRank > 0) "#$myRank" else if (!isLoadingLeaderboard) "—" else "…"
 
     
@@ -500,9 +567,9 @@ fun GameRecoveryScreen(
                             Spacer(Modifier.height(12.dp))
                             Text(
                                 text  = if (isEnglish)
-                                    "To assign you to your regional arena while keeping you anonymous, we need real-time location access."
+                                    "Start once to join your regional arena. Your anonymous name is checked online and locked permanently."
                                 else
-                                    "Aapko ilaqay ke mutabiq anonymous leaderboard dikhane ke liye location ki ijazat darkar hai.",
+                                    "Regional arena join karne ke liye shuru karein. Anonymous naam online check hoga aur phir hamesha ke liye lock ho jayega.",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 textAlign = TextAlign.Center
@@ -538,34 +605,37 @@ fun GameRecoveryScreen(
                                     Spacer(Modifier.width(12.dp))
                                     IconButton(
                                         onClick  = { tempAlias = generateDesiAlias() },
+                                        enabled = !isStartingRecovery,
                                         modifier = Modifier.background(SaharaStrongGreen.copy(0.1f), CircleShape).size(44.dp)
                                     ) {
                                         Icon(Icons.Default.Refresh, "Randomize", tint = SaharaStrongGreen, modifier = Modifier.size(24.dp))
                                     }
                                 }
                             }
+                            Spacer(Modifier.height(10.dp))
+                            Text(
+                                text = if (isEnglish) {
+                                    "This name cannot be changed after you start."
+                                } else {
+                                    "Shuru karne ke baad yeh naam badla nahi ja sakega."
+                                },
+                                style = MaterialTheme.typography.labelSmall,
+                                color = SaharaWarning,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.fillMaxWidth()
+                            )
 
                             Spacer(Modifier.height(32.dp))
 
                             SaharaButton(
-                                text      = if (isEnglish) "Grant Access" else "Ijazat Dein",
-                                onClick   = {
-                                    val lm = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
-                                    val gps = lm.isProviderEnabled(LocationManager.GPS_PROVIDER)
-                                          || lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
-                                    if (!gps) {
-                                        context.showLocalizedToast(
-                                            isEnglish,
-                                            "Please turn on GPS in settings.",
-                                            "Please settings mein GPS on karein.",
-                                            Toast.LENGTH_LONG,
-                                        )
-                                        context.startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
-                                    } else {
-                                        locationPermissionRequester.request()
-                                    }
+                                text      = if (isStartingRecovery) {
+                                    if (isEnglish) "Starting..." else "Shuru ho raha hai..."
+                                } else {
+                                    if (isEnglish) "Start" else "Shuru Karein"
                                 },
+                                onClick   = { onStartRecoveryClick() },
                                 variant   = ButtonVariant.DEFAULT,
+                                enabled = !isStartingRecovery,
                                 modifier  = Modifier.fillMaxWidth().height(54.dp),
                                 isEnglish = isEnglish
                             )

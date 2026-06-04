@@ -3,7 +3,7 @@ package pk.edu.ucp.saharaai.ui.theme
 import androidx.compose.ui.graphics.Color
 
 val SaharaGreen = Color(0xFF00A158)
-val SaharaStrongGreen = Color(0xFF3FD9AD)
+val SaharaStrongGreen = Color(0xFF00D59B)
 val SaharaGreenLight = Color(0xFFD6F0E3)
 val SaharaSage = Color(0xFFA6D9B8)
 val SaharaSky = Color(0xFF82D0F4)

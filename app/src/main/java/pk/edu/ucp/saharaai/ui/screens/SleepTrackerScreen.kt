@@ -49,6 +49,7 @@ import pk.edu.ucp.saharaai.viewmodels.SleepLog
 import pk.edu.ucp.saharaai.viewmodels.SleepTrackerViewModel
 import pk.edu.ucp.saharaai.viewmodels.HealthSleepImportState
 import pk.edu.ucp.saharaai.viewmodels.SLEEP_SOURCE_HEALTH_CONNECT
+import pk.edu.ucp.saharaai.utils.ObservePermissionState
 import pk.edu.ucp.saharaai.utils.PermissionCopy
 import pk.edu.ucp.saharaai.utils.rememberAppPermissionsRequester
 
@@ -126,6 +127,9 @@ fun SleepTrackerScreen(
         },
         onDenied = { viewModel.onAutomaticPermissionsResult(context, emptyMap()) },
     )
+    ObservePermissionState(automaticPermissionRequester) {
+        viewModel.checkAutomaticTracking(context)
+    }
 
     
     

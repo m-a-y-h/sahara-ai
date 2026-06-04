@@ -38,6 +38,7 @@ import pk.edu.ucp.saharaai.data.remote.RealtimeDBService
 import pk.edu.ucp.saharaai.ui.theme.SaharaCoral
 import pk.edu.ucp.saharaai.ui.theme.SaharaSky
 import pk.edu.ucp.saharaai.ui.theme.SaharaStrongGreen
+import pk.edu.ucp.saharaai.utils.ObservePermissionState
 import pk.edu.ucp.saharaai.utils.PermissionCopy
 import pk.edu.ucp.saharaai.utils.rememberAppPermissionsRequester
 
@@ -84,9 +85,8 @@ fun InAppCallScreen(
         onGranted = { permissionsGranted = true },
         onDenied = { permissionsGranted = false },
     )
-
-    LaunchedEffect(Unit) {
-        permissionsGranted = permissionRequester.hasPermission()
+    ObservePermissionState(permissionRequester) {
+        permissionsGranted = it
     }
 
     LaunchedEffect(counselorKey) {

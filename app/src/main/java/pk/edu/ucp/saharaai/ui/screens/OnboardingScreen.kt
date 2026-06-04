@@ -38,6 +38,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.delay
 import pk.edu.ucp.saharaai.ui.components.*
 import pk.edu.ucp.saharaai.ui.theme.*
+import pk.edu.ucp.saharaai.utils.ObservePermissionState
 import pk.edu.ucp.saharaai.utils.PermissionCopy
 import pk.edu.ucp.saharaai.utils.rememberAppPermissionRequester
 import pk.edu.ucp.saharaai.viewmodels.OnboardingViewModel
@@ -98,7 +99,7 @@ fun OnboardingScreen(
         onDenied = { onboardingViewModel.actigraphyAllowed = false },
     )
     val locationPermissionRequester = rememberAppPermissionRequester(
-        permission = Manifest.permission.ACCESS_FINE_LOCATION,
+        permission = Manifest.permission.ACCESS_COARSE_LOCATION,
         isEnglish = isEnglish,
         copy = PermissionCopy(
             deniedEn = "Location permission was denied.",
@@ -109,6 +110,15 @@ fun OnboardingScreen(
         onGranted = { onboardingViewModel.locationAllowed = true },
         onDenied = { onboardingViewModel.locationAllowed = false },
     )
+    ObservePermissionState(notificationPermissionRequester) {
+        onboardingViewModel.notificationsAllowed = it
+    }
+    ObservePermissionState(locationPermissionRequester) {
+        onboardingViewModel.locationAllowed = it
+    }
+    ObservePermissionState(actigraphyPermissionRequester) {
+        onboardingViewModel.actigraphyAllowed = it
+    }
 
     val isNextEnabled = onboardingViewModel.isNextEnabled
     val headerTitle = onboardingViewModel.getHeaderTitle(isEnglish)

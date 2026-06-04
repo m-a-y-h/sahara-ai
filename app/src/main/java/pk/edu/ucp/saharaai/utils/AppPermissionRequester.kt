@@ -13,11 +13,16 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 
 private const val PERMISSION_PREFS = "sahara_permission_state"
 
@@ -35,6 +40,32 @@ class AppPermissionRequester internal constructor(
     val request: () -> Unit,
     val openSettings: () -> Unit,
 )
+
+@Composable
+fun ObservePermissionState(
+    requester: AppPermissionRequester,
+    onChanged: (Boolean) -> Unit,
+) {
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val latestRequester = rememberUpdatedState(requester)
+    val latestOnChanged = rememberUpdatedState(onChanged)
+
+    LaunchedEffect(lifecycleOwner) {
+        latestOnChanged.value(latestRequester.value.hasPermission())
+    }
+
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                latestOnChanged.value(latestRequester.value.hasPermission())
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+}
 
 fun Context.showLocalizedToast(
     isEnglish: Boolean,

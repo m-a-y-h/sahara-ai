@@ -31,6 +31,7 @@ import pk.edu.ucp.saharaai.ui.components.ButtonVariant
 import pk.edu.ucp.saharaai.ui.components.HazeBackButton
 import pk.edu.ucp.saharaai.ui.components.SaharaButton
 import pk.edu.ucp.saharaai.ui.theme.SaharaStrongGreen
+import pk.edu.ucp.saharaai.utils.ObservePermissionState
 import pk.edu.ucp.saharaai.utils.PermissionCopy
 import pk.edu.ucp.saharaai.utils.rememberAppPermissionRequester
 import pk.edu.ucp.saharaai.viewmodels.RegistrationRequestViewModel
@@ -110,8 +111,8 @@ fun RegistrationRequestScreen(
             )
         },
     )
-    LaunchedEffect(Unit) {
-        if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+    ObservePermissionState(locationPermissionRequester) { granted ->
+        if (granted && city.isBlank() && district.isBlank()) {
             applyPreciseLocation()
         }
     }

@@ -40,6 +40,7 @@ import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeSource
 import pk.edu.ucp.saharaai.ui.components.*
 import pk.edu.ucp.saharaai.ui.theme.*
+import pk.edu.ucp.saharaai.utils.ObservePermissionState
 import pk.edu.ucp.saharaai.utils.PermissionCopy
 import pk.edu.ucp.saharaai.utils.rememberAppPermissionRequester
 import pk.edu.ucp.saharaai.viewmodels.SettingsViewModel
@@ -104,6 +105,9 @@ fun SettingsScreen(
         onGranted = { pushNotifications = true },
         onDenied = { pushNotifications = false },
     )
+    ObservePermissionState(notificationPermissionRequester) {
+        pushNotifications = it
+    }
 
     val blobMotion = rememberBackdropBlobMotion()
 

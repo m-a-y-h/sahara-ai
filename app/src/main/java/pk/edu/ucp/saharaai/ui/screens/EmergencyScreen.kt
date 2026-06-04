@@ -26,7 +26,9 @@ import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
@@ -53,6 +55,7 @@ import pk.edu.ucp.saharaai.ui.components.SaharaButton
 import pk.edu.ucp.saharaai.ui.components.SaharaCard
 import pk.edu.ucp.saharaai.ui.components.HazeBackButton
 import pk.edu.ucp.saharaai.ui.theme.*
+import pk.edu.ucp.saharaai.utils.ObservePermissionState
 import pk.edu.ucp.saharaai.utils.PermissionCopy
 import pk.edu.ucp.saharaai.utils.rememberAppPermissionRequester
 import pk.edu.ucp.saharaai.utils.showLocalizedToast
@@ -84,6 +87,7 @@ fun EmergencyScreen(
     }
 
     val fusedLocationClient = remember { LocationServices.getFusedLocationProviderClient(context) }
+    var pendingLocationShare by remember { mutableStateOf(false) }
 
     val shareLocationInfo = { lat: Double, lon: Double ->
         val uri = "https://maps.google.com/?q=$lat,$lon"
@@ -98,6 +102,7 @@ fun EmergencyScreen(
     val fetchLocationAndShare = {
         val hasPermission = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
         if (hasPermission) {
+            pendingLocationShare = false
             context.showLocalizedToast(isEnglish, "Fetching location...", "Location li ja rahi hai...")
             fusedLocationClient.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, CancellationTokenSource().token)
                 .addOnSuccessListener { location ->
@@ -121,6 +126,11 @@ fun EmergencyScreen(
         ),
         onGranted = fetchLocationAndShare,
     )
+    ObservePermissionState(locationPermissionRequester) { granted ->
+        if (granted && pendingLocationShare) {
+            fetchLocationAndShare()
+        }
+    }
 
     val helplines = remember {
         listOf(
@@ -272,6 +282,7 @@ fun EmergencyScreen(
                                     if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
                                         fetchLocationAndShare()
                                     } else {
+                                        pendingLocationShare = true
                                         locationPermissionRequester.request()
                                     }
                                 },

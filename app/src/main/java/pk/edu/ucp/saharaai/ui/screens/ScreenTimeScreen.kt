@@ -50,6 +50,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import dev.chrisbanes.haze.HazeState
@@ -466,11 +469,24 @@ fun ScreenTimeScreen(
 
     var isAccessEnabled by remember { mutableStateOf(isAccessibilityServiceEnabled(context)) }
     val liveEvents = screenTimeViewModel.liveEvents
+    val lifecycleOwner = LocalLifecycleOwner.current
 
-    DisposableEffect(Unit) {
+    fun refreshPermissionState() {
         hasPermission = hasUsagePermission(context)
         isAccessEnabled = isAccessibilityServiceEnabled(context)
-        onDispose {}
+    }
+
+    DisposableEffect(lifecycleOwner) {
+        refreshPermissionState()
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                refreshPermissionState()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
     }
 
     LaunchedEffect(isAccessEnabled) {

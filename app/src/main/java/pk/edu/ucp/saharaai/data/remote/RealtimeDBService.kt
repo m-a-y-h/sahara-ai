@@ -1460,7 +1460,9 @@ object RealtimeDBService {
     
 
     
-    private suspend fun requireRealtimeConnection() {
+    private suspend fun requireRealtimeConnection(
+        message: String = "Internet connection is required to save the assessment."
+    ) {
         // Best-effort online check. Keep it non-fatal: RTDB has its own offline
         // queue so a transient null/false reading from .info/connected
         // shouldn't block a save that would otherwise succeed once the
@@ -1477,7 +1479,7 @@ object RealtimeDBService {
         if (ok == false) {
             // Probe returned a definitive "not connected". Surface that with a
             // clear message; the snackbar will read it back as-is.
-            throw IllegalStateException("Internet connection is required to save the assessment.")
+            throw IllegalStateException(message)
         }
     }
 
@@ -1876,33 +1878,147 @@ object RealtimeDBService {
     
 
     
-    suspend fun saveGameAlias(uid: String, alias: String, location: String): Result<Unit> = runCatching {
+    suspend fun startGameRecovery(uid: String, alias: String, location: String): Result<Map<String, Any>> = runCatching {
+        require(uid.isNotBlank()) { "Missing user id." }
+        val cleanAlias = alias.trim()
+        require(cleanAlias.isNotBlank()) { "Choose an anonymous name first." }
+        require(location.trim().isNotBlank()) { "Could not detect your location yet." }
+        requireRealtimeConnection("Internet connection is required to start Game Recovery.")
+
         val ref  = db.getReference("game_recovery").child(uid)
         val snap = ref.get().await()
+        val existingAlias = snap.child("alias").getValue(String::class.java).orEmpty()
+        if (snap.exists() && existingAlias.isNotBlank()) {
+            if (!existingAlias.equals(cleanAlias, ignoreCase = true)) {
+                throw IllegalStateException("Your anonymous name is already locked and cannot be changed.")
+            }
+            val existingLocation = snap.child("location").getValue(String::class.java).orEmpty()
+            if (location.isNotBlank() && existingLocation.isBlank()) {
+                ref.child("location").setValue(location).await()
+            }
+            val updated = ref.get().await()
+            syncGameLeaderboard(uid, updated)
+            return@runCatching mapOf(
+                "alias" to existingAlias,
+                "location" to (updated.child("location").getValue(String::class.java) ?: location),
+                "totalXp" to (updated.child("totalXp").getValue(Long::class.java) ?: 0L),
+                "dailyXp" to (updated.child("dailyXp").getValue(Long::class.java) ?: 0L),
+                "weeklyXp" to (updated.child("weeklyXp").getValue(Long::class.java) ?: 0L),
+                "level" to (updated.child("level").getValue(Long::class.java) ?: 1L),
+                "completedToday" to emptySet<String>(),
+            )
+        }
+
+        reserveGameAlias(uid, cleanAlias)
+        val now = System.currentTimeMillis()
         if (!snap.exists()) {
             ref.setValue(mapOf(
-                "alias"          to alias,
+                "alias"          to cleanAlias,
                 "location"       to location,
                 "totalXp"        to 0L,
                 "dailyXp"        to 0L,
                 "weeklyXp"       to 0L,
                 "level"          to 1L,
                 "lastDailyDate"  to "",
-                "lastWeeklyDate" to ""
+                "lastWeeklyDate" to "",
+                "aliasLocked"    to true,
+                "aliasLockedAt"  to now,
             )).await()
         } else {
-            ref.updateChildren(mapOf("alias" to alias, "location" to location)).await()
+            ref.updateChildren(mapOf(
+                "alias" to cleanAlias,
+                "location" to location,
+                "aliasLocked" to true,
+                "aliasLockedAt" to now,
+            )).await()
         }
+        val updated = ref.get().await()
+        syncGameLeaderboard(uid, updated)
+        mapOf(
+            "alias" to cleanAlias,
+            "location" to location,
+            "totalXp" to (updated.child("totalXp").getValue(Long::class.java) ?: 0L),
+            "dailyXp" to (updated.child("dailyXp").getValue(Long::class.java) ?: 0L),
+            "weeklyXp" to (updated.child("weeklyXp").getValue(Long::class.java) ?: 0L),
+            "level" to (updated.child("level").getValue(Long::class.java) ?: 1L),
+            "completedToday" to emptySet<String>(),
+        )
+    }.onFailure {
+        Log.w("RealtimeDBService", "startGameRecovery failed", it)
+    }
+
+    suspend fun saveGameAlias(uid: String, alias: String, location: String): Result<Unit> = runCatching {
+        startGameRecovery(uid, alias, location).getOrThrow()
+    }
+
+    private suspend fun reserveGameAlias(uid: String, alias: String) {
+        val aliasKey = gameAliasKey(alias)
+        val existingAliasSnap = db.getReference("game_recovery")
+            .orderByChild("alias")
+            .equalTo(alias)
+            .limitToFirst(1)
+            .get()
+            .await()
+        for (child in existingAliasSnap.children) {
+            val existingUid = child.key.orEmpty()
+            if (existingUid.isNotBlank() && existingUid != uid) {
+                throw IllegalStateException("This anonymous name is already taken. Please choose another.")
+            }
+        }
+
+        val aliasRef = db.getReference("game_alias_index").child(aliasKey)
+        suspendCancellableCoroutine<Unit> { continuation ->
+            var takenByOtherUser = false
+            aliasRef.runTransaction(object : Transaction.Handler {
+                override fun doTransaction(currentData: MutableData): Transaction.Result {
+                    val currentUid = currentData.child("uid").getValue(String::class.java).orEmpty()
+                    if (currentUid.isNotBlank() && currentUid != uid) {
+                        takenByOtherUser = true
+                        return Transaction.abort()
+                    }
+                    currentData.value = mapOf(
+                        "uid" to uid,
+                        "alias" to alias,
+                        "aliasKey" to aliasKey,
+                        "createdAt" to System.currentTimeMillis(),
+                    )
+                    return Transaction.success(currentData)
+                }
+
+                override fun onComplete(error: DatabaseError?, committed: Boolean, currentData: DataSnapshot?) {
+                    when {
+                        error != null -> continuation.resumeWithException(error.toException())
+                        takenByOtherUser || !committed ->
+                            continuation.resumeWithException(
+                                IllegalStateException("This anonymous name is already taken. Please choose another.")
+                            )
+                        else -> continuation.resume(Unit)
+                    }
+                }
+            })
+        }
+    }
+
+    private suspend fun syncGameLeaderboard(uid: String, snap: DataSnapshot) {
+        val alias = snap.child("alias").getValue(String::class.java).orEmpty()
+        if (alias.isBlank()) return
         db.getReference("game_leaderboard").child(uid).updateChildren(mapOf(
-            "alias"       to alias,
-            "location"    to location,
-            "totalXp"     to (snap.child("totalXp").getValue(Long::class.java)  ?: 0L),
-            "dailyXp"     to (snap.child("dailyXp").getValue(Long::class.java)  ?: 0L),
-            "weeklyXp"    to (snap.child("weeklyXp").getValue(Long::class.java) ?: 0L),
+            "alias" to alias,
+            "location" to snap.child("location").getValue(String::class.java).orEmpty(),
+            "totalXp" to (snap.child("totalXp").getValue(Long::class.java) ?: 0L),
+            "dailyXp" to (snap.child("dailyXp").getValue(Long::class.java) ?: 0L),
+            "weeklyXp" to (snap.child("weeklyXp").getValue(Long::class.java) ?: 0L),
             "lastDailyDate" to snap.child("lastDailyDate").getValue(String::class.java).orEmpty(),
             "lastWeeklyDate" to snap.child("lastWeeklyDate").getValue(String::class.java).orEmpty(),
             "lastUpdated" to System.currentTimeMillis()
         )).await()
+    }
+
+    private fun gameAliasKey(alias: String): String {
+        val normalized = alias.trim().lowercase(Locale.US)
+        val digest = MessageDigest.getInstance("SHA-256")
+            .digest(normalized.toByteArray())
+        return digest.joinToString("") { "%02x".format(it) }
     }
 
     
