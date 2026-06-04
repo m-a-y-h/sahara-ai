@@ -17,9 +17,35 @@ object SaharaAiClient {
 
     private val gson = Gson()
 
+    /** One turn of conversation history sent to Qalb. */
+    data class HistoryTurn(
+        @SerializedName("role")         val role: String,         // "user" | "assistant"
+        @SerializedName("content")      val content: String,
+        @SerializedName("timestamp_ms") val timestampMs: Long?    = null,
+    )
+
     data class ChatRequest(
-        @SerializedName("user_input") val userInput: String,
-        @SerializedName("language")   val language: String?  = null,
+        @SerializedName("user_input")       val userInput: String,
+        @SerializedName("language")         val language: String?  = null,
+        /** Unsummarised live history of this chat session, oldest-first.
+         *  Does NOT include the current [userInput] — server appends it
+         *  internally when building the prompt. */
+        @SerializedName("history")          val history: List<HistoryTurn> = emptyList(),
+        /** Each entry is the model's own summary of a previously
+         *  collapsed 16-message batch, oldest-first. Server prepends them
+         *  to the prompt as "Earlier context summaries" so continuity is
+         *  preserved past the live-history window. */
+        @SerializedName("prior_summaries")  val priorSummaries: List<String> = emptyList(),
+    )
+
+    data class SummarizeRequest(
+        /** Full 16-message batch (8 user + 8 assistant) to compress, oldest-first. */
+        @SerializedName("messages") val messages: List<HistoryTurn>,
+        @SerializedName("language") val language: String? = null,
+    )
+
+    data class SummarizeResponse(
+        @SerializedName("summary") val summary: String? = null,
     )
 
     data class ChatResponse(
@@ -40,6 +66,8 @@ object SaharaAiClient {
         endpoint: String,
         userInput: String,
         language: String?,
+        history: List<HistoryTurn> = emptyList(),
+        priorSummaries: List<String> = emptyList(),
     ): Result<ChatResponse> {
         val trimmedEndpoint = endpoint.trim()
         if (trimmedEndpoint.isBlank()) {
@@ -50,9 +78,47 @@ object SaharaAiClient {
             return Result.failure(IllegalArgumentException("user input is empty"))
         }
 
+        val request = ChatRequest(
+            userInput = cleanInput,
+            language = language,
+            history = history,
+            priorSummaries = priorSummaries,
+        )
+        return postJson(endpoint = trimmedEndpoint, body = gson.toJson(request))
+            .mapCatching { parseResponse<ChatResponse>(it) }
+    }
+
+    /**
+     * Asks the same Qalb endpoint to compress a 16-message batch into a
+     * short paragraph. The endpoint is the same Modal-deployed FastAPI
+     * service, just with the `/v1/chat` path swapped for `/v1/summarize`.
+     */
+    suspend fun postSummarize(
+        chatEndpoint: String,
+        messages: List<HistoryTurn>,
+        language: String?,
+    ): Result<String> {
+        val summarizeUrl = chatEndpoint.trim().let { base ->
+            if (base.endsWith("/v1/chat")) base.removeSuffix("/v1/chat") + "/v1/summarize"
+            else if (base.endsWith("/v1/chat/")) base.removeSuffix("/v1/chat/") + "/v1/summarize"
+            else base.trimEnd('/') + "/v1/summarize"
+        }
+        if (messages.isEmpty()) {
+            return Result.failure(IllegalArgumentException("nothing to summarize"))
+        }
+        val request = SummarizeRequest(messages = messages, language = language)
+        return postJson(endpoint = summarizeUrl, body = gson.toJson(request))
+            .mapCatching { parseResponse<SummarizeResponse>(it).summary.orEmpty().trim() }
+            .mapCatching { summary ->
+                if (summary.isBlank()) throw IOException("Sahara AI returned an empty summary")
+                summary
+            }
+    }
+
+    private suspend fun postJson(endpoint: String, body: String): Result<String> {
         return withContext(Dispatchers.IO) {
             runCatching {
-                val connection = (URL(trimmedEndpoint).openConnection() as HttpURLConnection).apply {
+                val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
                     requestMethod = "POST"
                     connectTimeout = CONNECT_TIMEOUT_MS
                     readTimeout    = READ_TIMEOUT_MS
@@ -61,24 +127,21 @@ object SaharaAiClient {
                     setRequestProperty("Accept", "application/json")
                 }
                 try {
-                    val requestBody = gson.toJson(ChatRequest(cleanInput, language))
-                        .toByteArray(Charsets.UTF_8)
-                    connection.outputStream.use { it.write(requestBody) }
+                    connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
 
                     val status = connection.responseCode
                     val stream = if (status in 200..299) connection.inputStream
                                  else connection.errorStream
-                    val body = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
+                    val responseBody = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
                         .orEmpty()
 
                     if (status !in 200..299) {
-                        throw IOException("SAHARA AI returned HTTP $status: ${body.take(200)}")
+                        throw IOException("SAHARA AI returned HTTP $status: ${responseBody.take(200)}")
                     }
-                    if (body.isBlank()) {
+                    if (responseBody.isBlank()) {
                         throw IOException("SAHARA AI returned an empty body")
                     }
-
-                    parseResponse(body)
+                    responseBody
                 } finally {
                     connection.disconnect()
                 }
@@ -86,16 +149,17 @@ object SaharaAiClient {
         }
     }
 
-    private fun parseResponse(body: String): ChatResponse {
+    private inline fun <reified T> parseResponse(body: String): T {
         runCatching {
-            return gson.fromJson(body, ChatResponse::class.java)
+            return gson.fromJson(body, T::class.java)
         }
         val start = body.indexOf('{')
         val end   = body.lastIndexOf('}')
         if (start in 0 until end) {
             val sliced = body.substring(start, end + 1)
-            return gson.fromJson(sliced, ChatResponse::class.java)
+            return gson.fromJson(sliced, T::class.java)
         }
         throw IOException("could not parse Sahara AI response JSON")
     }
+
 }

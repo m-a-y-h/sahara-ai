@@ -147,6 +147,41 @@ object ChatRepository {
     suspend fun clearSession(sessionId: String): Result<Unit> =
         FirestoreService.deleteAllMessages(sessionId)
 
+    /**
+     * Asks Qalb to compress a 16-message batch into a short paragraph that
+     * preserves the user's situation, concerns, substance/risk mentions,
+     * and the assistant's guidance. Returns the summary text or null if
+     * the endpoint isn't configured / the call fails — caller falls back
+     * to keeping the live history intact in that case.
+     */
+    suspend fun summarizeBatch(
+        messages: List<SaharaAiClient.HistoryTurn>,
+        isEnglish: Boolean,
+    ): String? {
+        val endpoint = BuildConfig.SAHARA_AI_CHAT_URL.takeIf { it.isNotBlank() } ?: return null
+        val language = if (isEnglish) "english" else "roman_urdu"
+        return SaharaAiClient.postSummarize(
+            chatEndpoint = endpoint,
+            messages = messages,
+            language = language,
+        ).getOrNull()
+    }
+
+    /**
+     * Persists a fresh batch summary onto the session document and bumps
+     * `summarizedThroughMs` so the next history build skips the messages
+     * the summary now represents.
+     */
+    suspend fun appendBatchSummary(
+        sessionId: String,
+        summary: String,
+        summarizedThroughMs: Long,
+    ): Result<Unit> = FirestoreService.appendAiChatBatchSummary(
+        sessionId = sessionId,
+        summary = summary,
+        summarizedThroughMs = summarizedThroughMs,
+    )
+
     
     
     
@@ -163,6 +198,8 @@ object ChatRepository {
         userText: String,
         isEnglish: Boolean,
         messageId: String,
+        history: List<SaharaAiClient.HistoryTurn> = emptyList(),
+        priorSummaries: List<String> = emptyList(),
     ): SaharaReply {
         val endpoint = BuildConfig.SAHARA_AI_CHAT_URL
         if (endpoint.isBlank()) {
@@ -170,7 +207,13 @@ object ChatRepository {
         }
 
         val language = if (isEnglish) "english" else "roman_urdu"
-        val result = SaharaAiClient.postChat(endpoint, userText, language)
+        val result = SaharaAiClient.postChat(
+            endpoint = endpoint,
+            userInput = userText,
+            language = language,
+            history = history,
+            priorSummaries = priorSummaries,
+        )
 
         return result.fold(
             onSuccess = { response ->

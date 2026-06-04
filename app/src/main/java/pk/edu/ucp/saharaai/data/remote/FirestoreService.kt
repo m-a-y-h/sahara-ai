@@ -329,7 +329,30 @@ object FirestoreService {
                 ?: (data["messageCount"] as? Number)?.toInt()
                 ?: 0,
             isDeleted = data["isDeleted"] as? Boolean ?: false,
+            batchSummaries = data.stringList("batchSummaries"),
+            summarizedThroughMs = (data["summarizedThroughMs"] as? Long)
+                ?: (data["summarizedThroughMs"] as? Number)?.toLong()
+                ?: 0L,
         )
+    }
+
+    /**
+     * Appends a new batch summary to the session and records the timestamp
+     * boundary up to which live history has been collapsed into summaries.
+     * Used by the AI chat 16-message (8-user-prompt) summarisation cycle.
+     */
+    suspend fun appendAiChatBatchSummary(
+        sessionId: String,
+        summary: String,
+        summarizedThroughMs: Long,
+    ): Result<Unit> = runCatching {
+        db.collection(COL_CHAT_SESSIONS).document(sessionId).update(
+            mapOf(
+                "batchSummaries" to FieldValue.arrayUnion(summary),
+                "summarizedThroughMs" to summarizedThroughMs,
+                "updatedAt" to FieldValue.serverTimestamp(),
+            )
+        ).await()
     }
 
     suspend fun getCounselors(): Result<List<CounselorProfile>> = runCatching {

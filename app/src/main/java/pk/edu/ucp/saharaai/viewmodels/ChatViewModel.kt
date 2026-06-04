@@ -26,6 +26,7 @@ import pk.edu.ucp.saharaai.data.model.SaharaMessageType
 import pk.edu.ucp.saharaai.data.model.SaharaRiskLevel
 import pk.edu.ucp.saharaai.data.model.VoiceLevel
 import pk.edu.ucp.saharaai.data.remote.RealtimeDBService
+import pk.edu.ucp.saharaai.data.remote.SaharaAiClient
 import pk.edu.ucp.saharaai.data.repository.ChatRepository
 import pk.edu.ucp.saharaai.data.repository.ReportRepository
 import pk.edu.ucp.saharaai.data.repository.SaharaVoiceRepository
@@ -388,7 +389,25 @@ class ChatViewModel : ViewModel() {
                 return@launch
             }
 
-            
+            // Build Qalb's context BEFORE persisting this user message —
+            // otherwise the listener might race and include the new message
+            // in both `history` and `user_input`. The current session's
+            // batch summaries cover everything older than summarizedThroughMs;
+            // anything newer is live history sent verbatim to the model.
+            val session = _aiSessions.value.firstOrNull { it.sessionId == sessionId }
+            val priorSummaries = session?.batchSummaries.orEmpty()
+            val summarizedThroughMs = session?.summarizedThroughMs ?: 0L
+            val historyTurns = _messages.value
+                .filter { (it.timestamp.seconds * 1000L + it.timestamp.nanoseconds / 1_000_000L) > summarizedThroughMs }
+                .sortedBy { (it.timestamp.seconds * 1000L + it.timestamp.nanoseconds / 1_000_000L) }
+                .map {
+                    SaharaAiClient.HistoryTurn(
+                        role = if (it.isFromAI) "assistant" else "user",
+                        content = it.content,
+                        timestampMs = (it.timestamp.seconds * 1000L + it.timestamp.nanoseconds / 1_000_000L),
+                    )
+                }
+
             val sendResult = ChatRepository.sendMessage(
                 sessionId   = sessionId,
                 senderId    = uid,
@@ -404,14 +423,20 @@ class ChatViewModel : ViewModel() {
             ChatRepository.updateAiChatSessionAfterMessage(sessionId, text)
             onUserMessageSaved?.invoke()
 
-            
+
             _isTyping.value = true
 
-            
-            
-            
+
+
+
             val aiMessageId = UUID.randomUUID().toString()
-            val sahara = ChatRepository.askSahara(text, isEnglish, aiMessageId)
+            val sahara = ChatRepository.askSahara(
+                userText = text,
+                isEnglish = isEnglish,
+                messageId = aiMessageId,
+                history = historyTurns,
+                priorSummaries = priorSummaries,
+            )
             _isTyping.value = false
             _saharaUnreachable.value = !sahara.viaLiveModel
 
@@ -450,6 +475,58 @@ class ChatViewModel : ViewModel() {
             )
 
             _uiState.value = ChatUiState.Idle
+
+            // Fire-and-forget batch summarisation. When the live (unsummarised)
+            // window now holds >= 16 messages — i.e. we've completed at
+            // least 8 user prompts + 8 AI replies since the last summary —
+            // ask Qalb to compress the OLDEST 16 into a paragraph and
+            // record the new summarizedThroughMs boundary on the session.
+            // Runs after the UI already has the reply, so the extra
+            // inference roundtrip doesn't delay the user's next turn.
+            if (sahara.viaLiveModel) {
+                launch {
+                    maybeSummariseOldestBatch(sessionId, isEnglish)
+                }
+            }
+        }
+    }
+
+    private suspend fun maybeSummariseOldestBatch(sessionId: String, isEnglish: Boolean) {
+        val session = _aiSessions.value.firstOrNull { it.sessionId == sessionId } ?: return
+        val cutoff = session.summarizedThroughMs
+        val unsummarised = _messages.value
+            .filter { (it.timestamp.seconds * 1000L + it.timestamp.nanoseconds / 1_000_000L) > cutoff }
+            .sortedBy { (it.timestamp.seconds * 1000L + it.timestamp.nanoseconds / 1_000_000L) }
+        if (unsummarised.size < 16) return
+
+        val batch = unsummarised.take(16)
+        val turns = batch.map {
+            SaharaAiClient.HistoryTurn(
+                role = if (it.isFromAI) "assistant" else "user",
+                content = it.content,
+                timestampMs = (it.timestamp.seconds * 1000L + it.timestamp.nanoseconds / 1_000_000L),
+            )
+        }
+        val summary = ChatRepository.summarizeBatch(turns, isEnglish)
+            ?.takeIf { it.isNotBlank() }
+            ?: return
+        val lastTs = batch.last().timestamp.let { it.seconds * 1000L + it.nanoseconds / 1_000_000L }
+        ChatRepository.appendBatchSummary(
+            sessionId = sessionId,
+            summary = summary,
+            summarizedThroughMs = lastTs,
+        ).onSuccess {
+            // Optimistically reflect the new summary state locally so the
+            // next sendUserMessageToAI uses it without waiting on the
+            // Firestore snapshot to round-trip. The listener will reconcile
+            // shortly anyway.
+            val updated = session.copy(
+                batchSummaries = session.batchSummaries + summary,
+                summarizedThroughMs = lastTs,
+            )
+            _aiSessions.value = _aiSessions.value.map {
+                if (it.sessionId == sessionId) updated else it
+            }
         }
     }
 

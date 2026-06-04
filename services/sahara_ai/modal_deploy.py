@@ -84,11 +84,14 @@ def fastapi_app():
     # text_generator(prompt) -> str. Parameters mirror the local generation
     # path in sahara_ai_protocol.generate_with_sahara_ai so the prompt
     # engineering tuned for the local model still applies on the remote one.
-    def text_generator(prompt: str) -> str:
+    def text_generator(prompt: str, max_new_tokens: int = 512) -> str:
+        # 512 default (was 240). Llama-3.1 chat-template replies frequently
+        # ran into the old cap mid-sentence, especially for the bilingual
+        # safety boilerplate. Summarisation prompts also need this room.
         out = client.text_generation(
             prompt,
             model=model_id,
-            max_new_tokens=240,
+            max_new_tokens=max_new_tokens,
             temperature=0.15,
             top_p=0.9,
             repetition_penalty=1.08,
@@ -101,12 +104,29 @@ def fastapi_app():
                 text = text[: -len(stop)].rstrip()
         return text
 
-    api = FastAPI(title="Sahara AI (Modal -> HF Inference)", version="0.3.0")
+    api = FastAPI(title="Sahara AI (Modal -> HF Inference)", version="0.4.0")
+
+    class HistoryTurn(BaseModel):
+        role: str            # "user" or "assistant"
+        content: str
+        timestamp_ms: int | None = None
 
     class ChatRequest(BaseModel):
         user_input: str
         language: str | None = None
         is_english: bool | None = None
+        # Unsummarised live history of the current chat session, oldest-
+        # first. Does NOT include `user_input`; we add it server-side.
+        history: list[HistoryTurn] | None = None
+        # Already-collapsed batch summaries (oldest-first). Prepended to
+        # the prompt as "Earlier context" so continuity survives past the
+        # live-history window.
+        prior_summaries: list[str] | None = None
+
+    class SummarizeRequest(BaseModel):
+        # Full 16-message batch (8 user + 8 assistant) to compress.
+        messages: list[HistoryTurn]
+        language: str | None = None
 
     @api.get("/")
     def root() -> dict:
@@ -116,7 +136,7 @@ def fastapi_app():
             "backend": "hf-inference",
             "model": model_id,
             "provider": provider,
-            "endpoints": ["/v1/chat", "/healthz"],
+            "endpoints": ["/v1/chat", "/v1/summarize", "/healthz"],
         }
 
     @api.get("/healthz")
@@ -130,10 +150,50 @@ def fastapi_app():
         preferred = req.language
         if req.is_english is True and preferred is None:
             preferred = "english"
+        history = [
+            {"role": t.role, "content": t.content, "timestamp_ms": t.timestamp_ms}
+            for t in (req.history or [])
+        ]
+        prior_summaries = list(req.prior_summaries or [])
         return sahara_ai_chat(
             req.user_input,
             preferred_language=preferred,
             text_generator=text_generator,
+            history=history,
+            prior_summaries=prior_summaries,
         )
+
+    @api.post("/v1/summarize")
+    def summarize(req: SummarizeRequest) -> dict:
+        # We don't import sahara_ai_chat's full protocol for summarisation
+        # — it just needs a faithful compression. Build the prompt inline.
+        if not req.messages:
+            raise HTTPException(status_code=400, detail="messages must not be empty.")
+        language_hint = (req.language or "").strip().lower()
+        transcript_lines = []
+        for t in req.messages:
+            speaker = "User" if t.role == "user" else "Assistant"
+            transcript_lines.append(f"{speaker}: {t.content}")
+        transcript = "\n".join(transcript_lines)
+        instruction = (
+            "You are helping the Sahara mental-health app keep continuity across "
+            "long conversations. Summarise the following exchange in 3-5 short "
+            "sentences. Preserve: any substance the user mentioned (drug name, "
+            "frequency, context), risk signals (suicidal ideation, withdrawal, "
+            "fainting, self-harm), the assistant's last guidance, and the user's "
+            "current emotional state. Use the same language the user was using "
+            f"({language_hint or 'auto-detect'}). Do NOT add new advice or extra "
+            "framing — just the compressed factual summary."
+        )
+        # Use Llama-3.1 chat template manually for the summariser.
+        prompt = (
+            "<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n"
+            f"{instruction}<|eot_id|>"
+            "<|start_header_id|>user<|end_header_id|>\n\n"
+            f"{transcript}<|eot_id|>"
+            "<|start_header_id|>assistant<|end_header_id|>\n\n"
+        )
+        summary = text_generator(prompt, max_new_tokens=512).strip()
+        return {"summary": summary}
 
     return api

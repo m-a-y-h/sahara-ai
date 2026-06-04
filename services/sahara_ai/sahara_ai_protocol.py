@@ -2140,14 +2140,62 @@ def build_system_prompt(assessment: SafetyAssessment) -> str:
     )
 
 
-def build_llama31_prompt(system_prompt: str, clean_user_input: str) -> str:
-    return (
-        "<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n"
-        f"{system_prompt}"
-        "<|eot_id|><|start_header_id|>user<|end_header_id|>\n\n"
+def build_llama31_prompt(
+    system_prompt: str,
+    clean_user_input: str,
+    history: Optional[list] = None,
+    prior_summaries: Optional[list] = None,
+) -> str:
+    """Build the Llama-3.1 chat template prompt with optional in-context
+    conversation history and earlier-batch summaries.
+
+    - ``prior_summaries`` (list[str]) are folded into the system message
+      under an "Earlier context" heading so the model treats them as
+      already-known facts about the user rather than continuing prose.
+    - ``history`` (list[dict] with role / content / timestamp_ms) is
+      replayed as alternating user / assistant turns BEFORE the current
+      user input. Ordering is assumed oldest-first; we don't re-sort.
+    """
+    summaries_block = ""
+    if prior_summaries:
+        joined = "\n".join(
+            f"- {s.strip()}" for s in prior_summaries if isinstance(s, str) and s.strip()
+        )
+        if joined:
+            summaries_block = (
+                "\n\nEarlier context (summaries of prior batches of this "
+                "conversation; treat as already established):\n" + joined
+            )
+
+    parts = [
+        "<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n",
+        f"{system_prompt}{summaries_block}<|eot_id|>",
+    ]
+
+    if history:
+        for turn in history:
+            if not isinstance(turn, dict):
+                continue
+            role = (turn.get("role") or "").strip().lower()
+            content = (turn.get("content") or "").strip()
+            if not content:
+                continue
+            if role == "assistant":
+                parts.append(
+                    f"<|start_header_id|>assistant<|end_header_id|>\n\n{content}<|eot_id|>"
+                )
+            else:
+                # Anything not explicitly "assistant" is treated as a user turn.
+                parts.append(
+                    f"<|start_header_id|>user<|end_header_id|>\n\n{content}<|eot_id|>"
+                )
+
+    parts.append(
+        "<|start_header_id|>user<|end_header_id|>\n\n"
         f"{clean_user_input}"
         "<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n"
     )
+    return "".join(parts)
 
 
 def generate_with_sahara_ai(
@@ -2357,6 +2405,8 @@ def sahara_ai_chat(
     model_lock: Optional[threading.Lock] = None,
     bypass_model_for_critical: bool = False,
     text_generator: Optional[Callable[[str], str]] = None,
+    history: Optional[list] = None,
+    prior_summaries: Optional[list] = None,
 ) -> Dict[str, Any]:
     assessment = assess_user_input(user_input, preferred_language=preferred_language)
 
@@ -2369,7 +2419,12 @@ def sahara_ai_chat(
         return normalize_model_response(None, assessment)
 
     system_prompt = build_system_prompt(assessment)
-    prompt = build_llama31_prompt(system_prompt, assessment.clean_input)
+    prompt = build_llama31_prompt(
+        system_prompt,
+        assessment.clean_input,
+        history=history,
+        prior_summaries=prior_summaries,
+    )
     lock_context = model_lock if model_lock is not None else contextlib.nullcontext()
     try:
         with lock_context:

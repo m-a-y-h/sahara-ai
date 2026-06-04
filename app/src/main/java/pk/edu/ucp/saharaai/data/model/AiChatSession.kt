@@ -14,6 +14,20 @@ data class AiChatSession(
     val lastMessage: String = "",
     val messageCount: Int = 0,
     val isDeleted: Boolean = false,
+    /**
+     * Running summaries of each 16-message (8 user + 8 AI) batch we've
+     * already collapsed out of live history, in order of generation. The
+     * Qalb prompt prepends them as "Earlier context" so the model still
+     * has continuity past the live-history window.
+     */
+    val batchSummaries: List<String> = emptyList(),
+    /**
+     * Server-timestamp (ms) of the latest message already folded into
+     * [batchSummaries]. Messages with timestamp <= this are represented
+     * by a summary; anything newer is live history and gets sent to Qalb
+     * verbatim. Zero = nothing summarised yet.
+     */
+    val summarizedThroughMs: Long = 0L,
 ) {
     companion object {
         const val TYPE_AI = "ai"
