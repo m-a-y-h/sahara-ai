@@ -141,24 +141,40 @@ class RegisterViewModel(
         isLoading = true
         errorMessage = ""
         viewModelScope.launch {
-            GoogleCredentialAuth.signIn(context)
-                .onSuccess { authResult ->
-                    val user = authResult.user
-                    val email = user?.email.orEmpty()
-                    val displayName = user?.displayName.orEmpty()
-                    if (authResult.additionalUserInfo?.isNewUser ?: true) {
-                        RealtimeDBService.saveUser(user?.uid.orEmpty(), displayName, email)
-                        val callingName = runCatching { getCallingName(displayName).ifBlank { "User" } }
-                            .getOrDefault("User")
-                        onNewUser(displayName, email, callingName)
-                    } else {
-                        onExistingUser(email)
+            pk.edu.ucp.saharaai.data.repository.GoogleCredentialAuth.signIn(context)
+                .onSuccess { outcome ->
+                    when (outcome) {
+                        is pk.edu.ucp.saharaai.data.repository.GoogleSignInOutcome.Signed -> {
+                            val authResult = outcome.authResult
+                            val user = authResult.user
+                            val email = user?.email.orEmpty()
+                            val displayName = user?.displayName.orEmpty()
+                            if (authResult.additionalUserInfo?.isNewUser ?: true) {
+                                RealtimeDBService.saveUser(user?.uid.orEmpty(), displayName, email)
+                                val callingName = runCatching { getCallingName(displayName).ifBlank { "User" } }
+                                    .getOrDefault("User")
+                                onNewUser(displayName, email, callingName)
+                            } else {
+                                onExistingUser(email)
+                            }
+                            isLoading = false
+                        }
+                        is pk.edu.ucp.saharaai.data.repository.GoogleSignInOutcome.NeedsPasswordLink -> {
+                            // Register flow shouldn't normally hit this — but if it
+                            // does, the user has an existing account, so point
+                            // them at the Sign-in screen.
+                            isLoading = false
+                            errorMessage = if (isEnglish)
+                                "This email already has a Sahara account — sign in with your password."
+                            else
+                                "Is email se Sahara account pehle se hai — apne password se sign in karein."
+                            onExistingUser(outcome.email)
+                        }
                     }
-                    isLoading = false
                 }
                 .onFailure {
                     isLoading = false
-                    errorMessage = GoogleCredentialAuth.userMessage(it, isEnglish)
+                    errorMessage = pk.edu.ucp.saharaai.data.repository.GoogleCredentialAuth.userMessage(it, isEnglish)
                 }
         }
     }

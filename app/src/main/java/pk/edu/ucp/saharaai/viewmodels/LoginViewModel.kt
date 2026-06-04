@@ -7,10 +7,12 @@ import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.google.firebase.auth.AuthCredential
 import kotlinx.coroutines.launch
 import pk.edu.ucp.saharaai.data.repository.AuthRepository
 import pk.edu.ucp.saharaai.data.repository.FirebaseAuthFailure
 import pk.edu.ucp.saharaai.data.repository.GoogleCredentialAuth
+import pk.edu.ucp.saharaai.data.repository.GoogleSignInOutcome
 
 class LoginViewModel(
     private val authRepository: AuthRepository = AuthRepository()
@@ -78,21 +80,81 @@ class LoginViewModel(
         }
     }
 
+    /** UI state for the "your Google email already has a password; enter it
+     *  so we can link the two providers" dialog. Empty/blank when not active. */
+    var googleLinkPromptEmail by mutableStateOf("")
+        private set
+    private var pendingGoogleCredential: AuthCredential? = null
+
     fun signInWithGoogle(context: Context, isEnglish: Boolean, onSuccess: (String) -> Unit) {
         if (isLoading) return
         isLoading = true
         errorMessage = ""
         viewModelScope.launch {
             GoogleCredentialAuth.signIn(context)
-                .onSuccess {
-                    isLoading = false
-                    onSuccess(it.user?.email.orEmpty())
+                .onSuccess { outcome ->
+                    when (outcome) {
+                        is GoogleSignInOutcome.Signed -> {
+                            isLoading = false
+                            onSuccess(outcome.authResult.user?.email.orEmpty())
+                        }
+                        is GoogleSignInOutcome.NeedsPasswordLink -> {
+                            // Suspend the Google sign-in mid-flight; the
+                            // screen will render the password-link dialog
+                            // and call completeGoogleLinkWithPassword on
+                            // submit. Loading stays true so the Google
+                            // button can't be re-tapped during the dialog.
+                            isLoading = false
+                            pendingGoogleCredential = outcome.pendingGoogleCredential
+                            googleLinkPromptEmail = outcome.email
+                        }
+                    }
                 }
                 .onFailure {
                     isLoading = false
                     errorMessage = GoogleCredentialAuth.userMessage(it, isEnglish)
                 }
         }
+    }
+
+    fun completeGoogleLinkWithPassword(
+        password: String,
+        isEnglish: Boolean,
+        onSuccess: (String) -> Unit,
+    ) {
+        val email = googleLinkPromptEmail
+        val cred = pendingGoogleCredential
+        if (email.isBlank() || cred == null) return
+        if (password.isBlank()) {
+            errorMessage = if (isEnglish) "Enter your password to continue."
+                           else "Jari rakhne ke liye apna password darj karein."
+            return
+        }
+        if (isLoading) return
+        isLoading = true
+        errorMessage = ""
+        viewModelScope.launch {
+            GoogleCredentialAuth.completeLinkWithPassword(email, password, cred)
+                .onSuccess {
+                    isLoading = false
+                    pendingGoogleCredential = null
+                    googleLinkPromptEmail = ""
+                    onSuccess(email)
+                }
+                .onFailure {
+                    isLoading = false
+                    errorMessage = if (isEnglish)
+                        "Incorrect password — couldn't link Google to your account."
+                    else
+                        "Galat password — Google ko aapke account se link nahi kar saka."
+                }
+        }
+    }
+
+    fun cancelGoogleLinkPrompt() {
+        pendingGoogleCredential = null
+        googleLinkPromptEmail = ""
+        errorMessage = ""
     }
 
     fun authenticateWithBiometrics(context: Context, isEnglish: Boolean, onSuccess: (String) -> Unit) {

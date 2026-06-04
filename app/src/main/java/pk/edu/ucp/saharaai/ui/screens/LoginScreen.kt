@@ -365,6 +365,88 @@ fun LoginScreen(
                 )
             }
         }
+
+        // "This Google email already has a password account — enter it so we
+        // can link both providers" dialog. Without this, Firebase's
+        // auto-link silently replaces the password provider with Google when
+        // the email/password account wasn't email-verified.
+        if (loginViewModel.googleLinkPromptEmail.isNotBlank()) {
+            var linkPassword by remember { mutableStateOf("") }
+            var linkPwdVisible by remember { mutableStateOf(false) }
+            GlassAlertDialog(
+                hazeState = bgHazeState,
+                onDismissRequest = { loginViewModel.cancelGoogleLinkPrompt() },
+                title = {
+                    Text(
+                        if (isEnglish) "Link Google to your account"
+                        else "Google ko account se link karein",
+                        fontWeight = FontWeight.Bold,
+                        color = primaryGreen,
+                    )
+                },
+                text = {
+                    Column {
+                        Text(
+                            if (isEnglish)
+                                "${loginViewModel.googleLinkPromptEmail} already has a Sahara account with a password. Enter that password to attach Google to the same account — you'll still keep email/password sign-in."
+                            else
+                                "${loginViewModel.googleLinkPromptEmail} se Sahara account password ke saath pehle se hai. Wahi password darj karein takay Google bhi usi account se link ho jaye — email/password sign-in bhi kaam karta rahega.",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        OutlinedTextField(
+                            value = linkPassword,
+                            onValueChange = { linkPassword = it },
+                            label = { Text(if (isEnglish) "Password" else "Password") },
+                            singleLine = true,
+                            enabled = !isLoading,
+                            leadingIcon = { Icon(Icons.Default.Lock, null, tint = primaryGreen) },
+                            trailingIcon = {
+                                IconButton(onClick = { linkPwdVisible = !linkPwdVisible }) {
+                                    Icon(
+                                        if (linkPwdVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                        contentDescription = null,
+                                        tint = primaryGreen,
+                                    )
+                                }
+                            },
+                            visualTransformation = if (linkPwdVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        if (errorMsg.isNotBlank()) {
+                            Spacer(Modifier.height(6.dp))
+                            Text(errorMsg, color = SaharaCoral, style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(
+                        enabled = !isLoading && linkPassword.isNotBlank(),
+                        onClick = {
+                            loginViewModel.completeGoogleLinkWithPassword(
+                                password = linkPassword,
+                                isEnglish = isEnglish,
+                                onSuccess = onNavigateToDashboard,
+                            )
+                        },
+                    ) {
+                        Text(
+                            if (isLoading) (if (isEnglish) "Linking..." else "Link ho raha hai...")
+                            else (if (isEnglish) "Link & Sign in" else "Link aur Sign in"),
+                            color = primaryGreen,
+                        )
+                    }
+                },
+                dismissButton = {
+                    TextButton(
+                        enabled = !isLoading,
+                        onClick = { loginViewModel.cancelGoogleLinkPrompt() },
+                    ) {
+                        Text(if (isEnglish) "Cancel" else "Cancel")
+                    }
+                },
+            )
+        }
     }
 }
 
