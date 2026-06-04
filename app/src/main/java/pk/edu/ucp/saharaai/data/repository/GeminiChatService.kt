@@ -8,8 +8,10 @@ import com.google.firebase.ai.type.GenerativeBackend
 import com.google.firebase.ai.type.HarmBlockThreshold
 import com.google.firebase.ai.type.HarmCategory
 import com.google.firebase.ai.type.SafetySetting
+import com.google.firebase.ai.type.TextPart
 import com.google.firebase.ai.type.content
 import com.google.firebase.ai.type.generationConfig
+import com.google.firebase.ai.type.thinkingConfig
 import pk.edu.ucp.saharaai.data.remote.SaharaAiClient
 
 /**
@@ -65,7 +67,7 @@ object GeminiChatService {
         val languageHint = if (isEnglish) "english" else "roman_urdu"
         val model = buildModel(
             systemText = buildChatSystemPrompt(languageHint, priorSummaries),
-            maxOutputTokens = 512,
+            maxOutputTokens = 1024,
         )
         val chat = model.startChat(
             history = history.map { turn ->
@@ -86,7 +88,7 @@ object GeminiChatService {
         val languageHint = if (isEnglish) "english" else "roman_urdu"
         val model = buildModel(
             systemText = buildSummariseSystemPrompt(languageHint),
-            maxOutputTokens = 320,
+            maxOutputTokens = 768,
         )
         val transcript = buildString {
             messages.forEach { t ->
@@ -104,6 +106,17 @@ object GeminiChatService {
                 temperature = 0.6f
                 topP = 0.95f
                 topK = 40
+                // Gemini 3.5 Flash is a reasoning model — by default it
+                // burns a chunk of the output-token budget on internal
+                // thinking before producing the visible reply. With the
+                // old 512-token cap, every call was finishing with
+                // finish_reason=max_tokens AND the SDK was returning an
+                // empty `.text` because the model never got to the
+                // user-visible portion. Disable thinking entirely (the
+                // SAHARA chat doesn't benefit from chain-of-thought for
+                // 2-4 sentence replies) and bump the cap so even long
+                // bilingual replies fit.
+                thinkingConfig = thinkingConfig { thinkingBudget = 0 }
                 this.maxOutputTokens = maxOutputTokens
             },
             safetySettings = SAFETY,
@@ -159,5 +172,23 @@ object GeminiChatService {
             "($languageHint). No new advice — just the compressed factual summary."
     }
 
-    private fun GenerateContentResponse.extractText(): String = text.orEmpty().trim()
+    /**
+     * Robust text extraction that survives finish_reason=max_tokens and
+     * any future "thinking" parts the SDK might surface alongside the
+     * visible reply. `GenerateContentResponse.text` is a convenience
+     * getter that returns null (or throws, depending on SDK version) on
+     * non-stop finish reasons; iterating the candidates' parts gives us
+     * whatever TextPart content the model produced, even when truncated.
+     */
+    private fun GenerateContentResponse.extractText(): String {
+        val fromConvenience = runCatching { text }.getOrNull()?.trim().orEmpty()
+        if (fromConvenience.isNotEmpty()) return fromConvenience
+        return candidates.firstOrNull()
+            ?.content
+            ?.parts
+            ?.mapNotNull { (it as? TextPart)?.text }
+            ?.joinToString(separator = "")
+            ?.trim()
+            .orEmpty()
+    }
 }
