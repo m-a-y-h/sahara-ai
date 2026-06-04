@@ -77,9 +77,9 @@ import pk.edu.ucp.saharaai.ui.components.CardVariant
 import pk.edu.ucp.saharaai.ui.components.SaharaButton
 import pk.edu.ucp.saharaai.ui.components.SaharaCard
 import pk.edu.ucp.saharaai.ui.components.PrescriptionRedirectCard
-import pk.edu.ucp.saharaai.ui.components.SaharaUnreachableBanner
 import pk.edu.ucp.saharaai.ui.components.HazeBackButton
 import pk.edu.ucp.saharaai.ui.theme.*
+import pk.edu.ucp.saharaai.data.model.AiChatSession
 import pk.edu.ucp.saharaai.data.model.SaharaMessageType
 import pk.edu.ucp.saharaai.data.remote.RealtimeDBService
 import pk.edu.ucp.saharaai.util.PermissionCopy
@@ -90,6 +90,8 @@ import java.text.SimpleDateFormat
 import java.util.*
 import android.os.VibratorManager
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalDensity
 import kotlin.math.abs
 
 enum class MessageType { TEXT, QUICK_REPLIES, CRISIS_CARD, EXERCISE_CARD, VOICE_NOTE }
@@ -362,6 +364,8 @@ private fun ChatConversationScreen(
 
     val vmMessages by chatViewModel.messages.collectAsState()
     val aiMetadata by chatViewModel.aiMetadata.collectAsState()
+    val aiSessions by chatViewModel.aiSessions.collectAsState()
+    val currentAiSessionId by chatViewModel.currentAiSessionId.collectAsState()
     val persistedMessages = vmMessages.map { msg ->
         val tsMillis = msg.timestamp.seconds * 1000L + msg.timestamp.nanoseconds / 1_000_000L
         val storedMetadata = aiMetadata[msg.messageId]
@@ -377,11 +381,13 @@ private fun ChatConversationScreen(
         ChatMessage(
             id = msg.messageId,
             text = msg.content,
-            // Treat the seeded welcome and every AI reply as bot-side
-            // regardless of how Firestore deserialised `isFromAI`. senderId
-            // == "ai" is always assistant-sourced — written by the VM, never
-            // by a real user — so it's a safe ground truth here.
-            isBot = if (isAiMode) (msg.isFromAI || msg.senderId == "ai") else msg.senderId != uid,
+            // Treat the seeded welcome and every AI reply as bot-side.
+            // `senderType == "ai"` is the current wire format because the
+            // document senderId must stay equal to the signed-in uid to pass
+            // Firestore rules; `senderId == "ai"` keeps older docs readable.
+            isBot = if (isAiMode) {
+                msg.isFromAI || msg.senderType == "ai" || msg.senderId == "ai"
+            } else msg.senderId != uid,
             timestamp = tsMillis,
             type = localType,
             options = storedMetadata?.quickReplies?.takeIf { it.isNotEmpty() },
@@ -416,6 +422,14 @@ private fun ChatConversationScreen(
     var lastObservedMessageId by remember { mutableStateOf<String?>(null) }
     val toneGenerator = remember { ToneGenerator(AudioManager.STREAM_NOTIFICATION, 45) }
     DisposableEffect(Unit) { onDispose { toneGenerator.release() } }
+    LaunchedEffect(currentAiSessionId) {
+        if (isAiMode && currentAiSessionId.isNotBlank()) {
+            transientMessages.clear()
+            isTyping = false
+            pendingReceivedMessages = 0
+            lastObservedMessageId = null
+        }
+    }
     LaunchedEffect(displayMessages.lastOrNull()?.id, isTyping, latestVisible) {
         if (displayMessages.isEmpty()) return@LaunchedEffect
         val latest = displayMessages.last()
@@ -450,7 +464,7 @@ private fun ChatConversationScreen(
         if (!isAiMode) return@LaunchedEffect
         chatViewModel.aiReplyEvents.collect { event ->
             isTyping = false
-            if (!event.isPersisted) {
+            if (!event.isPersisted && uid.isBlank()) {
                 val localType = when (event.metadata.messageType) {
                     SaharaMessageType.CRISIS_CARD -> MessageType.CRISIS_CARD
                     SaharaMessageType.QUICK_REPLIES -> MessageType.QUICK_REPLIES
@@ -537,7 +551,6 @@ private fun ChatConversationScreen(
     }
     val isCounselorSide = forUserId.isNotBlank()
     var showBlockConfirm by remember { mutableStateOf(false) }
-    var showNewChatConfirm by remember { mutableStateOf(false) }
     val openCounselorCall: (Boolean) -> Unit = { video ->
         if (counselorId.isBlank()) {
             context.showLocalizedToast(
@@ -606,7 +619,7 @@ private fun ChatConversationScreen(
                     isEnglish = isEnglish,
                     isDark = isDark,
                     displayName = if (isAiMode) "SAHARA AI" else counselorName,
-                    isOnline = isAiMode || true,
+                    isOnline = if (isAiMode) !saharaUnreachable else true,
                     subtitle = run {
                         if (isAiMode || sessionExpiresAt <= 0L) null
                         else {
@@ -624,7 +637,7 @@ private fun ChatConversationScreen(
                     identityVisible = identityVisible,
                     onAvatarClick = { if (!isAiMode) showProfileSheet = true },
                     onHistory = { showHistorySheet = true },
-                    onNewChat = { showNewChatConfirm = true },
+                    onNewChat = { chatViewModel.startNewAiChat() },
                     onReport = {
                         chatViewModel.reportCurrentChat(
                             reason = "Chat concern",
@@ -636,10 +649,6 @@ private fun ChatConversationScreen(
                     onVoiceCall = { openCounselorCall(false) },
                     onVideoCall = { openCounselorCall(true) },
                     onToggleIdentity = { chatViewModel.setIdentityVisible(!identityVisible) },
-                )
-                SaharaUnreachableBanner(
-                    visible = isAiMode && saharaUnreachable,
-                    isEnglish = isEnglish,
                 )
                 Box(modifier = Modifier.weight(1f)) {
                     LazyColumn(
@@ -790,18 +799,34 @@ private fun ChatConversationScreen(
             isEnglish = isEnglish,
         )
         if (showHistorySheet) {
-            ChatHistorySheet(
-                messages = displayMessages,
-                isEnglish = isEnglish,
-                onDismiss = { showHistorySheet = false },
-                onJump = { targetId ->
-                    val index = displayMessages.indexOfFirst { it.id == targetId }
-                    if (index >= 0) {
-                        coroutineScope.launch { listState.animateScrollToItem(index) }
-                    }
-                    showHistorySheet = false
-                },
-            )
+            if (isAiMode) {
+                AiChatHistorySheet(
+                    sessions = aiSessions,
+                    currentSessionId = currentAiSessionId,
+                    isEnglish = isEnglish,
+                    onDismiss = { showHistorySheet = false },
+                    onOpen = { sessionId ->
+                        chatViewModel.openAiChatSession(sessionId)
+                        showHistorySheet = false
+                    },
+                    onDelete = { sessionId ->
+                        chatViewModel.deleteAiChatSession(sessionId)
+                    },
+                )
+            } else {
+                ChatHistorySheet(
+                    messages = displayMessages,
+                    isEnglish = isEnglish,
+                    onDismiss = { showHistorySheet = false },
+                    onJump = { targetId ->
+                        val index = displayMessages.indexOfFirst { it.id == targetId }
+                        if (index >= 0) {
+                            coroutineScope.launch { listState.animateScrollToItem(index) }
+                        }
+                        showHistorySheet = false
+                    },
+                )
+            }
         }
         if (showProfileSheet && !isAiMode) {
             ChatProfileSheet(
@@ -813,33 +838,6 @@ private fun ChatConversationScreen(
                 onDismiss = { showProfileSheet = false },
             )
         }
-    }
-
-    if (showNewChatConfirm) {
-        GlassAlertDialog(
-            hazeState = hazeState,
-            onDismissRequest = { showNewChatConfirm = false },
-            title = { Text(if (isEnglish) "Start a new chat?" else "Nayi chat shuru karein?") },
-            text = {
-                Text(
-                    if (isEnglish)
-                        "This clears the current AI conversation on this device and on the cloud. Your counselor chats and journal entries aren't affected."
-                    else
-                        "Is se AI ki maujooda guftugu device aur cloud dono se hat jayegi. Counselor ki chat aur journal mehfooz rahenge."
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    showNewChatConfirm = false
-                    chatViewModel.startNewAiChat()
-                }) { Text(if (isEnglish) "New chat" else "Nayi chat", color = SaharaCoral) }
-            },
-            dismissButton = {
-                TextButton(onClick = { showNewChatConfirm = false }) {
-                    Text(if (isEnglish) "Cancel" else "Cancel")
-                }
-            }
-        )
     }
 
     if (showBlockConfirm) {
@@ -1218,21 +1216,34 @@ private fun TwoFingerGestureHintOverlay(
                 .fillMaxWidth()
                 .padding(horizontal = 18.dp),
         ) {
+            // Use a TouchApp hand icon for a recognisable gesture cue, then
+            // drive its position with a per-frame layout-phase offset lambda
+            // (not the value-capturing Modifier.offset overload, which only
+            // sees the value at composition time and made the dots look
+            // static). Alpha also pulses so the eye can't miss the motion.
             val transition = rememberInfiniteTransition(label = "twoFingerHint")
-            val start = if (isAiMode) 34f else -34f
+            val travel = 56f
+            val start = if (isAiMode) travel else -travel
             val end = -start
-            // Reverse (not Restart) so the dots actually slide back and
-            // forth — Restart snaps them to the start each cycle which made
-            // the animation look static at 60fps.
-            val offset by transition.animateFloat(
+            val offsetX by transition.animateFloat(
                 initialValue = start,
                 targetValue = end,
                 animationSpec = infiniteRepeatable(
-                    animation = tween(900, easing = FastOutSlowInEasing),
+                    animation = tween(1100, easing = FastOutSlowInEasing),
                     repeatMode = RepeatMode.Reverse,
                 ),
                 label = "twoFingerHintOffset",
             )
+            val pulseAlpha by transition.animateFloat(
+                initialValue = 0.55f,
+                targetValue = 1f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(1100, easing = FastOutSlowInEasing),
+                    repeatMode = RepeatMode.Reverse,
+                ),
+                label = "twoFingerHintAlpha",
+            )
+            val density = LocalDensity.current
             Surface(
                 color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
                 shape = RoundedCornerShape(18.dp),
@@ -1249,13 +1260,23 @@ private fun TwoFingerGestureHintOverlay(
                             .height(38.dp),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Row(
-                            modifier = Modifier.offset(x = offset.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            Box(Modifier.size(18.dp).background(SaharaStrongGreen, CircleShape))
-                            Box(Modifier.size(18.dp).background(SaharaStrongGreen, CircleShape))
-                        }
+                        Icon(
+                            imageVector = Icons.Default.TouchApp,
+                            contentDescription = null,
+                            tint = SaharaStrongGreen,
+                            modifier = Modifier
+                                .size(28.dp)
+                                // Layout-phase offset = recomputed every
+                                // frame from the animated state, so the
+                                // hand actually slides.
+                                .offset {
+                                    IntOffset(
+                                        x = with(density) { offsetX.dp.roundToPx() },
+                                        y = 0,
+                                    )
+                                }
+                                .graphicsLayer { alpha = pulseAlpha },
+                        )
                     }
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
@@ -1273,6 +1294,114 @@ private fun TwoFingerGestureHintOverlay(
             }
         }
     }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AiChatHistorySheet(
+    sessions: List<AiChatSession>,
+    currentSessionId: String,
+    isEnglish: Boolean,
+    onDismiss: () -> Unit,
+    onOpen: (String) -> Unit,
+    onDelete: (String) -> Unit,
+) {
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(horizontal = 20.dp)
+        ) {
+            Text(
+                text = if (isEnglish) "Chat History" else "Chat History",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            if (sessions.isEmpty()) {
+                Text(
+                    text = if (isEnglish) "No chats yet." else "Abhi koi chat nahi.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(vertical = 24.dp),
+                )
+            } else {
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    contentPadding = PaddingValues(bottom = 28.dp),
+                    modifier = Modifier.heightIn(max = 460.dp),
+                ) {
+                    items(sessions, key = { it.sessionId }) { session ->
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = if (session.sessionId == currentSessionId) {
+                                SaharaStrongGreen.copy(alpha = 0.12f)
+                            } else {
+                                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onOpen(session.sessionId) },
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(start = 12.dp, top = 10.dp, bottom = 10.dp, end = 4.dp),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.ChatBubble,
+                                    contentDescription = null,
+                                    tint = SaharaStrongGreen,
+                                    modifier = Modifier.size(24.dp),
+                                )
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            text = session.title.ifBlank { "Untitled" },
+                                            maxLines = 1,
+                                            style = MaterialTheme.typography.titleSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                        if (session.sessionId == currentSessionId) {
+                                            Text(
+                                                text = if (isEnglish) "Current" else "Current",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = SaharaStrongGreen,
+                                                modifier = Modifier.padding(start = 8.dp),
+                                            )
+                                        }
+                                    }
+                                    Text(
+                                        text = session.lastMessage.ifBlank {
+                                            formatAiChatSessionTime(session)
+                                        },
+                                        maxLines = 1,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                                IconButton(onClick = { onDelete(session.sessionId) }) {
+                                    Icon(
+                                        imageVector = Icons.Default.Delete,
+                                        contentDescription = if (isEnglish) "Delete chat" else "Chat delete karein",
+                                        tint = SaharaCoral,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun formatAiChatSessionTime(session: AiChatSession): String {
+    val timestamp = session.updatedAt ?: session.createdAt ?: session.clientCreatedAt
+    val millis = timestamp.seconds * 1000L + timestamp.nanoseconds / 1_000_000L
+    return SimpleDateFormat("MMM d, h:mm a", Locale.getDefault()).format(Date(millis))
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -1540,9 +1669,9 @@ fun ChatTopBar(
                 Column {
                     Text(displayName, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                     Text(
-                        subtitle ?: (if (isOnline) (if (isEnglish) "Online" else "Online") else (if (isEnglish) "Away" else "Away")),
+                        subtitle ?: (if (isOnline) (if (isEnglish) "Online" else "Online") else (if (isEnglish) "Offline" else "Offline")),
                         style = MaterialTheme.typography.bodySmall,
-                        color = if (subtitle != null) SaharaSky else if (isOnline) SaharaStrongGreen else SaharaWarning
+                        color = if (subtitle != null) SaharaSky else if (isOnline) SaharaStrongGreen else SaharaCoral
                     )
                 }
             }

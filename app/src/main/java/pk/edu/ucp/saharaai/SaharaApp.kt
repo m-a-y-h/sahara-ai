@@ -47,24 +47,14 @@ private const val KEY_LANGUAGE            = "is_english"
 fun SaharaApp() {
     val context = LocalContext.current
     val prefs   = remember { context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE) }
+    val firebaseUser = remember { Firebase.auth.currentUser }
 
-    remember {
-        val savedScore = prefs.getInt(KEY_ASSESSMENT_SCORE, -1)
-        val savedTs    = prefs.getLong(KEY_ASSESSMENT_TIMESTAMP, 0L)
-        GlobalAppState.hasEverCompletedAssessment =
-            prefs.getBoolean(KEY_ASSESSMENT_EVER_COMPLETED, false) || savedScore >= 0
-        if (savedScore >= 0) {
-            val ageMs = if (savedTs > 0) System.currentTimeMillis() - savedTs else 0L
-            GlobalAppState.dast10Score = savedScore
-            GlobalAppState.lastAssessmentTimestamp = savedTs
-            if (savedTs == 0L || ageMs <= ASSESSMENT_VALIDITY_MS) {
-                GlobalAppState.hasCompletedInitialAssessment = true
-            }
-        }
+    remember(firebaseUser?.uid) {
+        AssessmentCache.restoreToGlobal(context, firebaseUser?.uid)
+        true
     }
 
     val savedCounselorKey = remember { prefs.getString(KEY_COUNSELOR_KEY, "") ?: "" }
-    val firebaseUser      = remember { Firebase.auth.currentUser }
     val savedEmail        = remember { prefs.getString(KEY_USER_EMAIL, "") ?: "" }
 
     val startDestination = remember {
@@ -167,19 +157,10 @@ fun SaharaApp() {
             .remove(KEY_USER_NAME)
             .remove(KEY_USER_EMAIL)
             .remove(KEY_USER_FULL_NAME)
-            // Assessment state is per-account; wipe it on sign-out so the
-            // next account on this device doesn't inherit a "completed" flag.
-            // It'll be rehydrated from RTDB on the next sign-in.
-            .remove(KEY_ASSESSMENT_SCORE)
-            .remove(KEY_ASSESSMENT_TIMESTAMP)
-            .remove(KEY_ASSESSMENT_EVER_COMPLETED)
             .putString("biometric_last_email", emailForBiometric)
             .putString("biometric_last_name",  nameForBiometric)
             .apply()
-        GlobalAppState.dast10Score = 0
-        GlobalAppState.lastAssessmentTimestamp = 0L
-        GlobalAppState.hasEverCompletedAssessment = false
-        GlobalAppState.hasCompletedInitialAssessment = false
+        AssessmentCache.clearActiveSession(context)
         counselorKey = ""
         navController.navigate("welcome") { popUpTo(0) { inclusive = true } }
     }
@@ -245,47 +226,29 @@ fun SaharaApp() {
                     runCatching { Firebase.messaging.token.await() }
                         .onSuccess { token -> RealtimeDBService.saveDeviceToken(currentUser.uid, token) }
 
-                    // Rehydrate assessment state from RTDB so users who sign
-                    // out + back in (especially via a different provider) on
-                    // the same account aren't shown as "first-time" and
-                    // asked to retake. Critically, when RTDB has NO record
-                    // (fresh account or wiped backend) we CLEAR local prefs
-                    // and GlobalAppState — otherwise stale flags from a
-                    // previous device user would short-circuit the
-                    // mandatory-assessment gate and let a brand-new sign-up
-                    // walk straight into the dashboard.
-                    runCatching {
-                        val latest = RealtimeDBService.loadLatestAssessment(currentUser.uid)
-                        val cloudScore = (latest?.get("score") as? Int) ?: -1
-                        val cloudTs    = (latest?.get("timestamp") as? Long) ?: 0L
-                        if (latest != null && cloudScore >= 0) {
-                            prefs.edit()
-                                .putInt(KEY_ASSESSMENT_SCORE, cloudScore)
-                                .putLong(KEY_ASSESSMENT_TIMESTAMP, cloudTs)
-                                .putBoolean(KEY_ASSESSMENT_EVER_COMPLETED, true)
-                                .apply()
-                            GlobalAppState.dast10Score = cloudScore
-                            GlobalAppState.lastAssessmentTimestamp = cloudTs
-                            GlobalAppState.hasEverCompletedAssessment = true
-                            val ageMs = if (cloudTs > 0) System.currentTimeMillis() - cloudTs else 0L
-                            GlobalAppState.hasCompletedInitialAssessment =
-                                cloudTs == 0L || ageMs <= ASSESSMENT_VALIDITY_MS
-                        } else {
-                            // No cloud record for this UID — this is either a
-                            // fresh account or a backend wipe. Either way,
-                            // local state belongs to whoever was on this
-                            // device before, NOT this user.
-                            prefs.edit()
-                                .remove(KEY_ASSESSMENT_SCORE)
-                                .remove(KEY_ASSESSMENT_TIMESTAMP)
-                                .remove(KEY_ASSESSMENT_EVER_COMPLETED)
-                                .apply()
-                            GlobalAppState.dast10Score = 0
-                            GlobalAppState.lastAssessmentTimestamp = 0L
-                            GlobalAppState.hasEverCompletedAssessment = false
-                            GlobalAppState.hasCompletedInitialAssessment = false
+                    val localAssessment = AssessmentCache.restoreToGlobal(context, currentUser.uid)
+                    RealtimeDBService.loadLatestAssessmentResult(currentUser.uid)
+                        .onSuccess { latest ->
+                            val cloudAssessment = AssessmentCache.fromCloudMap(latest)
+                            when {
+                                cloudAssessment != null -> {
+                                    AssessmentCache.save(
+                                        context = context,
+                                        uid = currentUser.uid,
+                                        score = cloudAssessment.score,
+                                        timestampMs = cloudAssessment.timestampMs,
+                                    )
+                                    AssessmentCache.applyToGlobal(cloudAssessment)
+                                }
+                                localAssessment?.isCurrent == true -> Unit
+                                else -> AssessmentCache.clearActiveSession(context)
+                            }
                         }
-                    }
+                        .onFailure {
+                            if (localAssessment?.isCurrent != true) {
+                                AssessmentCache.clearActiveSession(context)
+                            }
+                        }
 
                     // Google-only accounts have no password attached, so the
                     // keystore vault has nothing to seal and the biometric
@@ -297,9 +260,35 @@ fun SaharaApp() {
                     val hasPasswordProvider = currentUser.providerData.any {
                         it.providerId == com.google.firebase.auth.EmailAuthProvider.PROVIDER_ID
                     }
+                    // If the Firebase project is in "Multiple accounts per
+                    // email" mode (the post-2023 default), signing in with
+                    // Google for an email that already has a password
+                    // account creates a NEW UID, so providerData on this
+                    // user won't include "password" — we'd then prompt for a
+                    // backup password the user already chose for the other
+                    // account. fetchSignInMethodsForEmail tells us whether
+                    // ANY existing Firebase user has password sign-in for
+                    // this email; if yes, skip the prompt.
+                    //
+                    // NB: on projects with Email Enumeration Protection on,
+                    // fetchSignInMethodsForEmail returns an empty list. We
+                    // can't fix multi-account-per-email purely in code; the
+                    // long-term fix is enabling "One account per email" in
+                    // Firebase Console -> Auth -> Settings -> User account
+                    // linking. With that on, Firebase auto-links Google to
+                    // the existing password account and this branch sees
+                    // hasPasswordProvider=true anyway.
+                    val emailAlreadyHasPassword = if (!hasPasswordProvider && dbEmail.isNotBlank()) {
+                        runCatching {
+                            Firebase.auth.fetchSignInMethodsForEmail(dbEmail).await()
+                                .signInMethods.orEmpty()
+                                .contains(com.google.firebase.auth.EmailAuthProvider.EMAIL_PASSWORD_SIGN_IN_METHOD)
+                        }.getOrDefault(false)
+                    } else false
                     val needsBackupPassword =
                         !skipBackupPasswordCheck &&
                         !hasPasswordProvider &&
+                        !emailAlreadyHasPassword &&
                         dbEmail.isNotBlank()
                     if (needsBackupPassword) {
                         navController.navigate(

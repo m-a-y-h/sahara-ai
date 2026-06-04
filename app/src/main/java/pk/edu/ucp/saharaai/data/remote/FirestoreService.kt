@@ -2,7 +2,10 @@ package pk.edu.ucp.saharaai.data.remote
 
 import android.util.Log
 import com.google.firebase.Timestamp
+import com.google.firebase.firestore.DocumentSnapshot
+import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.FirebaseFirestoreSettings
 import com.google.firebase.firestore.Query
 import com.google.firebase.Firebase
 import com.google.firebase.firestore.firestore
@@ -10,6 +13,7 @@ import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.tasks.await
+import pk.edu.ucp.saharaai.data.model.AiChatSession
 import pk.edu.ucp.saharaai.data.model.AppNotification
 import pk.edu.ucp.saharaai.data.model.CommunityPost
 import pk.edu.ucp.saharaai.data.model.ConnectionStatus
@@ -19,10 +23,19 @@ import pk.edu.ucp.saharaai.data.model.FirestoreMessage
 import pk.edu.ucp.saharaai.data.model.ModerationReport
 import pk.edu.ucp.saharaai.data.model.NgoStats
 import pk.edu.ucp.saharaai.data.model.UserConnection
+import java.util.Date
 
 object FirestoreService {
 
-    private val db: FirebaseFirestore get() = Firebase.firestore
+    private val db: FirebaseFirestore by lazy {
+        Firebase.firestore.apply {
+            runCatching {
+                firestoreSettings = FirebaseFirestoreSettings.Builder()
+                    .setPersistenceEnabled(true)
+                    .build()
+            }
+        }
+    }
 
     private const val COL_MESSAGES         = "messages"
     private const val COL_COUNSELORS       = "counselors"
@@ -74,7 +87,7 @@ object FirestoreService {
     suspend fun sendMessage(message: FirestoreMessage): Result<String> = runCatching {
         val ref = db.collection(COL_MESSAGES).document()
         val withId = message.copy(messageId = ref.id)
-        ref.set(withId).await()
+        ref.set(withId.toFirestoreMap()).await()
         ref.id
     }
 
@@ -89,7 +102,7 @@ object FirestoreService {
                     return@addSnapshotListener
                 }
                 val messages = snapshot?.documents?.mapNotNull {
-                    it.toObject(FirestoreMessage::class.java)
+                    it.toFirestoreMessage()
                 } ?: emptyList()
                 trySend(messages)
             }
@@ -130,7 +143,193 @@ object FirestoreService {
             .orderBy("timestamp", Query.Direction.ASCENDING)
             .get()
             .await()
-            .toObjects(FirestoreMessage::class.java)
+            .documents
+            .mapNotNull { it.toFirestoreMessage() }
+    }
+
+    fun createAiChatSession(
+        userId: String,
+        clientCreatedAtMillis: Long = System.currentTimeMillis(),
+        sessionId: String = "",
+    ): Result<AiChatSession> = runCatching {
+        val ref = if (sessionId.isBlank()) {
+            db.collection(COL_CHAT_SESSIONS).document()
+        } else {
+            db.collection(COL_CHAT_SESSIONS).document(sessionId)
+        }
+        val clientCreatedAt = Timestamp(Date(clientCreatedAtMillis))
+        val session = AiChatSession(
+            sessionId = ref.id,
+            userId = userId,
+            title = "Untitled",
+            titleStatus = AiChatSession.TITLE_PENDING,
+            clientCreatedAt = clientCreatedAt,
+            clientCreatedAtMillis = clientCreatedAtMillis,
+        )
+        ref.set(
+            mapOf(
+                "sessionId" to session.sessionId,
+                "type" to AiChatSession.TYPE_AI,
+                "userId" to userId,
+                "title" to session.title,
+                "titleStatus" to session.titleStatus,
+                "createdAt" to FieldValue.serverTimestamp(),
+                "clientCreatedAt" to clientCreatedAt,
+                "clientCreatedAtMillis" to clientCreatedAtMillis,
+                "updatedAt" to FieldValue.serverTimestamp(),
+                "lastMessage" to "",
+                "messageCount" to 0,
+                "isDeleted" to false,
+            )
+        )
+        session
+    }
+
+    suspend fun getLatestAiChatSession(userId: String): Result<AiChatSession?> = runCatching {
+        db.collection(COL_CHAT_SESSIONS)
+            .whereEqualTo("type", AiChatSession.TYPE_AI)
+            .whereEqualTo("userId", userId)
+            .whereEqualTo("isDeleted", false)
+            .get()
+            .await()
+            .documents
+            .mapNotNull { it.toAiChatSession() }
+            .maxByOrNull { it.clientCreatedAtMillis }
+    }
+
+    fun getAiChatSessionsFlow(userId: String): Flow<List<AiChatSession>> = callbackFlow {
+        val listener = db.collection(COL_CHAT_SESSIONS)
+            .whereEqualTo("type", AiChatSession.TYPE_AI)
+            .whereEqualTo("userId", userId)
+            .whereEqualTo("isDeleted", false)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.w("FirestoreService", "AI chat sessions listener error", error)
+                    close()
+                    return@addSnapshotListener
+                }
+                val sessions = snapshot?.documents
+                    ?.mapNotNull { it.toAiChatSession() }
+                    ?.sortedByDescending { it.clientCreatedAtMillis }
+                    .orEmpty()
+                trySend(sessions)
+            }
+        awaitClose { listener.remove() }
+    }
+
+    suspend fun getAiChatSessionsOnce(userId: String): Result<List<AiChatSession>> = runCatching {
+        db.collection(COL_CHAT_SESSIONS)
+            .whereEqualTo("type", AiChatSession.TYPE_AI)
+            .whereEqualTo("userId", userId)
+            .whereEqualTo("isDeleted", false)
+            .get()
+            .await()
+            .documents
+            .mapNotNull { it.toAiChatSession() }
+            .sortedByDescending { it.clientCreatedAtMillis }
+    }
+
+    fun updateAiChatSessionAfterMessage(sessionId: String, preview: String) {
+        db.collection(COL_CHAT_SESSIONS).document(sessionId).update(
+            mapOf(
+                "lastMessage" to preview.take(160),
+                "updatedAt" to FieldValue.serverTimestamp(),
+                "messageCount" to FieldValue.increment(1),
+            )
+        )
+    }
+
+    suspend fun renameAiChatSessionFromServerTime(sessionId: String, title: String): Result<Unit> = runCatching {
+        db.collection(COL_CHAT_SESSIONS).document(sessionId).update(
+            mapOf(
+                "title" to title,
+                "titleStatus" to AiChatSession.TITLE_READY,
+                "updatedAt" to FieldValue.serverTimestamp(),
+            )
+        ).await()
+    }
+
+    suspend fun deleteAiChatSession(sessionId: String): Result<Unit> = runCatching {
+        deleteAllMessages(sessionId).getOrThrow()
+        db.collection(COL_CHAT_SESSIONS)
+            .document(sessionId)
+            .delete()
+            .await()
+    }
+
+    private fun FirestoreMessage.toFirestoreMap(): Map<String, Any?> =
+        mapOf(
+            "messageId" to messageId,
+            "sessionId" to sessionId,
+            "senderId" to senderId,
+            "receiverId" to receiverId,
+            "content" to content,
+            "timestamp" to timestamp,
+            "isFromAI" to isFromAI,
+            "fromAI" to isFromAI,
+            "isRead" to isRead,
+            "messageType" to messageType,
+            "senderType" to senderType,
+            "riskLevel" to riskLevel,
+            "triggerCounselor" to triggerCounselor,
+            "substanceDetected" to substanceDetected,
+            "substancesDetected" to substancesDetected,
+            "actionDestination" to actionDestination,
+            "quickReplies" to quickReplies,
+            "safetyFlags" to safetyFlags,
+            "detectedSymptoms" to detectedSymptoms,
+            "userIntent" to userIntent,
+        )
+
+    private fun DocumentSnapshot.toFirestoreMessage(): FirestoreMessage? {
+        val data = data ?: return null
+        return FirestoreMessage(
+            messageId = (data["messageId"] as? String).orEmpty().ifBlank { id },
+            sessionId = (data["sessionId"] as? String).orEmpty(),
+            senderId = (data["senderId"] as? String).orEmpty(),
+            receiverId = (data["receiverId"] as? String).orEmpty(),
+            content = (data["content"] as? String).orEmpty(),
+            isFromAI = data["isFromAI"] as? Boolean
+                ?: data["fromAI"] as? Boolean
+                ?: ((data["senderType"] as? String) == "ai" || (data["senderId"] as? String) == "ai"),
+            isRead = data["isRead"] as? Boolean ?: false,
+            messageType = (data["messageType"] as? String).orEmpty().ifBlank { "TEXT" },
+            timestamp = data["timestamp"] as? Timestamp ?: Timestamp.now(),
+            senderType = (data["senderType"] as? String).orEmpty(),
+            riskLevel = (data["riskLevel"] as? String).orEmpty(),
+            triggerCounselor = data["triggerCounselor"] as? Boolean ?: false,
+            substanceDetected = (data["substanceDetected"] as? String).orEmpty(),
+            substancesDetected = data.stringList("substancesDetected"),
+            actionDestination = (data["actionDestination"] as? String).orEmpty(),
+            quickReplies = data.stringList("quickReplies"),
+            safetyFlags = data.stringList("safetyFlags"),
+            detectedSymptoms = data.stringList("detectedSymptoms"),
+            userIntent = (data["userIntent"] as? String).orEmpty(),
+        )
+    }
+
+    private fun Map<String, Any>.stringList(key: String): List<String> =
+        (this[key] as? List<*>)?.mapNotNull { it as? String }.orEmpty()
+
+    private fun DocumentSnapshot.toAiChatSession(): AiChatSession? {
+        val data = data ?: return null
+        return AiChatSession(
+            sessionId = (data["sessionId"] as? String).orEmpty().ifBlank { id },
+            userId = (data["userId"] as? String).orEmpty(),
+            title = (data["title"] as? String).orEmpty().ifBlank { "Untitled" },
+            titleStatus = (data["titleStatus"] as? String).orEmpty().ifBlank { AiChatSession.TITLE_PENDING },
+            createdAt = data["createdAt"] as? Timestamp,
+            clientCreatedAt = data["clientCreatedAt"] as? Timestamp ?: Timestamp.now(),
+            clientCreatedAtMillis = data["clientCreatedAtMillis"] as? Long
+                ?: (data["clientCreatedAtMillis"] as? Number)?.toLong()
+                ?: 0L,
+            updatedAt = data["updatedAt"] as? Timestamp,
+            lastMessage = (data["lastMessage"] as? String).orEmpty(),
+            messageCount = (data["messageCount"] as? Long)?.toInt()
+                ?: (data["messageCount"] as? Number)?.toInt()
+                ?: 0,
+            isDeleted = data["isDeleted"] as? Boolean ?: false,
+        )
     }
 
     suspend fun getCounselors(): Result<List<CounselorProfile>> = runCatching {

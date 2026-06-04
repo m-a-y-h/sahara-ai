@@ -63,7 +63,7 @@ class DashboardViewModel : ViewModel() {
                 GlobalAppState.lastAssessmentTimestamp = savedTs
                 GlobalAppState.hasEverCompletedAssessment = true
                 val ageMs = if (savedTs > 0) System.currentTimeMillis() - savedTs else 0L
-                if (savedTs == 0L || ageMs <= ASSESSMENT_VALIDITY_MS) {
+                if (savedTs > 0L && ageMs <= ASSESSMENT_VALIDITY_MS) {
                     GlobalAppState.hasCompletedInitialAssessment = true
                 } else {
                     GlobalAppState.hasCompletedInitialAssessment = false

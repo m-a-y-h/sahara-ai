@@ -11,8 +11,8 @@ import java.net.URL
 
 object SaharaAiClient {
 
-    private const val CONNECT_TIMEOUT_MS = 12_000
-    private const val READ_TIMEOUT_MS    = 30_000
+    private const val CONNECT_TIMEOUT_MS = 20_000
+    private const val READ_TIMEOUT_MS    = 45_000
     private const val MAX_USER_INPUT_CHARS = 900
 
     private val gson = Gson()

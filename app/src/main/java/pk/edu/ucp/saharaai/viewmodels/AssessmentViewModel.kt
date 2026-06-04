@@ -8,9 +8,7 @@ import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
 import kotlinx.coroutines.launch
 import pk.edu.ucp.saharaai.ASSESSMENT_VALIDITY_MS
-import pk.edu.ucp.saharaai.KEY_ASSESSMENT_EVER_COMPLETED
-import pk.edu.ucp.saharaai.KEY_ASSESSMENT_SCORE
-import pk.edu.ucp.saharaai.KEY_ASSESSMENT_TIMESTAMP
+import pk.edu.ucp.saharaai.AssessmentCache
 import pk.edu.ucp.saharaai.data.remote.RealtimeDBService
 import pk.edu.ucp.saharaai.data.repository.RiskProfileRepository
 import pk.edu.ucp.saharaai.ui.screens.GlobalAppState
@@ -34,14 +32,16 @@ class AssessmentViewModel : ViewModel() {
         saveError = null
     }
 
-    fun restoreLatestAssessment(onRestored: () -> Unit) {
+    fun restoreLatestAssessment(context: Context, onRestored: () -> Unit) {
         val uid = Firebase.auth.currentUser?.uid ?: return
         viewModelScope.launch {
             val latest = RealtimeDBService.loadLatestAssessment(uid) ?: return@launch
             val score = (latest["score"] as? Int) ?: (latest["score"] as? Long)?.toInt() ?: return@launch
             val timestamp = (latest["timestamp"] as? Long) ?: 0L
+            if (timestamp <= 0L) return@launch
+            AssessmentCache.save(context, uid, score, timestamp)
             val ageMs = if (timestamp > 0) System.currentTimeMillis() - timestamp else 0L
-            if (timestamp == 0L || ageMs <= ASSESSMENT_VALIDITY_MS) {
+            if (timestamp > 0L && ageMs <= ASSESSMENT_VALIDITY_MS) {
                 GlobalAppState.dast10Score = score
                 GlobalAppState.lastAssessmentTimestamp = timestamp
                 GlobalAppState.hasCompletedInitialAssessment = true
@@ -69,19 +69,22 @@ class AssessmentViewModel : ViewModel() {
             isSaving = true
             saveError = null
             val uid = Firebase.auth.currentUser?.uid
-            val timestamp = System.currentTimeMillis()
-            if (!uid.isNullOrBlank()) {
-                RealtimeDBService.saveAssessment(uid, quizType, score, riskLevel, date, answers)
-                    .onFailure { saveError = it.message }
-                RiskProfileRepository.registerAssessmentCycle(score, timestamp)
-                    .onFailure { saveError = it.message ?: "Could not start monitoring cycle." }
+            if (uid.isNullOrBlank()) {
+                saveError = "Sign in is required to save the assessment."
+                isSaving = false
+                return@launch
             }
-            context.applicationContext.getSharedPreferences("sahara_prefs", Context.MODE_PRIVATE)
-                .edit()
-                .putInt(KEY_ASSESSMENT_SCORE, score)
-                .putLong(KEY_ASSESSMENT_TIMESTAMP, timestamp)
-                .putBoolean(KEY_ASSESSMENT_EVER_COMPLETED, true)
-                .apply()
+
+            val timestamp = RealtimeDBService.saveAssessment(uid, quizType, score, riskLevel, date, answers)
+                .getOrElse {
+                    saveError = it.message ?: "Could not save assessment."
+                    isSaving = false
+                    return@launch
+                }
+
+            RiskProfileRepository.registerAssessmentCycle(score, timestamp)
+                .onFailure { saveError = it.message ?: "Could not start monitoring cycle." }
+            AssessmentCache.save(context, uid, score, timestamp)
             NotificationManager.logAssessment(
                 oldScore = GlobalAppState.dast10Score,
                 newScore = score

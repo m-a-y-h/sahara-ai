@@ -61,7 +61,31 @@ class ProfileViewModel : ViewModel() {
             isProfileLoading = false
             return
         }
-        isProfileLoading = true
+
+        // Local-first: paint whatever we cached on this device for this UID
+        // so the avatar circle / location chip don't blink as placeholders
+        // while we wait on RTDB. Cloud is then queried in the coroutine
+        // below and treated as the source of truth — any mismatch updates
+        // both the in-memory state and the prefs cache.
+        val keyAvatarId        = profileKey("avatarId", currentUid)
+        val keyCustomAvatarUrl = profileKey("customAvatarUrl", currentUid)
+        val keyAvatarStatus    = profileKey("customAvatarStatus", currentUid)
+        val keyRegion          = profileKey("region", currentUid)
+        val keyMemberSince     = profileKey("memberSince", currentUid)
+        val keyName            = profileKey("name", currentUid)
+
+        prefs.getString(keyName, null)?.takeIf(String::isNotBlank)?.let { resolvedName = it }
+        prefs.getString(keyAvatarId, null)?.takeIf(String::isNotBlank)?.let { avatarId = it }
+        prefs.getString(keyCustomAvatarUrl, null)?.let { customAvatarUrl = it }
+        prefs.getString(keyAvatarStatus, null)?.let { customAvatarStatus = it }
+        prefs.getString(keyRegion, null)?.let { resolvedRegion = it }
+        prefs.getString(keyMemberSince, null)?.let { memberSince = it }
+
+        // If we already had something cached, don't show the global spinner —
+        // refresh quietly in the background.
+        val hadCache = prefs.contains(keyAvatarId) || prefs.contains(keyRegion)
+        isProfileLoading = !hadCache
+
         viewModelScope.launch {
             runCatching {
                 RealtimeDBService.getUser(currentUid).getOrNull()?.let { user ->
@@ -87,11 +111,23 @@ class ProfileViewModel : ViewModel() {
                 } else {
                     ""
                 }
+                // Mirror the cloud snapshot back into prefs so the next cold
+                // start has accurate data even before the network finishes.
+                prefs.edit()
+                    .putString(keyName, resolvedName)
+                    .putString(keyAvatarId, avatarId)
+                    .putString(keyCustomAvatarUrl, customAvatarUrl)
+                    .putString(keyAvatarStatus, customAvatarStatus)
+                    .putString(keyRegion, resolvedRegion)
+                    .putString(keyMemberSince, memberSince)
+                    .apply()
             }.also {
                 isProfileLoading = false
             }
         }
     }
+
+    private fun profileKey(field: String, uid: String) = "profile.$field.$uid"
 
     fun updateName(context: Context, newName: String, onComplete: () -> Unit) {
         val currentUid = uid

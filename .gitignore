@@ -10,6 +10,7 @@
 
 # IDE and local assistant configuration
 .idea/
+*.iml
 /shelf/
 /workspace.xml
 

@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.tasks.await
+import pk.edu.ucp.saharaai.ASSESSMENT_VALIDITY_MS
 import pk.edu.ucp.saharaai.data.model.AvatarRequest
 import pk.edu.ucp.saharaai.data.model.BugReport
 import pk.edu.ucp.saharaai.data.model.CounselorAttributeCatalog
@@ -1421,6 +1422,30 @@ object RealtimeDBService {
     
 
     
+    private suspend fun requireRealtimeConnection() {
+        val connected = db.getReference(".info/connected")
+            .get()
+            .await()
+            .getValue(Boolean::class.java) == true
+        require(connected) { "Internet connection is required to save the assessment." }
+    }
+
+    private fun parseAssessmentEntry(child: DataSnapshot): Map<String, Any>? {
+        val entry = mutableMapOf<String, Any>()
+        entry["id"] = child.key ?: ""
+        child.child("score").getValue(Long::class.java)?.let        { entry["score"]     = it.toInt() }
+        child.child("quizType").getValue(String::class.java)?.let   { entry["quizType"]  = it }
+        child.child("riskLevel").getValue(String::class.java)?.let  { entry["riskLevel"] = it }
+        child.child("date").getValue(String::class.java)?.let       { entry["date"]      = it }
+        child.child("timestamp").getValue(Long::class.java)?.let    { entry["timestamp"] = it }
+        return if (entry.containsKey("score")) entry else null
+    }
+
+    private fun formatAssessmentUnlockDate(timestampMs: Long): String {
+        val unlockAt = timestampMs + ASSESSMENT_VALIDITY_MS
+        return SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(Date(unlockAt))
+    }
+
     suspend fun saveAssessment(
         uid: String,
         quizType: String,
@@ -1428,7 +1453,17 @@ object RealtimeDBService {
         riskLevel: String,
         date: String,
         answers: Map<Int, Triple<String, String, Boolean>>   
-    ): Result<Unit> = runCatching {
+    ): Result<Long> = runCatching {
+        require(uid.isNotBlank()) { "Missing user id." }
+        requireRealtimeConnection()
+        val latest = loadLatestAssessmentResult(uid).getOrThrow()
+        val latestTimestamp = latest?.get("timestamp") as? Long ?: 0L
+        if (latestTimestamp > 0L && System.currentTimeMillis() - latestTimestamp <= ASSESSMENT_VALIDITY_MS) {
+            throw IllegalStateException(
+                "Assessment already exists. Next reassessment is available from ${formatAssessmentUnlockDate(latestTimestamp)}."
+            )
+        }
+
         val ref = db.getReference("assessment").child(uid).push()
 
         
@@ -1441,34 +1476,30 @@ object RealtimeDBService {
         }
 
         ref.setValue(
-            mapOf(
+            mapOf<String, Any>(
                 "quizType"       to quizType,
                 "score"          to score,
                 "totalQuestions" to answers.size,
                 "riskLevel"      to riskLevel,
                 "date"           to date,
-                "timestamp"      to System.currentTimeMillis(),
+                "timestamp"      to ServerValue.TIMESTAMP,
                 "answers"        to answersMap
             )
         ).await()
+        val savedTimestamp = ref.child("timestamp").get().await().getValue(Long::class.java) ?: 0L
+        check(savedTimestamp > 0L) { "Server timestamp could not be verified." }
+        savedTimestamp
     }
 
     
-    suspend fun loadLatestAssessment(uid: String): Map<String, Any>? = runCatching {
+    suspend fun loadLatestAssessmentResult(uid: String): Result<Map<String, Any>?> = runCatching {
         val snap = db.getReference("assessment").child(uid)
             .orderByChild("timestamp").limitToLast(1).get().await()
-        snap.children.lastOrNull()?.let { child ->
-            val entry = mutableMapOf<String, Any>()
-            entry["id"] = child.key ?: ""
-            child.child("score").getValue(Long::class.java)?.let        { entry["score"]     = it.toInt() }
-            child.child("quizType").getValue(String::class.java)?.let   { entry["quizType"]  = it }
-            child.child("riskLevel").getValue(String::class.java)?.let  { entry["riskLevel"] = it }
-            child.child("date").getValue(String::class.java)?.let       { entry["date"]      = it }
-            child.child("timestamp").getValue(Long::class.java)?.let    { entry["timestamp"] = it }
-            
-            if (entry.containsKey("score")) entry else null
-        }
-    }.getOrNull()
+        snap.children.lastOrNull()?.let(::parseAssessmentEntry)
+    }
+
+    suspend fun loadLatestAssessment(uid: String): Map<String, Any>? =
+        loadLatestAssessmentResult(uid).getOrNull()
 
     
     fun listenToAssessments(uid: String): Flow<List<Map<String, Any>>> = callbackFlow {

@@ -15,9 +15,15 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import com.google.firebase.Timestamp
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import java.util.UUID
+import pk.edu.ucp.saharaai.data.model.AiChatSession
 import pk.edu.ucp.saharaai.data.model.FirestoreMessage
 import pk.edu.ucp.saharaai.data.model.SaharaChatTurnMetadata
+import pk.edu.ucp.saharaai.data.model.SaharaMessageType
+import pk.edu.ucp.saharaai.data.model.SaharaRiskLevel
 import pk.edu.ucp.saharaai.data.model.VoiceLevel
 import pk.edu.ucp.saharaai.data.remote.RealtimeDBService
 import pk.edu.ucp.saharaai.data.repository.ChatRepository
@@ -49,6 +55,12 @@ class ChatViewModel : ViewModel() {
     
     private val _aiMetadata = MutableStateFlow<Map<String, SaharaChatTurnMetadata>>(emptyMap())
     val aiMetadata: StateFlow<Map<String, SaharaChatTurnMetadata>> = _aiMetadata.asStateFlow()
+
+    private val _aiSessions = MutableStateFlow<List<AiChatSession>>(emptyList())
+    val aiSessions: StateFlow<List<AiChatSession>> = _aiSessions.asStateFlow()
+
+    private val _currentAiSessionId = MutableStateFlow("")
+    val currentAiSessionId: StateFlow<String> = _currentAiSessionId.asStateFlow()
 
     
     private val _saharaUnreachable = MutableStateFlow(false)
@@ -92,6 +104,7 @@ class ChatViewModel : ViewModel() {
     private var currentUserId: String = ""
     private var isRealtimeChat: Boolean = false
     private var messageListenJob: Job? = null
+    private var aiSessionListenJob: Job? = null
     private var identityListenJob: Job? = null
     private var sessionMetaJob: Job? = null
     private var profileLoadJob: Job? = null
@@ -105,6 +118,7 @@ class ChatViewModel : ViewModel() {
     /** Last welcome text that was seeded into the AI session, so `startNewAiChat()`
      *  can re-seed an identical opener without the screen having to remember it. */
     private var lastAiWelcomeText: String = ""
+    private val pendingSessionTitleRenames = mutableSetOf<String>()
 
     fun initSession(
         userId: String,
@@ -114,11 +128,16 @@ class ChatViewModel : ViewModel() {
         counselorName: String = "",
         aiWelcomeText: String = "",
     ) {
+        val nextRealtimePathUserId = if (targetUserId.isNotBlank()) targetUserId else userId
+        val wasSameAiUser = isAiChat &&
+            !isRealtimeChat &&
+            currentUserId == userId &&
+            currentSessionId.isNotBlank()
+
         messageListenJob?.cancel()
         identityListenJob?.cancel()
         sessionMetaJob?.cancel()
         profileLoadJob?.cancel()
-        _messages.value = emptyList()
         _identityVisible.value = false
         _counselorProfile.value = null
         _targetUserProfile.value = null
@@ -129,41 +148,74 @@ class ChatViewModel : ViewModel() {
         currentUserId = userId
         isCounselorSide = targetUserId.isNotBlank()
         
-        realtimePathUserId = if (targetUserId.isNotBlank()) targetUserId else userId
+        realtimePathUserId = nextRealtimePathUserId
 
         if (isAiChat) {
+            aiSessionListenJob?.cancel()
             isRealtimeChat = false
-            currentSessionId = ChatRepository.aiSessionId(userId)
             lastAiWelcomeText = aiWelcomeText
-            // Seed the welcome bubble as the first persisted message if the
-            // session is empty. Doing it here (not in Compose) means the
-            // welcome survives screen recreation, app restart, and the
-            // Firestore snapshot can't blow it away on the first real send.
-            if (aiWelcomeText.isNotBlank()) {
+
+            if (!wasSameAiUser) {
+                currentSessionId = ""
+                _currentAiSessionId.value = ""
+                _messages.value = emptyList()
+                _aiMetadata.value = emptyMap()
+            }
+
+            aiSessionListenJob = viewModelScope.launch {
+                ChatRepository.getAiChatSessionsFlow(userId)
+                    .catch { e -> Log.w(TAG, "AI sessions flow error", e) }
+                    .collect { sessions ->
+                        _aiSessions.value = sessions
+                        finalizeServerNamedSessions(sessions)
+                        if (currentSessionId.isBlank() && sessions.isNotEmpty()) {
+                            selectAiSession(
+                                sessionId = sessions.first().sessionId,
+                                seedWelcomeIfEmpty = false,
+                            )
+                        }
+                    }
+            }
+
+            if (wasSameAiUser) {
+                selectAiSession(currentSessionId, seedWelcomeIfEmpty = false)
+            } else {
                 viewModelScope.launch {
-                    val existing = ChatRepository.getMessagesOnce(currentSessionId)
-                        .getOrDefault(emptyList())
-                    if (existing.isEmpty()) {
-                        ChatRepository.sendMessage(
-                            sessionId   = currentSessionId,
-                            senderId    = "ai",
-                            receiverId  = userId,
-                            content     = aiWelcomeText,
-                            isFromAI    = true,
-                        )
+                    val latest = ChatRepository.getLatestAiChatSession(userId).getOrNull()
+                    if (latest != null) {
+                        selectAiSession(latest.sessionId, seedWelcomeIfEmpty = false)
+                    } else {
+                        val legacySessionId = ChatRepository.legacyAiSessionId(userId)
+                        val legacyMessages = ChatRepository.getMessagesOnce(legacySessionId)
+                            .getOrDefault(emptyList())
+                        if (legacyMessages.isNotEmpty()) {
+                            val firstMessageMillis = legacyMessages.first().timestamp.let {
+                                it.seconds * 1000L + it.nanoseconds / 1_000_000L
+                            }
+                            ChatRepository.createAiChatSession(
+                                userId = userId,
+                                clientCreatedAtMillis = firstMessageMillis,
+                                sessionId = legacySessionId,
+                            )
+                            selectAiSession(legacySessionId, seedWelcomeIfEmpty = false)
+                        } else {
+                            createAndSelectAiSession(seedWelcome = true)
+                        }
                     }
                 }
             }
-            messageListenJob = viewModelScope.launch {
-                ChatRepository.getMessagesFlow(currentSessionId)
-                    .catch { e -> Log.w(TAG, "AI messages flow error", e) }
-                    .collect { msgs ->
-                        _messages.value = msgs
-                    }
-            }
         } else if (counselorId.isNotBlank()) {
+            aiSessionListenJob?.cancel()
+            _aiSessions.value = emptyList()
+            _currentAiSessionId.value = ""
             isRealtimeChat = true
-            currentSessionId = RealtimeDBService.chatSessionPath(realtimePathUserId, counselorId)
+            val nextSessionId = RealtimeDBService.chatSessionPath(nextRealtimePathUserId, counselorId)
+            val isSameSession = nextSessionId == currentSessionId
+            if (!isSameSession) {
+                _messages.value = emptyList()
+                _aiMetadata.value = emptyMap()
+            }
+            currentSessionId = nextSessionId
 
             identityListenJob = viewModelScope.launch {
                 RealtimeDBService.listenChatIdentityVisible(realtimePathUserId, counselorId)
@@ -228,6 +280,94 @@ class ChatViewModel : ViewModel() {
         }
     }
 
+    private fun createAndSelectAiSession(seedWelcome: Boolean): Boolean {
+        val uid = currentUserId.ifBlank { auth.currentUser?.uid.orEmpty() }
+        if (uid.isBlank()) return false
+        return ChatRepository.createAiChatSession(uid).fold(
+            onSuccess = { session ->
+                _aiSessions.value = listOf(session) + _aiSessions.value.filterNot { it.sessionId == session.sessionId }
+                selectAiSession(session.sessionId, seedWelcomeIfEmpty = seedWelcome)
+                true
+            },
+            onFailure = {
+                _uiState.value = ChatUiState.Error(it.message ?: "Could not create chat.")
+                false
+            },
+        )
+    }
+
+    fun openAiChatSession(sessionId: String) {
+        if (sessionId.isBlank() || isRealtimeChat) return
+        selectAiSession(sessionId, seedWelcomeIfEmpty = false)
+    }
+
+    private fun selectAiSession(sessionId: String, seedWelcomeIfEmpty: Boolean) {
+        if (sessionId.isBlank()) return
+        val changed = sessionId != currentSessionId
+        currentSessionId = sessionId
+        _currentAiSessionId.value = sessionId
+        if (changed) {
+            _messages.value = emptyList()
+            _aiMetadata.value = emptyMap()
+        }
+
+        messageListenJob?.cancel()
+        if (seedWelcomeIfEmpty) {
+            seedAiWelcomeIfEmpty(sessionId)
+        }
+        messageListenJob = viewModelScope.launch {
+            ChatRepository.getMessagesFlow(sessionId)
+                .catch { e -> Log.w(TAG, "AI messages flow error", e) }
+                .collect { msgs ->
+                    _messages.value = msgs
+                    _aiMetadata.value = msgs.mapNotNull { it.toSaharaMetadataOrNull() }
+                        .associateBy { it.messageId }
+                }
+        }
+    }
+
+    private fun seedAiWelcomeIfEmpty(sessionId: String) {
+        val welcome = lastAiWelcomeText
+        val uid = currentUserId
+        if (welcome.isBlank() || uid.isBlank()) return
+        viewModelScope.launch {
+            val existing = ChatRepository.getMessagesOnce(sessionId).getOrDefault(emptyList())
+            if (existing.isEmpty()) {
+                ChatRepository.sendAiMessage(
+                    sessionId = sessionId,
+                    content = welcome,
+                    userId = uid,
+                ).onSuccess {
+                    ChatRepository.updateAiChatSessionAfterMessage(sessionId, welcome)
+                }
+            }
+        }
+    }
+
+    private fun finalizeServerNamedSessions(sessions: List<AiChatSession>) {
+        sessions
+            .filter { session ->
+                session.createdAt != null &&
+                    session.titleStatus != AiChatSession.TITLE_READY &&
+                    session.title == "Untitled" &&
+                    pendingSessionTitleRenames.add(session.sessionId)
+            }
+            .forEach { session ->
+                val titleSource = session.clientCreatedAt.takeIf { session.clientCreatedAtMillis > 0 }
+                    ?: session.createdAt
+                    ?: Timestamp.now()
+                val title = SimpleDateFormat("MMM d, yyyy h:mm a", Locale.getDefault())
+                    .format(Date(titleSource.seconds * 1000L + titleSource.nanoseconds / 1_000_000L))
+                viewModelScope.launch {
+                    ChatRepository.renameAiChatSessionFromServerTime(session.sessionId, title)
+                        .onFailure {
+                            pendingSessionTitleRenames.remove(session.sessionId)
+                            Log.w(TAG, "Could not finalize AI session title", it)
+                        }
+                }
+            }
+    }
+
     
     fun sendUserMessageToAI(
         text: String,
@@ -239,10 +379,18 @@ class ChatViewModel : ViewModel() {
 
         viewModelScope.launch {
             _uiState.value = ChatUiState.Sending
+            if (currentSessionId.isBlank()) {
+                createAndSelectAiSession(seedWelcome = true)
+            }
+            val sessionId = currentSessionId
+            if (sessionId.isBlank()) {
+                _uiState.value = ChatUiState.Error("Could not open chat.")
+                return@launch
+            }
 
             
             val sendResult = ChatRepository.sendMessage(
-                sessionId   = currentSessionId,
+                sessionId   = sessionId,
                 senderId    = uid,
                 receiverId  = "ai",
                 content     = text,
@@ -253,6 +401,7 @@ class ChatViewModel : ViewModel() {
                 _uiState.value = ChatUiState.Error("Failed to send message.")
                 return@launch
             }
+            ChatRepository.updateAiChatSessionAfterMessage(sessionId, text)
             onUserMessageSaved?.invoke()
 
             
@@ -269,14 +418,16 @@ class ChatViewModel : ViewModel() {
             
             
             val storedMessageType = sahara.metadata.messageType.name
-            val savedResult = ChatRepository.sendMessage(
-                sessionId   = currentSessionId,
-                senderId    = "ai",
-                receiverId  = uid,
-                content     = sahara.text,
-                isFromAI    = true,
+            val savedResult = ChatRepository.sendAiMessage(
+                sessionId  = sessionId,
+                userId     = uid,
+                content    = sahara.text,
                 messageType = storedMessageType,
+                metadata   = sahara.metadata,
             )
+            if (savedResult.isSuccess) {
+                ChatRepository.updateAiChatSessionAfterMessage(sessionId, sahara.text)
+            }
 
             
             
@@ -420,32 +571,39 @@ class ChatViewModel : ViewModel() {
         }
     }
 
-    /** Wipes the current AI session's messages from Firestore and re-seeds the
-     *  welcome bubble. Used by the chat top-bar "New chat" action. */
+    /** Starts a separate AI session. Older sessions stay in history until the
+     *  user deletes them from the history sheet. */
     fun startNewAiChat() {
-        if (isRealtimeChat || currentSessionId.isBlank()) return
+        if (isRealtimeChat) return
         val uid = currentUserId
         if (uid.isBlank()) return
-        val welcome = lastAiWelcomeText
+        _uiState.value = ChatUiState.Sending
+        val created = createAndSelectAiSession(seedWelcome = true)
+        _saharaUnreachable.value = false
+        if (created) _uiState.value = ChatUiState.Idle
+    }
+
+    fun deleteAiChatSession(sessionId: String) {
+        if (sessionId.isBlank() || isRealtimeChat) return
         viewModelScope.launch {
-            _uiState.value = ChatUiState.Sending
-            ChatRepository.clearSession(currentSessionId)
+            ChatRepository.deleteAiChatSession(sessionId)
                 .onSuccess {
-                    _aiMetadata.value = emptyMap()
-                    _saharaUnreachable.value = false
-                    if (welcome.isNotBlank()) {
-                        ChatRepository.sendMessage(
-                            sessionId  = currentSessionId,
-                            senderId   = "ai",
-                            receiverId = uid,
-                            content    = welcome,
-                            isFromAI   = true,
-                        )
+                    pendingSessionTitleRenames.remove(sessionId)
+                    if (currentSessionId == sessionId) {
+                        val replacement = _aiSessions.value.firstOrNull { it.sessionId != sessionId }
+                        if (replacement != null) {
+                            selectAiSession(replacement.sessionId, seedWelcomeIfEmpty = false)
+                        } else {
+                            currentSessionId = ""
+                            _currentAiSessionId.value = ""
+                            _messages.value = emptyList()
+                            _aiMetadata.value = emptyMap()
+                            createAndSelectAiSession(seedWelcome = true)
+                        }
                     }
-                    _uiState.value = ChatUiState.Idle
                 }
                 .onFailure {
-                    _uiState.value = ChatUiState.Error(it.message ?: "Could not reset chat.")
+                    _uiState.value = ChatUiState.Error(it.message ?: "Could not delete chat.")
                 }
         }
     }
@@ -471,12 +629,13 @@ class ChatViewModel : ViewModel() {
         if (currentSessionId.isBlank()) return
         viewModelScope.launch {
             _isTyping.value = true
+            val sessionId = currentSessionId
             val placeholderText = if (isEnglish)
                 "Voice note ($secondsRecorded sec) - analyzing..."
             else
                 "Voice note ($secondsRecorded sec) - sun raha hoon..."
             val userMsgIdResult = ChatRepository.sendMessage(
-                sessionId   = currentSessionId,
+                sessionId   = sessionId,
                 senderId    = uid,
                 receiverId  = "ai",
                 content     = placeholderText,
@@ -484,6 +643,9 @@ class ChatViewModel : ViewModel() {
                 messageType = "VOICE_NOTE",
             )
             val userMsgId = userMsgIdResult.getOrNull()
+            if (userMsgId != null) {
+                ChatRepository.updateAiChatSessionAfterMessage(sessionId, placeholderText)
+            }
 
             SaharaVoiceRepository.analyze(audioBytes, mimeType).fold(
                 onSuccess = { response ->
@@ -518,13 +680,13 @@ class ChatViewModel : ViewModel() {
                     if (userMsgId != null) {
                         ChatRepository.updateMessageContent(userMsgId, finalUserBubble)
                     }
-                    ChatRepository.sendMessage(
-                        sessionId   = currentSessionId,
-                        senderId    = "ai",
-                        receiverId  = uid,
+                    ChatRepository.sendAiMessage(
+                        sessionId   = sessionId,
                         content     = reply,
-                        isFromAI    = true,
-                    )
+                        userId      = uid,
+                    ).onSuccess {
+                        ChatRepository.updateAiChatSessionAfterMessage(sessionId, reply)
+                    }
                 },
                 onFailure = {
                     val failureUserBubble = "Voice note ($secondsRecorded sec)"
@@ -535,13 +697,13 @@ class ChatViewModel : ViewModel() {
                         "Couldn't reach the voice analyser right now. Please type how you're feeling."
                     else
                         "Voice analyser tak abhi raabta nahi ho saka. Type kar ke batayein."
-                    ChatRepository.sendMessage(
-                        sessionId   = currentSessionId,
-                        senderId    = "ai",
-                        receiverId  = uid,
+                    ChatRepository.sendAiMessage(
+                        sessionId   = sessionId,
                         content     = failureReply,
-                        isFromAI    = true,
-                    )
+                        userId      = uid,
+                    ).onSuccess {
+                        ChatRepository.updateAiChatSessionAfterMessage(sessionId, failureReply)
+                    }
                 },
             )
             _isTyping.value = false
@@ -611,4 +773,28 @@ class ChatViewModel : ViewModel() {
 
     
     fun metadataFor(messageId: String): SaharaChatTurnMetadata? = _aiMetadata.value[messageId]
+
+    private fun FirestoreMessage.toSaharaMetadataOrNull(): SaharaChatTurnMetadata? {
+        if (!isFromAI && senderType != "ai" && senderId != "ai") return null
+        val hasMetadata =
+            messageType.isNotBlank() ||
+                riskLevel.isNotBlank() ||
+                actionDestination.isNotBlank() ||
+                quickReplies.isNotEmpty() ||
+                userIntent.isNotBlank()
+        if (!hasMetadata) return null
+        return SaharaChatTurnMetadata(
+            messageId = messageId,
+            messageType = SaharaMessageType.fromWire(messageType, userIntent.ifBlank { null }),
+            riskLevel = SaharaRiskLevel.fromWire(riskLevel),
+            triggerCounselor = triggerCounselor,
+            substanceDetected = substanceDetected.ifBlank { null },
+            substancesDetected = substancesDetected,
+            actionDestination = actionDestination.ifBlank { null },
+            quickReplies = quickReplies,
+            safetyFlags = safetyFlags,
+            detectedSymptoms = detectedSymptoms,
+            userIntent = userIntent.ifBlank { null },
+        )
+    }
 }

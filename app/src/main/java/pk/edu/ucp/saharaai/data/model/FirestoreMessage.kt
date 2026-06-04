@@ -9,12 +9,10 @@ data class FirestoreMessage(
     val senderId: String = "",
     val receiverId: String = "",
     val content: String = "",
-    // Kotlin val isFromAI generates a Java-bean getter `isFromAI()` whose
-    // bean property name is `fromAI` (the SDK strips the `is` prefix). That
-    // means without these annotations Firestore would write the key as
-    // `fromAI` and read it back into the field name `isFromAI` — a mismatch
-    // that silently drops to the default `false` on some SDK paths and
-    // causes AI replies to render on the user side of the chat.
+    // Kotlin Boolean properties starting with `is` can expose a bean property
+    // name without the `is` prefix. Without these annotations, some Firestore
+    // SDK paths write `fromAI` and read `isFromAI`, silently dropping the value
+    // to false and rendering AI replies on the user side of the chat.
     // Pinning the JSON key with @PropertyName on both the field and its
     // getter keeps the wire format consistent across versions.
     @get:PropertyName("isFromAI")
@@ -27,7 +25,16 @@ data class FirestoreMessage(
     var isRead: Boolean = false,
     val messageType: String = "TEXT",
     val timestamp: Timestamp = Timestamp.now(),
-    val senderType: String = ""
+    val senderType: String = "",
+    val riskLevel: String = "",
+    val triggerCounselor: Boolean = false,
+    val substanceDetected: String = "",
+    val substancesDetected: List<String> = emptyList(),
+    val actionDestination: String = "",
+    val quickReplies: List<String> = emptyList(),
+    val safetyFlags: List<String> = emptyList(),
+    val detectedSymptoms: List<String> = emptyList(),
+    val userIntent: String = "",
 ) {
     constructor() : this("", "", "", "", "", false, false, "TEXT", Timestamp.now(), "")
 }

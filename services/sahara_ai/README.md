@@ -13,6 +13,7 @@ The Android app owns user workflow and Firebase access. This API receives the mi
 | File | Purpose |
 |---|---|
 | `sahara_ai_protocol.py` | Slang/risk parser, prompt builder, JSON extractor, safe-fallback replies, FastAPI route registration. |
+| `regional_slang.py` | Curated regional slang alias extensions merged into the deterministic parser before model inference. |
 | `app.py` | Deployment-agnostic FastAPI app for HF Spaces / Cloud Run / Firebase / Colab. Lazy model loading + health checks. |
 | `generate_sahara_ai_sft_dataset.py` | Seed JSONL generator for supervised fine-tuning / LoRA. |
 | `sahara_ai_sft_seed.jsonl` | Generated SFT seed examples (committed for reproducibility). |
@@ -22,14 +23,27 @@ The Android app owns user workflow and Firebase access. This API receives the mi
 
 The slang parser ships with substance profiles spanning the Pakistan substance-use landscape, not just the urban-Karachi slang most LLMs know:
 
-- **Stimulants** — Ice/Methamphetamine, MDMA/Ecstasy, Cocaine/Crack
-- **Opioids** — Heroin/Opioids (incl. Balochistan/KPK street slang: *smack*, *black tar*, *brown powder*, *sufaid maal*); Tramadol & unprescribed pain pills; Doda/Bhukki/Poppy husk (rural Punjab, Seraiki, Sindhi: *doda*, *bhukki*, *post*, *kuknar*, *tariyak*, *nattha*)
-- **Depressants** — Xanax/Benzodiazepines, Alcohol, Cough syrup / DXM / codeine, Pregabalin/Gabapentin, and **Hooch/Kachi sharab/Tharra** (rural Punjab + Sindh + Balochistan illicit moonshine, treated separately because methanol contamination is a distinct ICU emergency)
+- **Stimulants** — Ice/Methamphetamine, MDMA/Ecstasy, Cocaine/Crack, Captagon / synthetic cathinones / bath salts style NPS, plus misused stimulant/performance-enhancement products like modafinil, clenbuterol, ephedrine, DMAA/DMHA
+- **Opioids** — Heroin/Opioids (incl. Balochistan/KPK street slang: *smack*, *black tar*, *brown powder*, *sufaid maal*); fentanyl analogs/nitazenes; Tramadol & unprescribed pain pills; Doda/Bhukki/Poppy husk (rural Punjab, Seraiki, Sindhi: *doda*, *bhukki*, *post*, *kuknar*, *tariyak*, *nattha*); atypical opioids such as kratom and tianeptine
+- **Depressants** — Xanax/Benzodiazepines, Alcohol, GHB/GBL/1,4-BDO, Cough syrup / DXM / codeine, Pregabalin/Gabapentin, sedative-hypnotics/Z-drugs/barbiturates/muscle relaxants, and **Hooch/Kachi sharab/Tharra** (rural Punjab + Sindh + Balochistan illicit moonshine, treated separately because methanol contamination is a distinct ICU emergency)
 - **Cannabis** — Cannabis/Charas with Androon-e-Lahore walled-city slang (*bottle wali*, *tola*, *tilla*, *boota*, *manori*, *majoon*, *thandai*, *phookni*, *tash*, *sulfa*), plus Synthetic cannabinoids / Spice / K2 as a separate high-risk profile
-- **Dissociatives & psychedelics** — Ketamine, LSD/Psychedelics
-- **Inhalants** — Samad Bond, glue/petrol sniffing, thinner
+- **Dissociatives, deliriants & psychedelics** — Ketamine, PCP/Angel Dust, LSD/Psychedelics, Datura/Scopolamine
+- **Inhalants** — Samad Bond, glue/petrol sniffing, thinner, nitrites/poppers, nitrous oxide
 - **Nicotine** — Cigarettes/vape (Nicotine profile) plus a dedicated **Smokeless tobacco** profile for naswar, gutka, chaalia, mainpuri, mawa, khaini, paan masala
+- **Research/performance compounds** — SARMs, peptides, racetams/nootropics, and other gray-market research chemicals when the user frames them as non-prescribed use or misuse
 - **Pills** — Unknown / unprescribed pill catch-all
+
+Qwen-supplied slang batches are treated as candidate data, not truth. The
+parser only activates terms that are either already known, clinically useful
+exact phrases, or safe weak matches requiring drug-use context. High-collision
+terms such as ordinary verbs, names, and generic objects stay in the held-review
+list until a stronger regional source is available.
+
+The inference prompt also carries an informal-input rule for Pakistani youth
+chat. The protocol passes Qalb both the raw user text and, when useful, a
+conservative interpretation for Roman Urdu/no-vowel shorthand (`m`, `h`, `g`,
+`kr`, `p`, `ue`, `xnx`, `trmdl`, `chrs`, `shrb`, etc.). This is backend context
+only; the app does not visibly correct or rewrite the user's message.
 
 ## Out-of-scope: prescription pharma
 

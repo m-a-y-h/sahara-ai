@@ -151,7 +151,7 @@ fun AssessmentScreen(
     }
 
     LaunchedEffect(Unit) {
-        assessmentViewModel.restoreLatestAssessment {
+        assessmentViewModel.restoreLatestAssessment(context) {
             if (view == AssessmentView.SELECT && selectedQuiz == null) {
                 view = AssessmentView.RESULT
             }

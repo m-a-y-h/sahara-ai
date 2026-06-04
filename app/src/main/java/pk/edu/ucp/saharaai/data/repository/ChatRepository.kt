@@ -3,6 +3,7 @@ package pk.edu.ucp.saharaai.data.repository
 import com.google.firebase.Timestamp
 import kotlinx.coroutines.flow.Flow
 import pk.edu.ucp.saharaai.BuildConfig
+import pk.edu.ucp.saharaai.data.model.AiChatSession
 import pk.edu.ucp.saharaai.data.model.FirestoreMessage
 import pk.edu.ucp.saharaai.data.model.SaharaChatTurnMetadata
 import pk.edu.ucp.saharaai.data.model.SaharaMessageType
@@ -16,7 +17,7 @@ import java.time.ZoneId
 object ChatRepository {
 
     
-    fun aiSessionId(userId: String) = "ai_$userId"
+    fun legacyAiSessionId(userId: String) = "ai_$userId"
 
     
     fun counselorSessionId(userId: String, counselorId: String): String {
@@ -31,7 +32,8 @@ object ChatRepository {
         receiverId: String,
         content: String,
         isFromAI: Boolean = false,
-        messageType: String = "TEXT"
+        messageType: String = "TEXT",
+        senderType: String = if (isFromAI) "ai" else "user",
     ): Result<String> {
         val msg = FirestoreMessage(
             sessionId   = sessionId,
@@ -40,7 +42,43 @@ object ChatRepository {
             content     = content,
             isFromAI    = isFromAI,
             messageType = messageType,
+            senderType  = senderType,
             timestamp   = Timestamp.now()
+        )
+        return FirestoreService.sendMessage(msg)
+    }
+
+    /**
+     * AI messages are written with senderId=userId so they pass the current
+     * Firestore rule (`senderId == request.auth.uid`). `isFromAI/senderType`
+     * remain the rendering source of truth, so the UI still treats the message
+     * as assistant-authored and older `senderId == "ai"` docs still read back.
+     */
+    suspend fun sendAiMessage(
+        sessionId: String,
+        userId: String,
+        content: String,
+        messageType: String = "TEXT",
+        metadata: SaharaChatTurnMetadata? = null,
+    ): Result<String> {
+        val msg = FirestoreMessage(
+            sessionId   = sessionId,
+            senderId    = userId,
+            receiverId  = "ai",
+            content     = content,
+            isFromAI    = true,
+            messageType = messageType,
+            senderType  = "ai",
+            riskLevel = metadata?.riskLevel?.name.orEmpty(),
+            triggerCounselor = metadata?.triggerCounselor ?: false,
+            substanceDetected = metadata?.substanceDetected.orEmpty(),
+            substancesDetected = metadata?.substancesDetected.orEmpty(),
+            actionDestination = metadata?.actionDestination.orEmpty(),
+            quickReplies = metadata?.quickReplies.orEmpty(),
+            safetyFlags = metadata?.safetyFlags.orEmpty(),
+            detectedSymptoms = metadata?.detectedSymptoms.orEmpty(),
+            userIntent = metadata?.userIntent.orEmpty(),
+            timestamp = Timestamp.now(),
         )
         return FirestoreService.sendMessage(msg)
     }
@@ -53,16 +91,48 @@ object ChatRepository {
     suspend fun getMessagesOnce(sessionId: String): Result<List<FirestoreMessage>> =
         FirestoreService.getMessagesOnce(sessionId)
 
+    fun createAiChatSession(
+        userId: String,
+        clientCreatedAtMillis: Long = System.currentTimeMillis(),
+        sessionId: String = "",
+    ): Result<AiChatSession> =
+        FirestoreService.createAiChatSession(userId, clientCreatedAtMillis, sessionId)
+
+    suspend fun getLatestAiChatSession(userId: String): Result<AiChatSession?> =
+        FirestoreService.getLatestAiChatSession(userId)
+
+    fun getAiChatSessionsFlow(userId: String): Flow<List<AiChatSession>> =
+        FirestoreService.getAiChatSessionsFlow(userId)
+
+    suspend fun getAiChatSessionsOnce(userId: String): Result<List<AiChatSession>> =
+        FirestoreService.getAiChatSessionsOnce(userId)
+
+    fun updateAiChatSessionAfterMessage(sessionId: String, preview: String) =
+        FirestoreService.updateAiChatSessionAfterMessage(sessionId, preview)
+
+    suspend fun renameAiChatSessionFromServerTime(sessionId: String, title: String): Result<Unit> =
+        FirestoreService.renameAiChatSessionFromServerTime(sessionId, title)
+
+    suspend fun deleteAiChatSession(sessionId: String): Result<Unit> =
+        FirestoreService.deleteAiChatSession(sessionId)
+
     suspend fun hasUserAiMessageToday(
         userId: String,
         zoneId: ZoneId = ZoneId.systemDefault(),
     ): Boolean {
         if (userId.isBlank()) return false
         val today = LocalDate.now(zoneId)
-        return getMessagesOnce(aiSessionId(userId)).getOrDefault(emptyList()).any { message ->
-            !message.isFromAI &&
-                message.senderId == userId &&
-                message.timestamp.toDate().toInstant().atZone(zoneId).toLocalDate() == today
+        val sessionIds = buildList {
+            addAll(getAiChatSessionsOnce(userId).getOrDefault(emptyList()).map { it.sessionId })
+            val legacy = legacyAiSessionId(userId)
+            if (legacy !in this) add(legacy)
+        }
+        return sessionIds.any { sessionId ->
+            getMessagesOnce(sessionId).getOrDefault(emptyList()).any { message ->
+                !message.isFromAI &&
+                    message.senderId == userId &&
+                    message.timestamp.toDate().toInstant().atZone(zoneId).toLocalDate() == today
+            }
         }
     }
 
@@ -104,9 +174,15 @@ object ChatRepository {
 
         return result.fold(
             onSuccess = { response ->
-                val reply = response.reply?.trim().orEmpty().ifBlank {
+                val rawReply = response.reply?.trim().orEmpty().ifBlank {
                     return@fold fallback(userText, isEnglish, messageId)
                 }
+                val reply = refineLiveReply(
+                    reply = rawReply,
+                    substanceDetected = response.substanceDetected,
+                    userIntent = response.userIntent,
+                    isEnglish = isEnglish,
+                )
                 SaharaReply(
                     text = reply,
                     metadata = SaharaChatTurnMetadata(
@@ -132,17 +208,77 @@ object ChatRepository {
     }
 
     private fun fallback(userText: String, isEnglish: Boolean, messageId: String): SaharaReply {
-        val reply = buildLocalAIReply(userText, isEnglish)
+        val localSubstance = detectLocalSubstance(userText)
+        val reply = localSubstance?.let { localSubstanceReply(it, isEnglish) }
+            ?: buildLocalAIReply(userText, isEnglish)
         return SaharaReply(
             text = reply,
             metadata = SaharaChatTurnMetadata(
                 messageId = messageId,
-                messageType = SaharaMessageType.TEXT,
-                riskLevel = SaharaRiskLevel.UNKNOWN,
+                messageType = if (localSubstance != null) SaharaMessageType.CRISIS_CARD else SaharaMessageType.TEXT,
+                riskLevel = if (localSubstance != null) SaharaRiskLevel.MEDIUM else SaharaRiskLevel.UNKNOWN,
+                substanceDetected = localSubstance,
+                substancesDetected = localSubstance?.let { listOf(it) }.orEmpty(),
+                actionDestination = if (localSubstance != null) "counselors" else null,
+                quickReplies = if (localSubstance != null) {
+                    if (isEnglish) listOf("Talk to counselor", "Safety check", "Open journal")
+                    else listOf("Counselor se baat", "Safety check", "Journal kholo")
+                } else emptyList(),
                 safetyFlags = listOf("sahara_ai_unreachable"),
+                userIntent = if (localSubstance != null) "substance_use_support" else null,
             ),
             viaLiveModel = false,
         )
+    }
+
+    private fun refineLiveReply(
+        reply: String,
+        substanceDetected: String?,
+        userIntent: String?,
+        isEnglish: Boolean,
+    ): String {
+        val substance = substanceDetected?.takeIf { it.isNotBlank() && it != "unknown" }
+            ?: return reply
+        if (userIntent !in setOf("substance_use_support", "craving_panic_or_relapse")) return reply
+        val lower = reply.lowercase()
+        val asksUnknownSubstance = lower.contains("kya use kiya") ||
+            lower.contains("what did you use") ||
+            lower.contains("what you used")
+        if (!asksUnknownSubstance) return reply
+        return localSubstanceReply(substance, isEnglish)
+    }
+
+    private fun detectLocalSubstance(userText: String): String? {
+        val lower = userText.lowercase()
+        return when {
+            lower.containsAny("charas", "chars", "chrs", "churs", "ganja", "weed", "hash") ->
+                "Cannabis / Charas"
+            lower.containsAny("xanax", "xnx", "zanax", "rivo", "lexo", "benzo") ->
+                "Unprescribed Xanax / Benzodiazepines"
+            lower.containsAny("ice", "aiis", "ayis", "meth", "crystal") ->
+                "Ice / Methamphetamine"
+            lower.containsAny("chitta", "heroin", "smack", "afeem", "opioid") ->
+                "Heroin / Opioids"
+            lower.containsAny("sharab", "daru", "daaru", "alcohol") ->
+                "Alcohol"
+            else -> null
+        }
+    }
+
+    private fun localSubstanceReply(substance: String, isEnglish: Boolean): String {
+        val label = when (substance) {
+            "Cannabis / Charas" -> "charas/cannabis"
+            "Unprescribed Xanax / Benzodiazepines" -> "Xanax/benzo"
+            "Ice / Methamphetamine" -> "ice/meth"
+            "Heroin / Opioids" -> "chitta/heroin/opioid"
+            "Alcohol" -> if (isEnglish) "alcohol" else "sharab/alcohol"
+            else -> substance
+        }
+        return if (isEnglish) {
+            "I am reading this as $label. Tell me when you took it and what your body feels now. If breathing, chest pain, fainting, seizure, or blue lips are involved, open emergency immediately."
+        } else {
+            "Main isay $label samajh raha hoon. Kab li/ki, aur ab body mein kya feel ho raha hai? Saans, chest pain, fainting, fit, ya neelay hont ka masla ho to emergency foran kholo."
+        }
     }
 
     

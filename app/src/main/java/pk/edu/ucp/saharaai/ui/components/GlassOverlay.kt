@@ -56,7 +56,7 @@ fun GlassOverlay(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.45f))
+            .background(Color.Black.copy(alpha = 0.35f))
             .pointerInput(dismissOnScrimTap) {
                 detectTapGestures(onTap = { if (dismissOnScrimTap) onDismiss() })
             },
@@ -65,24 +65,26 @@ fun GlassOverlay(
         Column(
             modifier = Modifier
                 .fillMaxWidth(0.88f)
-                // Cap the card height and scroll its content so a tall popup (long
-                // forms, avatar grids, time pickers) never overflows the screen.
+                // Cap the card height and scroll its content so a tall popup
+                // (long forms, avatar grids, time pickers) never overflows
+                // the screen.
                 .heightIn(max = 560.dp)
                 .clip(RoundedCornerShape(24.dp))
-                // Opaque fallback layer so the card still reads as a real
-                // surface on devices where the hardware blur path falls back
-                // to a no-op. On devices that DO blur, this colour sits
-                // behind the haze effect and just tints it slightly more —
-                // matching how Material 3's `surfaceContainerHigh` looks at
-                // a high tonal elevation.
-                .background(
-                    if (isDark) Color(0xFF1A1F22).copy(alpha = 0.75f)
-                    else Color.White.copy(alpha = 0.75f)
-                )
+                // Two-layer surface: the hazeEffect blurs the screen behind
+                // the popup (real glass on devices that support it). On top
+                // of that we paint a *gentle* translucent tint — light enough
+                // that the blur shows through and the popup still feels like
+                // glass, opaque enough to give the popup a readable surface
+                // when blur is unavailable. Earlier 0.75-alpha background
+                // killed the glass look; this is the deliberate compromise.
                 .hazeEffect(state = hazeState) {
                     inputScale = HazeInputScale.Auto
                     blurEffect { style = glassStyle }
                 }
+                .background(
+                    if (isDark) Color.White.copy(alpha = 0.06f)
+                    else Color.White.copy(alpha = 0.22f)
+                )
                 .border(
                     1.dp,
                     Color.White.copy(alpha = if (isDark) 0.18f else 0.55f),

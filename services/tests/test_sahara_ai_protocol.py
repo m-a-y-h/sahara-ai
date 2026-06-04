@@ -212,9 +212,133 @@ class SaharaAiProtocolTests(unittest.TestCase):
         
         self.assertEqual(assessment.risk_level, "critical")
 
-    
-    
-    
+    def test_supplied_regional_slang_batch_terms_detected(self):
+        cases = {
+            "captagon ka nasha": "Synthetic stimulants / Cathinones / Captagon",
+            "tablet k ka nasha": "Synthetic stimulants / Cathinones / Captagon",
+            "angel dust li hai": "PCP / Angel Dust",
+            "krokodil ka nasha": "Heroin / Opioids",
+            "triple c tablets high ke liye li": "Cough syrup / Dextromethorphan or Codeine",
+            "xanies ka nasha kar raha hai": "Unprescribed Xanax / Benzodiazepines",
+            "afghani charas use kar raha hai": "Cannabis / Charas",
+            "liquid g aur sharab li hai": "GHB / GBL / 1,4-BDO",
+            "datura kha kar confused hai": "Datura / Scopolamine / Deliriants",
+            "whippets use kiye party mein": "Nitrous oxide",
+            "dendrite sniffing karta hai": "Inhalants / Solvents",
+            "zarda ka aadi ho gaya hai": "Smokeless tobacco (Naswar / Gutka / Chaalia / Mainpuri)",
+            "juul pod bohat zyada use karta hai": "Nicotine / Vape / Tobacco",
+        }
+        for text, expected in cases.items():
+            with self.subTest(text=text):
+                assessment = assess_user_input(text)
+                self.assertIn(expected, assessment.substances_detected)
+
+    def test_regional_weak_terms_do_not_create_false_positives_without_context(self):
+        for text in (
+            "Malala speech about education",
+            "cream lagayi face par",
+            "base branch missing hai",
+            "line code mein bug hai",
+            "fresh juice piya",
+            "grow plants at home",
+            "infection cure karni hai",
+        ):
+            with self.subTest(text=text):
+                assessment = assess_user_input(text)
+                self.assertEqual(assessment.substance_detected, "unknown")
+                self.assertEqual(assessment.risk_level, "low")
+
+    def test_hookah_shisha_context_stays_nicotine_not_meth(self):
+        assessment = assess_user_input("hookah shisha cafe mein piya")
+        self.assertEqual(assessment.substance_detected, "Nicotine / Vape / Tobacco")
+        self.assertNotIn("Ice / Methamphetamine", assessment.substances_detected)
+
+    def test_regional_depressant_mixing_routes_high_risk(self):
+        response = sahara_ai_chat("liquid g aur xanax li hai aur bohat neend aa rahi hai")
+        self.assertEqual(response["risk_level"], "high")
+        self.assertEqual(response["substance_detected"], "Polysubstance / Unknown mix")
+        self.assertIn("possible_polysubstance_or_mixing", response["safety_flags"])
+
+    def test_new_dissociative_profile_can_route_critical(self):
+        response = sahara_ai_chat("dost ne angel dust li aur ab seizures aa rahe hain help")
+        self.assertEqual(response["risk_level"], "critical")
+        self.assertEqual(response["substance_detected"], "PCP / Angel Dust")
+        self.assertEqual(response["action_destination"], "emergency")
+
+    def test_supplied_second_batch_terms_detected(self):
+        cases = {
+            "dilaudid ka nasha": "Heroin / Opioids",
+            "oxycontin zyada le li": "Unprescribed opioid pills / Tramadol",
+            "kratom ka nasha": "Atypical opioids / Kratom / Tianeptine",
+            "phenibut aur sharab li hai": "Sedatives / Z-drugs / Barbiturates / Muscle relaxants",
+            "gabbas high ke liye li": "Pregabalin / Gabapentin",
+            "modafinil boht zyada li hai": "Misused stimulants / performance enhancers",
+            "rad-140 use kar raha hai": "Research nootropics / SARMs / peptides",
+            "zyn pouch bohat use karta hai": "Nicotine / Vape / Tobacco",
+            "supari ka aadi ho gaya hai": "Smokeless tobacco (Naswar / Gutka / Chaalia / Mainpuri)",
+        }
+        for text, expected in cases.items():
+            with self.subTest(text=text):
+                assessment = assess_user_input(text)
+                self.assertIn(expected, assessment.substances_detected)
+
+    def test_informal_roman_urdu_interpretation_samples(self):
+        cases = {
+            "tum ue btao": "tum mujhe ye batao",
+            "Dekh liya m b": "dekh liya main bhi",
+            "M phone m install kr lu app": "main phone mein install kar loon app",
+            "ek page p likh lijye g": "ek page pe likh lijiye ga",
+        }
+        for text, expected in cases.items():
+            with self.subTest(text=text):
+                assessment = assess_user_input(text)
+                self.assertEqual(assessment.interpreted_input, expected)
+                self.assertEqual(assessment.risk_level, "low")
+
+    def test_missing_vowel_substance_detection(self):
+        cases = {
+            "m xnx aur shrb li h": ("Polysubstance / Unknown mix", "high"),
+            "chrs ki tlb h": ("Cannabis / Charas", "medium"),
+            "mne boht zyada trmdl li h": ("Unprescribed opioid pills / Tramadol", "critical"),
+            "sns n arhi ice k bd": ("Ice / Methamphetamine", "critical"),
+        }
+        for text, (expected_substance, expected_risk) in cases.items():
+            with self.subTest(text=text):
+                assessment = assess_user_input(text)
+                self.assertEqual(assessment.substance_detected, expected_substance)
+                self.assertEqual(assessment.risk_level, expected_risk)
+                self.assertTrue(assessment.input_normalization_notes)
+
+    def test_chrs_use_reply_acknowledges_charas(self):
+        response = sahara_ai_chat("hlo, m n chrs kia", preferred_language="roman_urdu")
+
+        self.assertEqual(response["substance_detected"], "Cannabis / Charas")
+        self.assertEqual(response["user_intent"], "substance_use_support")
+        self.assertIn("charas", response["reply"].lower())
+        self.assertNotIn("kya use kiya", response["reply"].lower())
+
+    def test_generic_model_reply_is_replaced_when_substance_known(self):
+        assessment = assess_user_input("m n chrs kia", preferred_language="roman_urdu")
+        raw = '{"reply":"Main practical rahunga. Batao kya use kiya, kab, aur body mein kya feel ho raha hai."}'
+
+        response = normalize_model_response(raw, assessment)
+
+        self.assertIn("charas", response["reply"].lower())
+        self.assertNotIn("kya use kiya", response["reply"].lower())
+
+    def test_second_batch_held_terms_do_not_false_positive(self):
+        for text in (
+            "commit changes push kar do",
+            "session expired ho gaya",
+            "coal price barh gaya hai",
+            "base branch missing hai",
+            "football match dekhna hai",
+            "new bowl khareedna hai",
+        ):
+            with self.subTest(text=text):
+                assessment = assess_user_input(text)
+                self.assertEqual(assessment.substance_detected, "unknown")
+                self.assertEqual(assessment.risk_level, "low")
 
     def test_prescription_inquiry_redirects_to_specialist(self):
         response = sahara_ai_chat(

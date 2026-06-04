@@ -200,14 +200,15 @@ fun ProfileScreen(
                     .verticalScroll(rememberScrollState()),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // Header layout matches the canonical pattern used elsewhere
-                // (e.g. GameRecoveryScreen / ActivityLogScreen): back button
-                // sits inline with the title at the top, and the optional
-                // subtitle drops to its own row below — so the back arrow
-                // no longer slides downward to center between two text lines.
-                Spacer(Modifier.statusBarsPadding())
+                // Canonical "back arrow + title" header used by GameRecovery,
+                // ActivityLog, etc. The descriptive subtitle was removed —
+                // every other screen has just the title on this line and the
+                // explanatory copy lives in the body (here: the avatar block
+                // immediately below).
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .statusBarsPadding(),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     HazeBackButton(onClick = onNavigateBack, hazeState = hazeState)
@@ -219,14 +220,6 @@ fun ProfileScreen(
                         color = SaharaStrongGreen
                     )
                 }
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    text = if (isEnglish) "Account and safety preferences"
-                           else "Account aur safety preferences",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.fillMaxWidth().padding(start = 56.dp),
-                )
                 Spacer(Modifier.height(18.dp))
 
                 ProfileAvatarSection(

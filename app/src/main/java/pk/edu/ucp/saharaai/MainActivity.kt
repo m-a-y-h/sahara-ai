@@ -10,8 +10,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.fragment.app.FragmentActivity
+import com.google.firebase.Firebase
+import com.google.firebase.auth.auth
 import eightbitlab.com.blurview.BlurTarget
-import pk.edu.ucp.saharaai.ui.screens.GlobalAppState
 import pk.edu.ucp.saharaai.ui.theme.SaharaAiTheme
 import pk.edu.ucp.saharaai.util.BlueskyOAuthCallbackStore
 import pk.edu.ucp.saharaai.util.NotificationHelper
@@ -29,19 +30,7 @@ class MainActivity : FragmentActivity() {
         NotificationHelper.init(this)
         enableEdgeToEdge()
 
-        val prefs = getSharedPreferences("sahara_prefs", android.content.Context.MODE_PRIVATE)
-        val savedScore = prefs.getInt(KEY_ASSESSMENT_SCORE, -1)
-        val savedTs    = prefs.getLong(KEY_ASSESSMENT_TIMESTAMP, 0L)
-        GlobalAppState.hasEverCompletedAssessment =
-            prefs.getBoolean(KEY_ASSESSMENT_EVER_COMPLETED, false) || savedScore >= 0
-        if (savedScore >= 0) {
-            val ageMs = if (savedTs > 0) System.currentTimeMillis() - savedTs else 0L
-            GlobalAppState.dast10Score = savedScore
-            GlobalAppState.lastAssessmentTimestamp = savedTs
-            if (savedTs == 0L || ageMs <= ASSESSMENT_VALIDITY_MS) {
-                GlobalAppState.hasCompletedInitialAssessment = true
-            }
-        }
+        AssessmentCache.restoreToGlobal(this, Firebase.auth.currentUser?.uid)
 
         setContent {
             SaharaAiTheme {
