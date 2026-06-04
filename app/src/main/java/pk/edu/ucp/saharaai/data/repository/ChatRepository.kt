@@ -157,15 +157,9 @@ object ChatRepository {
     suspend fun summarizeBatch(
         messages: List<SaharaAiClient.HistoryTurn>,
         isEnglish: Boolean,
-    ): String? {
-        val endpoint = BuildConfig.SAHARA_AI_CHAT_URL.takeIf { it.isNotBlank() } ?: return null
-        val language = if (isEnglish) "english" else "roman_urdu"
-        return SaharaAiClient.postSummarize(
-            chatEndpoint = endpoint,
-            messages = messages,
-            language = language,
-        ).getOrNull()
-    }
+    ): String? = runCatching {
+        GeminiChatService.summarise(messages, isEnglish).takeIf { it.isNotBlank() }
+    }.getOrNull()
 
     /**
      * Persists a fresh batch summary onto the session document and bumps
@@ -201,52 +195,60 @@ object ChatRepository {
         history: List<SaharaAiClient.HistoryTurn> = emptyList(),
         priorSummaries: List<String> = emptyList(),
     ): SaharaReply {
-        val endpoint = BuildConfig.SAHARA_AI_CHAT_URL
-        if (endpoint.isBlank()) {
+        // Direct call to Gemini via the Firebase AI Logic SDK. Modal is no
+        // longer in the chat critical path — that proxy was overengineering
+        // for what is fundamentally an Android-talks-to-Gemini call, and
+        // Firebase AI Logic is the industry-standard pattern: first-party
+        // SDK, key off-device, no extra deploy surface.
+        val raw = runCatching {
+            GeminiChatService.reply(
+                userText = userText,
+                history = history,
+                priorSummaries = priorSummaries,
+                isEnglish = isEnglish,
+            )
+        }.getOrDefault("")
+        val rawReply = raw.trim()
+        if (rawReply.isBlank()) {
             return fallback(userText, isEnglish, messageId)
         }
 
-        val language = if (isEnglish) "english" else "roman_urdu"
-        val result = SaharaAiClient.postChat(
-            endpoint = endpoint,
-            userInput = userText,
-            language = language,
-            history = history,
-            priorSummaries = priorSummaries,
+        // Crisis / substance signalling moved from server-side response
+        // metadata to client-side heuristics — Gemini doesn't surface
+        // structured flags, just text. The inline crisis-card attachment
+        // still fires correctly because ChatScreen reads
+        // [SaharaChatTurnMetadata.triggerCounselor] and message_type below.
+        val substanceDetected = detectLocalSubstance(userText)
+        val isCrisis = detectLocalCrisis(userText)
+        val reply = refineLiveReply(
+            reply = rawReply,
+            substanceDetected = substanceDetected,
+            userIntent = if (substanceDetected != null) "substance_use_support" else null,
+            isEnglish = isEnglish,
         )
-
-        return result.fold(
-            onSuccess = { response ->
-                val rawReply = response.reply?.trim().orEmpty().ifBlank {
-                    return@fold fallback(userText, isEnglish, messageId)
-                }
-                val reply = refineLiveReply(
-                    reply = rawReply,
-                    substanceDetected = response.substanceDetected,
-                    userIntent = response.userIntent,
-                    isEnglish = isEnglish,
-                )
-                SaharaReply(
-                    text = reply,
-                    metadata = SaharaChatTurnMetadata(
-                        messageId          = messageId,
-                        messageType        = SaharaMessageType.fromWire(
-                            response.messageType, response.userIntent
-                        ),
-                        riskLevel          = SaharaRiskLevel.fromWire(response.riskLevel),
-                        triggerCounselor   = response.triggerCounselor ?: false,
-                        substanceDetected  = response.substanceDetected,
-                        substancesDetected = response.substancesDetected.orEmpty(),
-                        actionDestination  = response.actionDestination,
-                        quickReplies       = response.quickReplies.orEmpty(),
-                        safetyFlags        = response.safetyFlags.orEmpty(),
-                        detectedSymptoms   = response.detectedSymptoms.orEmpty(),
-                        userIntent         = response.userIntent,
-                    ),
-                    viaLiveModel = true,
-                )
-            },
-            onFailure = { fallback(userText, isEnglish, messageId) },
+        return SaharaReply(
+            text = reply,
+            metadata = SaharaChatTurnMetadata(
+                messageId          = messageId,
+                messageType        = if (isCrisis) SaharaMessageType.CRISIS_CARD else SaharaMessageType.TEXT,
+                riskLevel          = when {
+                    isCrisis -> SaharaRiskLevel.HIGH
+                    substanceDetected != null -> SaharaRiskLevel.MEDIUM
+                    else -> SaharaRiskLevel.LOW
+                },
+                triggerCounselor   = isCrisis,
+                substanceDetected  = substanceDetected,
+                substancesDetected = substanceDetected?.let { listOf(it) }.orEmpty(),
+                actionDestination  = if (isCrisis) "counselors" else null,
+                quickReplies       = emptyList(),
+                safetyFlags        = buildList {
+                    if (isCrisis) add("crisis")
+                    substanceDetected?.let { add(it) }
+                },
+                detectedSymptoms   = emptyList(),
+                userIntent         = if (substanceDetected != null) "substance_use_support" else null,
+            ),
+            viaLiveModel = true,
         )
     }
 
@@ -289,6 +291,24 @@ object ChatRepository {
             lower.contains("what you used")
         if (!asksUnknownSubstance) return reply
         return localSubstanceReply(substance, isEnglish)
+    }
+
+    /**
+     * Bilingual crisis-vocabulary scan. Drives `triggerCounselor=true` on
+     * the metadata, which makes ChatScreen render the inline "Talk to a
+     * counselor" attachment under the bot bubble. Gemini gives us natural
+     * text only; the structured signalling is our responsibility.
+     */
+    private fun detectLocalCrisis(userText: String): Boolean {
+        val lower = userText.lowercase()
+        return lower.containsAny(
+            "suicide", "khudkushi", "khud kushi", "self harm", "self-harm",
+            "kill myself", "marna chahta", "marna chahti",
+            "overdose", "od kiya", "blue lips", "neelay hont", "neele hont",
+            "fainting", "behosh", "behoshi", "saans nahi",
+            "chest pain", "seene mein dard", "fit aya", "fit aaya",
+            "withdrawal", "withdrawals",
+        )
     }
 
     private fun detectLocalSubstance(userText: String): String? {

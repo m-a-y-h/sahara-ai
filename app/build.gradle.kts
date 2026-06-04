@@ -156,6 +156,7 @@ dependencies {
     implementation(libs.androidx.credentials.play.services.auth)
     implementation(libs.googleid)
     implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.ai)
     implementation(libs.firebase.analytics)
     implementation(libs.firebase.messaging)
     implementation(libs.firebase.auth)
