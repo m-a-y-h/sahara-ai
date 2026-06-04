@@ -88,7 +88,10 @@ fun SaharaButton(
                 ) {
                     Text(
                         text = text, modifier = Modifier.align(Alignment.Center), fontWeight = FontWeight.Bold,
-                        color = if (isDark) Color.White else Color.Black.copy(alpha = 0.85f),
+                        // White in both light + dark — the green tint behind this
+                        // variant is saturated enough that dark text on it
+                        // (the previous light-mode choice) didn't read.
+                        color = Color.White,
                         style = finalTextStyle
                     )
                 }

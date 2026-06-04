@@ -673,9 +673,25 @@ private fun ChatConversationScreen(
                                     ChatBubbleQuickReplies(message.options ?: emptyList()) { handleSendMessage(it) }
                                 }
                                 MessageType.CRISIS_CARD -> {
-                                    ChatBubbleText(message, isDark)
-                                    Spacer(modifier = Modifier.height(8.dp))
-                                    ChatBubbleCrisisCard(isEnglish, navController, message.actionDestination)
+                                    // Render the crisis attachment INSIDE the bot
+                                    // bubble's surface instead of as a separate
+                                    // red-bordered card below — it should read
+                                    // as something the AI itself attached to its
+                                    // reply, not as a system warning.
+                                    ChatBubbleTextWithCrisisInline(
+                                        message = message,
+                                        isDark = isDark,
+                                        isEnglish = isEnglish,
+                                        // Crisis attachment always sends the user
+                                        // to the counselors screen — the AI is
+                                        // saying "talk to a real person," not
+                                        // "open the toolkit." actionDestination
+                                        // from the model is ignored for this
+                                        // variant.
+                                        onOpenCounselors = {
+                                            navController.navigate("counselors") { launchSingleTop = true }
+                                        },
+                                    )
                                 }
                                 MessageType.EXERCISE_CARD -> {
                                     ChatBubbleText(message, isDark)
@@ -1759,6 +1775,111 @@ fun ChatTopBar(
         }
     }
 }
+/**
+ * AI text bubble + an inline crisis attachment, rendered inside the SAME
+ * surface so the attachment reads as "the AI clipped this on" rather than
+ * as a separate system warning. Only used when the AI's
+ * [SaharaChatTurnMetadata.triggerCounselor] is set (mapped to
+ * [MessageType.CRISIS_CARD] upstream); otherwise the regular
+ * [ChatBubbleText] is used.
+ */
+@Composable
+fun ChatBubbleTextWithCrisisInline(
+    message: ChatMessage,
+    isDark: Boolean,
+    isEnglish: Boolean,
+    onOpenCounselors: () -> Unit,
+) {
+    val shape = RoundedCornerShape(topStart = 4.dp, topEnd = 16.dp, bottomStart = 16.dp, bottomEnd = 16.dp)
+    val bgColor = if (isDark) Color(0xFF1F2C34) else Color.White
+    val textColor = if (isDark) Color.White else Color(0xFF111111)
+    val timeColor = if (isDark) Color.White.copy(alpha = 0.65f) else Color(0xFF8696A0)
+    val dividerColor = if (isDark) Color.White.copy(alpha = 0.10f) else Color.Black.copy(alpha = 0.08f)
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp),
+        horizontalArrangement = Arrangement.Start,
+    ) {
+        Column(
+            modifier = Modifier
+                .widthIn(min = 80.dp, max = 280.dp)
+                .clip(shape)
+                .background(bgColor)
+                .padding(start = 10.dp, end = 10.dp, top = 8.dp, bottom = 8.dp),
+        ) {
+            Text(
+                text = message.text,
+                color = textColor,
+                fontSize = 15.sp,
+                lineHeight = 20.sp,
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(1.dp)
+                    .background(dividerColor),
+            )
+            Spacer(modifier = Modifier.height(10.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    Icons.Default.Warning,
+                    contentDescription = null,
+                    tint = SaharaCoral,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    if (isEnglish) "Talk to a counselor" else "Counselor se baat karein",
+                    fontWeight = FontWeight.Bold,
+                    color = SaharaCoral,
+                    style = MaterialTheme.typography.labelLarge,
+                )
+            }
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                if (isEnglish)
+                    "I can connect you with a verified Sahara counselor right now."
+                else
+                    "Main aapko abhi ek verified Sahara counselor se mila sakta hoon.",
+                style = MaterialTheme.typography.bodySmall,
+                color = textColor.copy(alpha = 0.75f),
+            )
+            Spacer(modifier = Modifier.height(10.dp))
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = SaharaStrongGreen,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                    ) { onOpenCounselors() },
+            ) {
+                Text(
+                    text = if (isEnglish) "Open Counselors" else "Counselors Kholein",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.titleSmall,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 10.dp),
+                )
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = message.getFormattedTime(),
+                color = timeColor,
+                fontSize = 11.sp,
+                modifier = Modifier.align(Alignment.End),
+            )
+        }
+    }
+}
+
 @Composable
 fun ChatBubbleText(message: ChatMessage, isDark: Boolean) {
     val isReceived = message.isBot
