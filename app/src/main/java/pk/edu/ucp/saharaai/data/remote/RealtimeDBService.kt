@@ -52,6 +52,38 @@ object RealtimeDBService {
     // crash the assessment save was hitting.
     private val CHARS_INVALID_IN_RTDB_KEY = setOf('.', '#', '$', '[', ']', '/')
 
+    private fun hashForPath(value: String): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+            .digest(value.toByteArray(Charsets.UTF_8))
+        return digest.joinToString("") { "%02x".format(it) }
+    }
+
+    private fun hasInvalidRtdbKeyChars(value: String): Boolean =
+        value.any { it in CHARS_INVALID_IN_RTDB_KEY }
+
+    private fun accessKeyPathSegment(key: String): String {
+        val cleanKey = key.trim()
+        require(cleanKey.isNotBlank()) { "Missing access key." }
+        return if (hasInvalidRtdbKeyChars(cleanKey)) {
+            "encoded_${hashForPath(cleanKey)}"
+        } else {
+            cleanKey
+        }
+    }
+
+    private fun accessKeyFromSnapshot(child: DataSnapshot, data: Map<String, Any>): String =
+        data["issuedKey"]?.toString()?.takeIf { it.isNotBlank() }
+            ?: data["key"]?.toString()?.takeIf { it.isNotBlank() }
+            ?: child.key.orEmpty()
+
+    private fun keyedAccessData(child: DataSnapshot, data: Map<String, Any>): Map<String, Any> {
+        val issuedKey = accessKeyFromSnapshot(child, data)
+        return data + mapOf(
+            "key" to issuedKey,
+            "pathKey" to child.key.orEmpty(),
+        )
+    }
+
     data class PostAuthUserState(
         val isBlocked: Boolean,
         val blockReason: String = "",
@@ -267,7 +299,11 @@ object RealtimeDBService {
 
     
     suspend fun getCounselorKey(key: String): Result<Map<String, Any>?> = runCatching {
-        db.getReference("counselor_keys").child(key).get().await().value as? Map<String, Any>
+        val cleanKey = key.trim()
+        val ref = db.getReference("counselor_keys").child(accessKeyPathSegment(cleanKey))
+        val snap = ref.get().await()
+        val data = snap.value as? Map<String, Any> ?: return@runCatching null
+        keyedAccessData(snap, data)
     }
 
     
@@ -275,7 +311,8 @@ object RealtimeDBService {
         val snap = db.getReference("counselor_keys").get().await()
         for (child in snap.children) {
             val data = child.value as? Map<String, Any> ?: continue
-            if (data["uid"]?.toString() == uid) return@runCatching Pair(child.key ?: "", data)
+            val key = accessKeyFromSnapshot(child, data)
+            if (data["uid"]?.toString() == uid) return@runCatching Pair(key, keyedAccessData(child, data))
         }
         null
     }
@@ -287,7 +324,8 @@ object RealtimeDBService {
         ngoName: String, region: String, bio: String
     ): Result<Unit> = runCatching {
         require(feePkr in 0..5000) { "Counselor fee must be between PKR 0 and PKR 5000." }
-        db.getReference("counselor_keys").child(key).updateChildren(mapOf(
+        db.getReference("counselor_keys").child(accessKeyPathSegment(key)).updateChildren(mapOf(
+            "issuedKey"       to key.trim(),
             "uid"             to uid,
             "assignedName"    to name,
             "ngoName"         to ngoName,
@@ -304,14 +342,14 @@ object RealtimeDBService {
 
     
     suspend fun setOnlineStatus(key: String, isOnline: Boolean): Result<Unit> = runCatching {
-        db.getReference("counselor_keys").child(key).child("isOnline").setValue(isOnline).await()
+        db.getReference("counselor_keys").child(accessKeyPathSegment(key)).child("isOnline").setValue(isOnline).await()
     }
 
     /** Manual "appear offline" override. Counselors are auto-online via the
      *  Firebase presence helper below; flipping this on makes them appear
      *  offline to users even though their app is connected. */
     suspend fun setCounselorInvisible(key: String, invisible: Boolean): Result<Unit> = runCatching {
-        db.getReference("counselor_keys").child(key).child("isInvisible").setValue(invisible).await()
+        db.getReference("counselor_keys").child(accessKeyPathSegment(key)).child("isInvisible").setValue(invisible).await()
     }
 
     /** Firebase presence wiring for a counselor's dashboard session.
@@ -325,7 +363,7 @@ object RealtimeDBService {
      *  [listenToAllActiveCounselors] below. */
     fun setupCounselorPresence(key: String): () -> Unit {
         if (key.isBlank()) return {}
-        val onlineRef    = db.getReference("counselor_keys").child(key).child("isOnline")
+        val onlineRef    = db.getReference("counselor_keys").child(accessKeyPathSegment(key)).child("isOnline")
         val connectedRef = db.getReference(".info/connected")
         val listener = object : ValueEventListener {
             override fun onDataChange(snap: DataSnapshot) {
@@ -364,8 +402,7 @@ object RealtimeDBService {
                     val isOnline    = data["isOnline"]    as? Boolean ?: false
                     val isInvisible = data["isInvisible"] as? Boolean ?: false
                     list.add(
-                        data + mapOf(
-                            "key" to (child.key ?: ""),
+                        keyedAccessData(child, data) + mapOf(
                             "effectiveOnline" to (isOnline && !isInvisible),
                         )
                     )
@@ -381,7 +418,7 @@ object RealtimeDBService {
 
     suspend fun setCounselorCallAvailability(key: String, enabled: Boolean): Result<Unit> = runCatching {
         require(key.isNotBlank()) { "Missing counselor key." }
-        db.getReference("counselor_keys").child(key).updateChildren(
+        db.getReference("counselor_keys").child(accessKeyPathSegment(key)).updateChildren(
             mapOf(
                 "callEnabled" to enabled,
                 "callAvailabilityUpdatedAt" to System.currentTimeMillis(),
@@ -401,7 +438,7 @@ object RealtimeDBService {
                     val isActive  = data["isActive"]  as? Boolean ?: false
                     val hasProfile = data["profileComplete"] as? Boolean ?: false
                     if (isOnline && isActive && hasProfile) {
-                        list.add(data + mapOf("key" to (child.key ?: "")))
+                        list.add(keyedAccessData(child, data))
                     }
                 }
                 trySend(list)
@@ -417,9 +454,12 @@ object RealtimeDBService {
 
     
     fun listenToCounselorData(key: String): Flow<Map<String, Any>?> = callbackFlow {
-        val ref = db.getReference("counselor_keys").child(key)
+        val ref = db.getReference("counselor_keys").child(accessKeyPathSegment(key))
         val listener = ref.addValueEventListener(object : ValueEventListener {
-            override fun onDataChange(snap: DataSnapshot) = trySend(snap.value as? Map<String, Any>).let {}
+            override fun onDataChange(snap: DataSnapshot) {
+                val data = snap.value as? Map<String, Any>
+                trySend(data?.let { keyedAccessData(snap, it) })
+            }
             override fun onCancelled(error: DatabaseError) {
                 val exception = error.toException()
                 Log.w("RealtimeDBService", "counselor data listener cancelled", exception)
@@ -431,7 +471,7 @@ object RealtimeDBService {
 
     
     suspend fun updateRating(key: String, newRating: Float): Result<Unit> = runCatching {
-        val ref  = db.getReference("counselor_keys").child(key)
+        val ref  = db.getReference("counselor_keys").child(accessKeyPathSegment(key))
         val snap = ref.get().await()
         val data = snap.value as? Map<String, Any> ?: return@runCatching
         val total = (data["totalRatings"] as? Long)?.toInt() ?: 0
@@ -445,7 +485,7 @@ object RealtimeDBService {
     
 
     
-    fun chatSessionPath(uid: String, counselorKey: String) = "${uid}_${counselorKey}"
+    fun chatSessionPath(uid: String, counselorKey: String) = "${uid}_${accessKeyPathSegment(counselorKey)}"
 
     
     suspend fun sendChatMessage(
@@ -559,22 +599,25 @@ object RealtimeDBService {
     
     fun listenToCounselorChats(counselorKey: String): Flow<List<Map<String, Any>>> = callbackFlow {
         val ref = db.getReference("user_chats")
+        val counselorPathKey = accessKeyPathSegment(counselorKey)
         val listener = ref.addValueEventListener(object : ValueEventListener {
             override fun onDataChange(snap: DataSnapshot) {
                 val sessions = mutableListOf<Map<String, Any>>()
                 for (child in snap.children) {
                     val sessionId = child.key ?: continue
-                    if (!sessionId.endsWith("_$counselorKey")) continue
-                    val uid       = sessionId.removeSuffix("_$counselorKey")
+                    if (!sessionId.endsWith("_$counselorPathKey")) continue
+                    val uid       = sessionId.removeSuffix("_$counselorPathKey")
                     val messages  = child.child("messages").children
                         .mapNotNull { it.value as? Map<String, Any> }
                         .sortedBy { (it["timestamp"] as? Long) ?: 0L }
                     val lastMsg   = messages.lastOrNull()?.get("text")?.toString() ?: ""
+                    val rawCounselorKey = child.child("counselorKey").getValue(String::class.java)
+                        ?: counselorKey
                     sessions.add(mapOf(
                         "sessionId"    to sessionId,
                         "uid"          to uid,
                         "lastMessage"  to lastMsg,
-                        "counselorKey" to counselorKey,
+                        "counselorKey" to rawCounselorKey,
                         "expiresAt"    to (child.child("expiresAt").getValue(Long::class.java) ?: 0L),
                         "blocked"      to child.child("blocked").exists(),
                     ))
@@ -594,7 +637,9 @@ object RealtimeDBService {
                 for (child in snap.children) {
                     val sessionId = child.key ?: continue
                     if (!sessionId.startsWith("${uid}_")) continue
-                    val counselorKey = sessionId.removePrefix("${uid}_")
+                    val counselorPathKey = sessionId.removePrefix("${uid}_")
+                    val counselorKey = child.child("counselorKey").getValue(String::class.java)
+                        ?: counselorPathKey
                     val messages = child.child("messages").children
                         .mapNotNull { it.value as? Map<String, Any> }
                         .sortedBy { (it["timestamp"] as? Long) ?: 0L }
@@ -1430,7 +1475,7 @@ object RealtimeDBService {
                     val data = child.value as? Map<String, Any> ?: return@mapNotNull null
                     val complete = data["profileComplete"] as? Boolean ?: false
                     if (!complete) return@mapNotNull null
-                    data + mapOf("key" to (child.key ?: ""))
+                    keyedAccessData(child, data)
                 }
                 trySend(list)
             }
@@ -2412,14 +2457,15 @@ object RealtimeDBService {
         reviewNotes: String,
         approvedAttributeIds: List<String> = emptyList(),
     ): Result<Unit> = runCatching {
-        require(issuedKey.isNotBlank()) { "An issued access key is required." }
+        val cleanIssuedKey = issuedKey.trim()
+        require(cleanIssuedKey.isNotBlank()) { "An issued access key is required." }
         val timestamp = System.currentTimeMillis()
         val cleanAttributes = approvedAttributeIds.distinct().filter { id ->
             CounselorAttributeCatalog.all.any { it.id == id }
         }
         val requestUpdates = mapOf(
             "status" to "APPROVED",
-            "issuedKey" to issuedKey.trim(),
+            "issuedKey" to cleanIssuedKey,
             "approvedAttributeIds" to cleanAttributes,
             "reviewedBy" to reviewedBy,
             "reviewNotes" to reviewNotes.trim(),
@@ -2439,7 +2485,7 @@ object RealtimeDBService {
                 "applicantName"   to request.applicantName,
                 "applicantEmail"  to request.email,
                 "applicantToken"  to request.applicantFcmToken,
-                "issuedKey"       to issuedKey.trim(),
+                "issuedKey"       to cleanIssuedKey,
                 "reviewNotes"     to reviewNotes.trim(),
                 "status"          to "PENDING",
                 "createdAt"       to timestamp,
@@ -2449,8 +2495,9 @@ object RealtimeDBService {
         if (request.applicantType == "COUNSELOR") {
             val attributeLabelsEn = cleanAttributes.map(CounselorAttributeCatalog::labelEn)
             val attributeLabelsUr = cleanAttributes.map(CounselorAttributeCatalog::labelUr)
-            db.getReference("counselor_keys").child(issuedKey.trim()).setValue(
+            db.getReference("counselor_keys").child(accessKeyPathSegment(cleanIssuedKey)).setValue(
                 mapOf(
+                    "issuedKey" to cleanIssuedKey,
                     "isActive" to true,
                     "isOnline" to false,
                     "callEnabled" to false,
@@ -2468,8 +2515,9 @@ object RealtimeDBService {
                 )
             ).await()
         } else {
-            db.getReference("ngo_keys").child(issuedKey.trim()).setValue(
+            db.getReference("ngo_keys").child(accessKeyPathSegment(cleanIssuedKey)).setValue(
                 mapOf(
+                    "issuedKey" to cleanIssuedKey,
                     "isActive" to true,
                     "name" to request.organizationName.ifBlank { request.applicantName },
                     "region" to request.region,
@@ -2514,7 +2562,9 @@ object RealtimeDBService {
     }
 
     suspend fun getNgoKey(key: String): Result<Map<String, Any>?> = runCatching {
-        db.getReference("ngo_keys").child(key).get().await().value as? Map<String, Any>
+        val snap = db.getReference("ngo_keys").child(accessKeyPathSegment(key)).get().await()
+        val data = snap.value as? Map<String, Any> ?: return@runCatching null
+        keyedAccessData(snap, data)
     }
 
     suspend fun submitPaymentRequest(
@@ -2598,7 +2648,7 @@ object RealtimeDBService {
                     "timestamp" to timestamp
                 )
             ).await()
-        db.getReference("counselor_keys").child(request.counselorKey).child("sessionCount")
+        db.getReference("counselor_keys").child(accessKeyPathSegment(request.counselorKey)).child("sessionCount")
             .setValue(ServerValue.increment(1)).await()
 
         saveUserNotification(
@@ -2608,7 +2658,7 @@ object RealtimeDBService {
             bodyEn = "Your payment was confirmed. Your 48-hour counselor session is active.",
             bodyUr = "Aapki payment confirm ho gayi. 48 ghante ka counselor session active hai.",
             type = "COUNSELOR",
-            actionRoute = "counselor-chat/${request.counselorKey}/${request.counselorName.replace(" ", "_")}"
+            actionRoute = "counselor-chat/${Uri.encode(request.counselorKey)}/${Uri.encode(request.counselorName)}"
         ).getOrThrow()
     }
 

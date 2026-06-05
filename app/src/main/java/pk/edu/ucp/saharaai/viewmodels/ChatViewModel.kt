@@ -1,5 +1,6 @@
 package pk.edu.ucp.saharaai.viewmodels
 
+import android.net.Uri
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -154,6 +155,7 @@ class ChatViewModel : ViewModel() {
         if (isAiChat) {
             aiSessionListenJob?.cancel()
             isRealtimeChat = false
+            _saharaUnreachable.value = false
             lastAiWelcomeText = aiWelcomeText
 
             if (!wasSameAiUser) {
@@ -419,6 +421,29 @@ class ChatViewModel : ViewModel() {
                 )
             }
 
+            _isTyping.value = true
+            _saharaUnreachable.value = false
+
+            val aiMessageId = UUID.randomUUID().toString()
+            val sahara = runCatching {
+                ChatRepository.askSahara(
+                    userText = text,
+                    isEnglish = isEnglish,
+                    messageId = aiMessageId,
+                    history = historyTurns,
+                    priorSummaries = priorSummaries,
+                )
+            }.getOrElse { error ->
+                _isTyping.value = false
+                _saharaUnreachable.value = false
+                _uiState.value = ChatUiState.Error(
+                    error.message ?: "Please check your internet connection and try again."
+                )
+                return@launch
+            }
+            _isTyping.value = false
+            _saharaUnreachable.value = false
+
             val sendResult = ChatRepository.sendMessage(
                 sessionId   = sessionId,
                 senderId    = uid,
@@ -433,23 +458,6 @@ class ChatViewModel : ViewModel() {
             }
             ChatRepository.updateAiChatSessionAfterMessage(sessionId, text)
             onUserMessageSaved?.invoke()
-
-
-            _isTyping.value = true
-
-
-
-
-            val aiMessageId = UUID.randomUUID().toString()
-            val sahara = ChatRepository.askSahara(
-                userText = text,
-                isEnglish = isEnglish,
-                messageId = aiMessageId,
-                history = historyTurns,
-                priorSummaries = priorSummaries,
-            )
-            _isTyping.value = false
-            _saharaUnreachable.value = !sahara.viaLiveModel
 
             
             
@@ -575,7 +583,6 @@ class ChatViewModel : ViewModel() {
                 
                 if (isCounselorSide && realtimePathUserId.isNotBlank()) {
                     
-                    val encodedName = counselorDisplayName.replace(" ", "_")
                     RealtimeDBService.saveUserNotification(
                         uid         = realtimePathUserId,
                         titleEn     = "Message from $counselorDisplayName",
@@ -583,7 +590,7 @@ class ChatViewModel : ViewModel() {
                         bodyEn      = "Your counselor has sent you a new message.",
                         bodyUr      = "Aapke counselor ne aapko naya paigham bheja hai.",
                         type        = "COUNSELOR",
-                        actionRoute = "counselor-chat/$currentCounselorId/$encodedName"
+                        actionRoute = "counselor-chat/${Uri.encode(currentCounselorId)}/${Uri.encode(counselorDisplayName.ifBlank { "Counselor" })}"
                     )
                 }
             } else {

@@ -27,7 +27,6 @@ loggingInterceptor = "5.3.2"
 navigationCompose = "2.9.8"
 coilCompose = "2.7.0"
 haze = "2.0.0-alpha02"
-blurry = "4.0.1"
 blurview = "version-3.2.0"
 gson = "2.14.0"
 lifecycleViewModelCompose = "2.10.0"
@@ -62,7 +61,6 @@ firebase-bom = { module = "com.google.firebase:firebase-bom", version.ref = "fir
 firebase-database = { module = "com.google.firebase:firebase-database" }
 firebase-firestore = { module = "com.google.firebase:firebase-firestore" }
 firebase-messaging = { module = "com.google.firebase:firebase-messaging" }
-firebase-storage = { module = "com.google.firebase:firebase-storage" }
 googleid = { module = "com.google.android.libraries.identity.googleid:googleid", version.ref = "googleid" }
 androidx-health-connect-client = { module = "androidx.health.connect:connect-client", version.ref = "healthConnect" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
@@ -83,7 +81,6 @@ androidx-navigation-compose = { group = "androidx.navigation", name = "navigatio
 coil-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "coilCompose" }
 haze = { group = "dev.chrisbanes.haze", name = "haze", version.ref = "haze" }
 haze-blur = { group = "dev.chrisbanes.haze", name = "haze-blur", version.ref = "haze" }
-blurry = { group = "jp.wasabeef", name = "blurry", version.ref = "blurry" }
 blurview = { group = "com.github.Dimezis", name = "BlurView", version.ref = "blurview" }
 androidx-compose-foundation = { group = "androidx.compose.foundation", name = "foundation" }
 androidx-compose-ui-text-googlefonts = { group = "androidx.compose.ui", name = "ui-text-google-fonts" }

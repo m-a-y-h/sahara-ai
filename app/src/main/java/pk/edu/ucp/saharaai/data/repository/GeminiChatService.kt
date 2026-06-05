@@ -34,11 +34,6 @@ import pk.edu.ucp.saharaai.data.remote.SaharaAiClient
  */
 object GeminiChatService {
 
-    // gemini-3.5-flash is the current free-tier Flash model. The 2.0
-    // Flash variants were end-of-life'd in June 2026; 3.x is the
-    // supported track. Override at run-time by editing this constant if
-    // a different version is preferred — Firebase AI Logic exposes
-    // every Gemini model via the same SDK surface.
     private const val MODEL_NAME = "gemini-3.5-flash"
 
     // Safety filters are explicitly loosened for all four categories. A
@@ -65,9 +60,11 @@ object GeminiChatService {
         isEnglish: Boolean,
     ): String {
         val languageHint = if (isEnglish) "english" else "roman_urdu"
+        val systemText = buildChatSystemPrompt(languageHint, priorSummaries)
         val model = buildModel(
-            systemText = buildChatSystemPrompt(languageHint, priorSummaries),
-            maxOutputTokens = 1024,
+            modelName = MODEL_NAME,
+            systemText = systemText,
+            maxOutputTokens = 384,
         )
         val chat = model.startChat(
             history = history.map { turn ->
@@ -75,7 +72,7 @@ object GeminiChatService {
                 content(role = role) { text(turn.content) }
             }
         )
-        return chat.sendMessage(userText).extractText()
+        return chat.sendMessage(userText.toModelInputForEmojiOnly()).extractText()
     }
 
     /** Compress a 16-message batch (8 user + 8 assistant) into 3-5
@@ -87,6 +84,7 @@ object GeminiChatService {
     ): String {
         val languageHint = if (isEnglish) "english" else "roman_urdu"
         val model = buildModel(
+            modelName = MODEL_NAME,
             systemText = buildSummariseSystemPrompt(languageHint),
             maxOutputTokens = 768,
         )
@@ -99,11 +97,11 @@ object GeminiChatService {
         return model.generateContent(transcript).extractText()
     }
 
-    private fun buildModel(systemText: String, maxOutputTokens: Int): GenerativeModel {
+    private fun buildModel(modelName: String, systemText: String, maxOutputTokens: Int): GenerativeModel {
         return Firebase.ai(backend = GenerativeBackend.googleAI()).generativeModel(
-            modelName = MODEL_NAME,
+            modelName = modelName,
             generationConfig = generationConfig {
-                temperature = 0.6f
+                temperature = 0.45f
                 topP = 0.95f
                 topK = 40
                 // Gemini 3.5 Flash is a reasoning model — by default it
@@ -132,7 +130,7 @@ object GeminiChatService {
             "You are SAHARA, a warm bilingual companion for Pakistani users who may be " +
                 "dealing with substance use, stress, or low mood. You are NOT a doctor.",
             "RULES (follow strictly):\n" +
-                "1. Reply with 2 to 4 short, natural sentences. Never one-liners.\n" +
+                "1. Reply with 1 to 2 short, natural sentences. Max 35 words unless safety risk is present.\n" +
                 "2. Match the user's language exactly. If they wrote Roman Urdu, reply in Roman Urdu " +
                 "(Hindi-Urdu in Latin letters). If English, English. If mixed, mix the same way. " +
                 "NEVER use Urdu script.\n" +
@@ -144,13 +142,25 @@ object GeminiChatService {
                 "4. NEVER greet the user. NEVER say 'Salam', 'Hello', 'Hi', or introduce yourself. " +
                 "You are already in conversation.\n" +
                 "5. NEVER repeat your previous reply or re-ask a question the user already answered.\n" +
-                "6. If the user's message is short or ambiguous (e.g. 'gla khrab ha', '?', 'ok'), " +
+                "6. Do not start with filler empathy phrases like 'I understand', 'I hear you', " +
+                "'Mujhe afsos hai', 'Main samajh raha hoon', or 'Main aapke saath hoon'. " +
+                "Get to the useful next question or step immediately.\n" +
+                "7. If the user says they are sad/udaas, do not spend lines restating sadness. " +
+                "Ask one direct question about cause, intensity, or what happened.\n" +
+                "8. If the user mentions nasha/addiction/latt/craving, ask what substance it is " +
+                "and when they last took it. Mention emergency only for breathing trouble, chest pain, " +
+                "fainting, seizure/fit, blue lips, overdose, or self-harm. Do not use poetic slogans.\n" +
+                "9. If the user's message is short or ambiguous (e.g. 'gla khrab ha', '?', 'ok'), " +
                 "DO NOT ask 'what danger are you in' or generic questions. Instead, gently ask a " +
                 "CONCRETE follow-up about THIS message (e.g. 'kab se khrab hai gala? Kuch liya hai aaj?').\n" +
-                "7. NEVER give medical advice, dosages, diagnoses, or recovery protocols. " +
+                "10. If the user asks for research, ask for the topic/subject and required format, " +
+                "then offer to make an outline or source plan.\n" +
+                "11. NEVER give medical advice, dosages, diagnoses, or recovery protocols. " +
                 "NEVER moralise about substance use.\n" +
-                "8. Acknowledge what the user said in your own words first, THEN ask one focused " +
-                "follow-up question.",
+                "12. If the user sends only emoji or a reaction symbol, interpret it as their " +
+                "current mood/reaction and reply naturally in one short sentence. If unclear, ask " +
+                "what happened.\n" +
+                "13. Ask only one focused follow-up question.",
             "If the user mentions chest pain, fainting, blue lips, a fit, no breathing, suicidal " +
                 "thoughts, or self-harm, reply warmly and add ONE line asking them to open the " +
                 "counselor list or press the Emergency button right now. Do not panic them.",
@@ -175,6 +185,27 @@ object GeminiChatService {
             "(suicidal thoughts, withdrawal, self-harm), the user's emotional state, and " +
             "the assistant's last guidance. Use the same language the user used " +
             "($languageHint). No new advice — just the compressed factual summary."
+    }
+
+    private fun String.toModelInputForEmojiOnly(): String {
+        val clean = trim()
+        if (!clean.isEmojiOnlyMessage()) return this
+        return "The user sent only this emoji/reaction: \"$clean\". " +
+            "Interpret it as their mood or reaction and reply naturally in one short sentence. " +
+            "If the meaning is unclear, ask what happened."
+    }
+
+    private fun String.isEmojiOnlyMessage(): Boolean {
+        val clean = trim()
+        if (clean.isBlank()) return false
+        if (clean.any { it.isLetterOrDigit() }) return false
+        return clean.any { it.isEmojiLikeChar() }
+    }
+
+    private fun Char.isEmojiLikeChar(): Boolean {
+        val type = Character.getType(this)
+        return type == Character.SURROGATE.toInt() ||
+            type == Character.OTHER_SYMBOL.toInt()
     }
 
     /**

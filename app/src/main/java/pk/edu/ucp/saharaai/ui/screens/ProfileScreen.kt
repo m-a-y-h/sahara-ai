@@ -26,7 +26,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.Image
@@ -49,6 +48,7 @@ import pk.edu.ucp.saharaai.ui.components.*
 import pk.edu.ucp.saharaai.ui.theme.*
 import pk.edu.ucp.saharaai.utils.ObservePermissionState
 import pk.edu.ucp.saharaai.utils.PermissionCopy
+import pk.edu.ucp.saharaai.utils.avatarPresenceLine
 import pk.edu.ucp.saharaai.utils.rememberAppPermissionRequester
 import pk.edu.ucp.saharaai.utils.showLocalizedToast
 import pk.edu.ucp.saharaai.viewmodels.ProfileViewModel
@@ -354,7 +354,6 @@ fun ProfileScreen(
             isEnglish = isEnglish,
             onSelect = {
                 profileViewModel.updateAvatarId(it, isEnglish)
-                showAvatarPickerDialog = false
             },
             onDismiss = { showAvatarPickerDialog = false }
         )
@@ -389,11 +388,15 @@ private fun ProfileAvatarSection(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Box(contentAlignment = Alignment.Center) {
-            Box(modifier = Modifier.size(100.dp).background(SaharaStrongGreen.copy(0.1f), CircleShape))
             Box(
                 modifier = Modifier
-                    .size(80.dp)
-                    .clip(CircleShape)
+                    .size(100.dp)
+                    .background(SaharaStrongGreen.copy(0.1f), RoundedCornerShape(24.dp))
+            )
+            Box(
+                modifier = Modifier
+                    .size(84.dp)
+                    .clip(RoundedCornerShape(20.dp))
                     .clickable { showAvatarMenu = true }
                     .background(Brush.linearGradient(listOf(SaharaStrongGreen, SaharaSky)))
             ) {
@@ -409,14 +412,19 @@ private fun ProfileAvatarSection(
                     AsyncImage(
                         model = customAvatarUrl,
                         contentDescription = null,
-                        modifier = Modifier.fillMaxSize()
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier
+                            .fillMaxSize(0.94f)
+                            .align(Alignment.Center)
                     )
                 } else {
                     Image(
                         painter = painterResource(id = profileAvatarDrawable(avatarId)),
                         contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize()
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier
+                            .fillMaxSize(0.94f)
+                            .align(Alignment.Center)
                     )
                 }
             }
@@ -491,32 +499,47 @@ private fun ProfileAvatarSection(
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.fillMaxWidth()
         )
-        TextButton(onClick = onRefreshRegion, enabled = !isUpdatingRegion) {
-            if (isUpdatingRegion) {
-                CircularProgressIndicator(
-                    color = SaharaStrongGreen,
-                    strokeWidth = 2.dp,
-                    modifier = Modifier.size(16.dp)
-                )
-            } else {
-                Icon(Icons.Default.LocationOn, null, tint = SaharaStrongGreen, modifier = Modifier.size(16.dp))
-            }
-            Spacer(Modifier.width(4.dp))
-            Text(
-                if (region.isBlank()) {
-                    if (isEnglish) "Use current location" else "Current location use karein"
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 1.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Row(
+                modifier = Modifier
+                    .offset(x = (-10).dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable(enabled = !isUpdatingRegion) { onRefreshRegion() }
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center
+            ) {
+                if (isUpdatingRegion) {
+                    CircularProgressIndicator(
+                        color = SaharaStrongGreen,
+                        strokeWidth = 2.dp,
+                        modifier = Modifier.size(16.dp)
+                    )
                 } else {
-                    region
-                },
-                color = SaharaStrongGreen,
-                style = MaterialTheme.typography.labelMedium,
-                textAlign = TextAlign.Center,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+                    Icon(Icons.Default.LocationOn, null, tint = SaharaStrongGreen, modifier = Modifier.size(16.dp))
+                }
+                Spacer(Modifier.width(4.dp))
+                Text(
+                    if (region.isBlank()) {
+                        if (isEnglish) "Use current location" else "Current location use karein"
+                    } else {
+                        region
+                    },
+                    color = SaharaStrongGreen,
+                    style = MaterialTheme.typography.labelMedium,
+                    textAlign = TextAlign.Center,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
         }
         if (memberSince.isNotBlank()) {
-            Spacer(Modifier.height(4.dp))
+            Spacer(Modifier.height(1.dp))
             Text(
                 text = if (isEnglish) "Member since $memberSince" else "Member $memberSince se",
                 style = MaterialTheme.typography.labelSmall,
@@ -554,6 +577,8 @@ private fun AvatarPresetDialog(
     onDismiss: () -> Unit
 ) {
     val presets = remember { profileAvatarPresets() }
+    val columnCount = 3
+    var previewSelectedId by remember(selectedAvatarId) { mutableStateOf(selectedAvatarId) }
     GlassAlertDialog(
         hazeState = hazeState,
         onDismissRequest = onDismiss,
@@ -561,43 +586,66 @@ private fun AvatarPresetDialog(
         text = {
             Column(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 420.dp)
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                    .fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                presets.chunked(4).forEach { row ->
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        row.forEach { preset ->
-                            val selected = selectedAvatarId == preset.id
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .aspectRatio(1f)
-                                    .clip(RoundedCornerShape(14.dp))
-                                    .background(SaharaStrongGreen.copy(alpha = if (selected) 0.16f else 0.06f))
-                                    .border(
-                                        width = if (selected) 2.dp else 1.dp,
-                                        color = if (selected) SaharaStrongGreen else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.14f),
-                                        shape = RoundedCornerShape(14.dp)
+                Text(
+                    text = avatarPresenceLine(previewSelectedId, isEnglish),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 420.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    presets.chunked(columnCount).forEach { row ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            row.forEach { preset ->
+                                val selected = previewSelectedId == preset.id
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .aspectRatio(1f)
+                                        .clip(RoundedCornerShape(14.dp))
+                                        .background(SaharaStrongGreen.copy(alpha = if (selected) 0.16f else 0.06f))
+                                        .border(
+                                            width = if (selected) 2.dp else 1.dp,
+                                            color = if (selected) SaharaStrongGreen else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.14f),
+                                            shape = RoundedCornerShape(14.dp)
+                                        )
+                                        .clickable {
+                                            previewSelectedId = preset.id
+                                            onSelect(preset.id)
+                                        },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Image(
+                                        painter = painterResource(id = preset.drawableRes),
+                                        contentDescription = null,
+                                        contentScale = ContentScale.Fit,
+                                        modifier = Modifier.fillMaxSize(0.94f)
                                     )
-                                    .clickable { onSelect(preset.id) }
-                                    .padding(6.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Image(
-                                    painter = painterResource(id = preset.drawableRes),
-                                    contentDescription = null,
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier.fillMaxSize().clip(CircleShape)
-                                )
+                                    if (selected) {
+                                        Icon(
+                                            imageVector = Icons.Default.CheckCircle,
+                                            contentDescription = null,
+                                            tint = SaharaStrongGreen,
+                                            modifier = Modifier.align(Alignment.TopEnd).size(22.dp)
+                                        )
+                                    }
+                                }
                             }
-                        }
-                        repeat(4 - row.size) {
-                            Spacer(modifier = Modifier.weight(1f))
+                            repeat(columnCount - row.size) {
+                                Spacer(modifier = Modifier.weight(1f))
+                            }
                         }
                     }
                 }

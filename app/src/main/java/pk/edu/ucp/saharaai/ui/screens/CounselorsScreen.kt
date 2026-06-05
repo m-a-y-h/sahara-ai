@@ -434,7 +434,7 @@ fun CounselorsScreen(
                                                             "This counselor is not taking calls right now.",
                                                             "Ye counselor abhi calls nahi le raha.",
                                                         )
-                                                        counselorId.isNotBlank() -> navController.navigate("counselor-call/$counselorId/${counselor.name.replace(" ", "_")}/voice/self")
+                                                        counselorId.isNotBlank() -> navController.navigate("counselor-call/${Uri.encode(counselorId)}/${Uri.encode(counselor.name.ifBlank { "Counselor" })}/voice/self")
                                                     }
                                                 },
                                                 modifier = Modifier.size(48.dp),
@@ -458,7 +458,7 @@ fun CounselorsScreen(
                                                             "This counselor is not taking calls right now.",
                                                             "Ye counselor abhi calls nahi le raha.",
                                                         )
-                                                        counselorId.isNotBlank() -> navController.navigate("counselor-call/$counselorId/${counselor.name.replace(" ", "_")}/video/self")
+                                                        counselorId.isNotBlank() -> navController.navigate("counselor-call/${Uri.encode(counselorId)}/${Uri.encode(counselor.name.ifBlank { "Counselor" })}/video/self")
                                                     }
                                                 },
                                                 modifier = Modifier.size(48.dp),
@@ -479,7 +479,7 @@ fun CounselorsScreen(
                                                             "Chat se pehle payment details submit kar ke approval ka intizar karein.",
                                                         )
                                                     } else if (counselorId.isNotBlank() && uid.isNotBlank()) {
-                                                        navController.navigate("counselor-chat/$counselorId/${counselor.name.replace(" ", "_")}")
+                                                        navController.navigate("counselor-chat/${Uri.encode(counselorId)}/${Uri.encode(counselor.name.ifBlank { "Counselor" })}")
                                                     }
                                                 },
                                                 variant = ButtonVariant.DEFAULT,

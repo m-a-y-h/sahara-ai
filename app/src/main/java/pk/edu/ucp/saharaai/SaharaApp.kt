@@ -1,6 +1,7 @@
 package pk.edu.ucp.saharaai
 
 import android.content.Context
+import android.net.Uri
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
@@ -296,14 +297,21 @@ fun SaharaApp() {
                         !emailAlreadyHasPassword &&
                         dbEmail.isNotBlank()
                     if (needsBackupPassword) {
-                        navController.navigate(
-                            "backup-password-setup/${state.onboardingCompleted}"
-                        ) {
-                            popUpTo("welcome") { inclusive = true }
+                        if (navController.currentDestination?.route != "backup-password-setup/{onboardingCompleted}") {
+                            navController.navigate(
+                                "backup-password-setup/${state.onboardingCompleted}"
+                            ) {
+                                launchSingleTop = true
+                                popUpTo("welcome") { inclusive = true }
+                            }
                         }
                     } else {
-                        navController.navigate(if (state.onboardingCompleted) "dashboard" else "onboarding") {
-                            popUpTo("welcome") { inclusive = true }
+                        val targetRoute = if (state.onboardingCompleted) "dashboard" else "onboarding"
+                        if (navController.currentDestination?.route != targetRoute) {
+                            navController.navigate(targetRoute) {
+                                launchSingleTop = true
+                                popUpTo("welcome") { inclusive = true }
+                            }
                         }
                     }
                 }
@@ -801,8 +809,8 @@ fun SaharaApp() {
             }
 
             composable("counselor-chat/{counselorId}/{counselorName}") { back ->
-                val counselorId   = back.arguments?.getString("counselorId") ?: ""
-                val counselorName = (back.arguments?.getString("counselorName") ?: "Counselor")
+                val counselorId   = Uri.decode(back.arguments?.getString("counselorId") ?: "")
+                val counselorName = Uri.decode(back.arguments?.getString("counselorName") ?: "Counselor")
                     .replace("_", " ")
                 val vmKey = "counselor_$counselorId"
                 RequireCurrentAssessment {
@@ -819,8 +827,8 @@ fun SaharaApp() {
             }
 
             composable("counselor-opens-chat/{userUid}/{counselorKey}") { back ->
-                val targetUserUid = back.arguments?.getString("userUid") ?: ""
-                val ck            = back.arguments?.getString("counselorKey") ?: ""
+                val targetUserUid = Uri.decode(back.arguments?.getString("userUid") ?: "")
+                val ck            = Uri.decode(back.arguments?.getString("counselorKey") ?: "")
                 val vmKey         = "counselor_opens_${targetUserUid}_$ck"
                 ChatScreen(
                     navController  = navController,
@@ -838,10 +846,10 @@ fun SaharaApp() {
                 InAppCallScreen(
                     navController = navController,
                     isEnglish = isEnglish,
-                    counselorKey = back.arguments?.getString("counselorKey") ?: "",
-                    counselorName = (back.arguments?.getString("counselorName") ?: "Counselor").replace("_", " "),
-                    mode = back.arguments?.getString("mode") ?: "voice",
-                    forUserId = back.arguments?.getString("forUserId") ?: "self",
+                    counselorKey = Uri.decode(back.arguments?.getString("counselorKey") ?: ""),
+                    counselorName = Uri.decode(back.arguments?.getString("counselorName") ?: "Counselor").replace("_", " "),
+                    mode = Uri.decode(back.arguments?.getString("mode") ?: "voice"),
+                    forUserId = Uri.decode(back.arguments?.getString("forUserId") ?: "self"),
                 )
             }
 

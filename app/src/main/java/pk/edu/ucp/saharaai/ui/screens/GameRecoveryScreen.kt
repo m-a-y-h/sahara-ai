@@ -505,11 +505,15 @@ fun GameRecoveryScreen(
         }
 
         Scaffold(
-        bottomBar        = { BottomNav(navController = navController, hazeState = hazeState) },
-        containerColor   = Color.Transparent,
-        contentWindowInsets = WindowInsets(0, 0, 0, 0)
-    ) { innerPadding ->
-        Box(modifier = Modifier.fillMaxSize()) {
+            bottomBar = { BottomNav(navController = navController, hazeState = hazeState) },
+            containerColor = Color.Transparent,
+            contentWindowInsets = WindowInsets(0, 0, 0, 0)
+        ) { innerPadding ->
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+            ) {
 
             
             AnimatedVisibility(
@@ -520,7 +524,6 @@ fun GameRecoveryScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(innerPadding)
                         .padding(24.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
@@ -693,7 +696,7 @@ fun GameRecoveryScreen(
                                         }
                                         Spacer(Modifier.width(16.dp))
                                     }
-                                    Column(modifier = Modifier.weight(1f)) {
+                                    Column(modifier = Modifier.weight(0.7f)) {
                                         Text(
                                             text       = finalAlias,
                                             style      = MaterialTheme.typography.titleMedium,
@@ -707,6 +710,7 @@ fun GameRecoveryScreen(
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
                                     }
+                                    Spacer(Modifier.weight(0.3f))
                                     Column(horizontalAlignment = Alignment.End) {
                                         Text(
                                             "$totalXp XP",
@@ -978,7 +982,7 @@ fun GameRecoveryScreen(
                         }
                     }
 
-                    Spacer(Modifier.height(innerPadding.calculateBottomPadding() + 40.dp))
+                    Spacer(Modifier.height(40.dp))
                 }
             }
         }

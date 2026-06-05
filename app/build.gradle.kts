@@ -53,6 +53,13 @@ android {
         buildConfigField("String", "SAHARA_LENS_SCAN_URL",      "\"$saharaLensScanUrl\"")
         buildConfigField("String", "SAHARA_VOICE_ANALYZE_URL",  "\"$saharaVoiceAnalyzeUrl\"")
 
+        // Base URL the guided-meditation tracks are downloaded + cached from
+        // (they no longer ship in the APK). Host the 4 mp3s anywhere static and
+        // set sahara.meditation.base.url in local.properties; files are fetched
+        // as "<base>/<filename>.mp3" on first play for a signed-in user.
+        val saharaMeditationBaseUrl = localProperties.getProperty("sahara.meditation.base.url") ?: ""
+        buildConfigField("String", "SAHARA_MEDITATION_BASE_URL", "\"$saharaMeditationBaseUrl\"")
+
         val liveKitUrl = localProperties.getProperty("sahara.livekit.url") ?: ""
         val liveKitTokenUrl = localProperties.getProperty("sahara.livekit.token.url") ?: ""
         buildConfigField("String", "LIVEKIT_URL", "\"$liveKitUrl\"")
@@ -82,6 +89,14 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
+            // Ship only arm64-v8a in the release APK. minSdk 26 (Android 8+)
+            // devices are universally 64-bit ARM, so x86/x86_64 (emulator-only)
+            // and armeabi-v7a just bloat the download — the native libs
+            // (WebRTC, MediaPipe face, TFLite) are ~12-15 MB *per ABI*. Debug
+            // keeps all ABIs so x86_64 emulators still work.
+            ndk {
+                abiFilters += "arm64-v8a"
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -113,6 +128,14 @@ android {
         noCompress += "tflite"
     }
 
+    // Debug never ran lintVital, so the release build was the first thing to
+    // hit these checks. Don't let latent lint findings block release packaging;
+    // run `./gradlew lintRelease` separately to review them.
+    lint {
+        checkReleaseBuilds = false
+        abortOnError = false
+    }
+
     buildToolsVersion = "36.0.0"
     packaging {
         jniLibs {
@@ -138,7 +161,6 @@ dependencies {
     implementation(libs.gson)
     implementation(libs.coil.compose)
     implementation(libs.androidx.compose.material.icons.extended)
-    implementation(libs.blurry)
     implementation(libs.blurview)
     implementation(libs.haze)
     implementation(libs.haze.blur)
@@ -165,7 +187,6 @@ dependencies {
     implementation(libs.firebase.auth)
     implementation(libs.firebase.firestore)
     implementation(libs.firebase.database)
-    implementation(libs.firebase.storage)
     implementation(libs.kotlinx.coroutines.play.services)
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

@@ -1,5 +1,6 @@
 package pk.edu.ucp.saharaai.ui.screens
 
+import android.net.Uri
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -579,7 +580,7 @@ fun CounselorDashboardScreen(
                                 isDark        = isDark,
                                 onOpenChat    = {
                                     
-                                    navController.navigate("counselor-opens-chat/$userId/$sessKey")
+                                    navController.navigate("counselor-opens-chat/${Uri.encode(userId)}/${Uri.encode(sessKey)}")
                                 }
                             )
                             Spacer(modifier = Modifier.height(12.dp))

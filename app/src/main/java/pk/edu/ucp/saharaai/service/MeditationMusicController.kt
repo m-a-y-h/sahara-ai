@@ -11,16 +11,17 @@ import androidx.core.content.ContextCompat
 
 class MeditationMusicController(private val appContext: Context) {
 
-    
+
     var isPlaying    by mutableStateOf(false)    ; private set
+    var isLoading    by mutableStateOf(false)    ; private set
     var currentTitle by mutableStateOf("")       ; private set
     var currentIndex by mutableStateOf(-1)       ; private set
 
-    
-    private var playlistIds:    IntArray      = intArrayOf()
+
+    private var playlistFiles:  Array<String> = emptyArray()
     private var playlistTitles: Array<String> = emptyArray()
 
-    
+
     private var service: MeditationMusicService? = null
     private var bound   = false
 
@@ -30,7 +31,7 @@ class MeditationMusicController(private val appContext: Context) {
             service  = svc
             bound    = true
             svc.addListener(::syncState)
-            syncState()  
+            syncState()
         }
         override fun onServiceDisconnected(name: ComponentName) {
             bound   = false
@@ -38,7 +39,7 @@ class MeditationMusicController(private val appContext: Context) {
         }
     }
 
-    
+
     fun bind() {
         if (!bound) {
             val intent = Intent(appContext, MeditationMusicService::class.java)
@@ -46,7 +47,7 @@ class MeditationMusicController(private val appContext: Context) {
         }
     }
 
-    
+
     fun unbind() {
         if (bound) {
             service?.removeListener(::syncState)
@@ -56,28 +57,29 @@ class MeditationMusicController(private val appContext: Context) {
         }
     }
 
-    
 
-    
+    /**
+     * @param file     the track's remote/cached file name, e.g. "meditation_relaxing.mp3"
+     * @param playlist (file, title) pairs for prev/next
+     */
     fun play(
-        resId: Int,
+        file: String,
         title: String,
-        playlist: List<Pair<Int, String>>
+        playlist: List<Pair<String, String>>
     ) {
-        playlistIds    = playlist.map { it.first  }.toIntArray()
+        playlistFiles  = playlist.map { it.first  }.toTypedArray()
         playlistTitles = playlist.map { it.second }.toTypedArray()
 
-        val idx = playlistIds.indexOf(resId)
-        
+        val idx = playlistFiles.indexOf(file)
+
         if (currentIndex == idx && isPlaying) {
             pause(); return
         }
-        if (currentIndex == idx && !isPlaying) {
-            
-            service?.resume() ?: startPlay(resId, title)
+        if (currentIndex == idx && !isPlaying && !isLoading) {
+            service?.resume() ?: startPlay(file, title)
             return
         }
-        startPlay(resId, title)
+        startPlay(file, title)
     }
 
     fun pause() {
@@ -97,13 +99,14 @@ class MeditationMusicController(private val appContext: Context) {
     fun next() { service?.skipNext() }
     fun prev() { service?.skipPrev() }
 
-    
+
     fun stop() {
         unbind()
         ContextCompat.startForegroundService(
             appContext, MeditationMusicService.actionIntent(appContext, MeditationMusicService.ACTION_STOP)
         )
         isPlaying    = false
+        isLoading    = false
         currentTitle = ""
         currentIndex = -1
     }
@@ -111,20 +114,19 @@ class MeditationMusicController(private val appContext: Context) {
     val durationMs: Int get() = service?.durationMs ?: 0
     val positionMs: Int get() = service?.positionMs ?: 0
 
-    
 
-    private fun startPlay(resId: Int, title: String) {
+    private fun startPlay(file: String, title: String) {
         val intent = MeditationMusicService.playIntent(
-            appContext, resId, title, playlistIds, playlistTitles
+            appContext, file, title, playlistFiles, playlistTitles
         )
         ContextCompat.startForegroundService(appContext, intent)
-        
         if (!bound) bind()
     }
 
     private fun syncState() {
         val svc = service ?: return
         isPlaying    = svc.isPlaying
+        isLoading    = svc.isLoading
         currentTitle = svc.currentTitle
         currentIndex = svc.currentIndex
     }

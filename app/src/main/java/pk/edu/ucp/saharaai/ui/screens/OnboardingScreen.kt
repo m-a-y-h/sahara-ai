@@ -18,7 +18,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -581,8 +580,9 @@ private fun avatarPresets(): List<AvatarPreset> {
 @Composable
 fun StepFiveAvatar(isE: Boolean, selectedId: String, h: HazeState, stc: Color, onSelect: (String) -> Unit) {
     val presets = remember { avatarPresets() }
+    val columnCount = 3
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        presets.chunked(4).forEach { row ->
+        presets.chunked(columnCount).forEach { row ->
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -603,32 +603,24 @@ fun StepFiveAvatar(isE: Boolean, selectedId: String, h: HazeState, stc: Color, o
                             .clickable { onSelect(preset.id) }
                     ) {
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize(0.85f)
-                                    .clip(CircleShape)
-                                    .background(Color.White.copy(alpha = 0.1f)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Image(
-                                    painter = painterResource(id = preset.drawableRes),
-                                    contentDescription = null,
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier.fillMaxSize()
-                                )
-                            }
+                            Image(
+                                painter = painterResource(id = preset.drawableRes),
+                                contentDescription = null,
+                                contentScale = ContentScale.Fit,
+                                modifier = Modifier.fillMaxSize(0.94f)
+                            )
                             if (selected) {
                                 Icon(
                                     Icons.Default.CheckCircle,
                                     contentDescription = null,
                                     tint = SaharaStrongGreen,
-                                    modifier = Modifier.align(Alignment.TopEnd).size(18.dp)
+                                    modifier = Modifier.align(Alignment.TopEnd).size(22.dp)
                                 )
                             }
                         }
                     }
                 }
-                repeat(4 - row.size) { Spacer(Modifier.weight(1f)) }
+                repeat(columnCount - row.size) { Spacer(Modifier.weight(1f)) }
             }
         }
         Text(

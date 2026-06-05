@@ -1075,6 +1075,11 @@ private fun RegistrationReviewCard(
                     color = SaharaStrongGreen,
                     fontWeight = FontWeight.Bold
                 )
+                OutlinedButton(
+                    onClick = { onApprove(request.issuedKey, notes, selectedAttributeIds.toList()) }
+                ) {
+                    Text(if (isEnglish) "Sync key record" else "Key sync karein")
+                }
             }
         }
     }

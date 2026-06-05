@@ -50,7 +50,6 @@ import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.blur.blurEffect
 import dev.chrisbanes.haze.blur.HazeColorEffect
 import kotlinx.coroutines.launch
-import pk.edu.ucp.saharaai.R
 import pk.edu.ucp.saharaai.service.rememberMeditationMusicController
 import pk.edu.ucp.saharaai.ui.components.BottomNav
 import pk.edu.ucp.saharaai.ui.components.HazeBackButton
@@ -82,7 +81,7 @@ data class GuidedSession(
     val duration: String,
     val icon: ImageVector = Icons.Default.MusicNote,
     val accentColor: Color = SaharaLavender,
-    val rawResId: Int? = null          
+    val audioFile: String? = null      // remote/cached file name, e.g. "meditation_relaxing.mp3"
 )
 
 private fun triggerBeatingVibration(context: Context, patternName: String) {
@@ -161,35 +160,35 @@ fun MeditationScreen(
                 "Anxiety release · sleep · soft ambient",
                 "Sukoon, neend aur soft ambient",
                 "10 min", Icons.Default.MusicNote, SaharaSky,
-                R.raw.meditation_relaxing
+                "meditation_relaxing.mp3"
             ),
             GuidedSession(
                 "Pure Waves", "Saf Lahrein",
                 "Pure meditation sound waves",
                 "Saf meditation ki awazein",
                 "10 min", Icons.Default.MusicNote, SaharaLavender,
-                R.raw.meditation_pure_waves
+                "meditation_pure_waves.mp3"
             ),
             GuidedSession(
                 "Positive Energy", "مثبت توانائی",
                 "Find inner peace within 10 minutes",
                 "10 minute mein sukoon paayein",
                 "10 min", Icons.Default.MusicNote, SaharaPeach,
-                R.raw.meditation_positive_energy
+                "meditation_positive_energy.mp3"
             ),
             GuidedSession(
                 "Deep Focus", "Gehri Tawajo",
                 "Brain power · focus · concentration",
                 "Concentration aur dimagh ki taqat",
                 "10 min", Icons.Default.MusicNote, SaharaStrongGreen,
-                R.raw.meditation_deep_focus
+                "meditation_deep_focus.mp3"
             )
         )
     }
 
     
     val songPlaylist = remember(sessions) {
-        sessions.mapNotNull { s -> s.rawResId?.let { it to s.titleEn } }
+        sessions.mapNotNull { s -> s.audioFile?.let { it to s.titleEn } }
     }
 
     
@@ -438,7 +437,7 @@ fun MeditationScreen(
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     sessions.forEach { session ->
-                        val resId        = session.rawResId!!
+                        val file         = session.audioFile!!
                         val isThisPlaying  = musicCtrl.isPlaying && musicCtrl.currentTitle == session.titleEn
                         val isThisSelected = musicCtrl.currentTitle == session.titleEn
 
@@ -454,7 +453,7 @@ fun MeditationScreen(
                                     else MaterialTheme.colorScheme.outlineVariant.copy(.3f),
                                     RoundedCornerShape(16.dp)
                                 )
-                                .clickable { musicCtrl.play(resId, session.titleEn, songPlaylist) }
+                                .clickable { musicCtrl.play(file, session.titleEn, songPlaylist) }
                                 .padding(16.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
@@ -490,7 +489,7 @@ fun MeditationScreen(
                                 )
                             }
                             IconButton(
-                                onClick = { musicCtrl.play(resId, session.titleEn, songPlaylist) },
+                                onClick = { musicCtrl.play(file, session.titleEn, songPlaylist) },
                                 modifier = Modifier.size(36.dp)
                             ) {
                                 Icon(

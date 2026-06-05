@@ -593,14 +593,6 @@ private fun ResultPane(
             )
         }
 
-        response.modelVersion?.let {
-            Text(
-                text = "Model: $it",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 8.dp),
-            )
-        }
     }
 }
 

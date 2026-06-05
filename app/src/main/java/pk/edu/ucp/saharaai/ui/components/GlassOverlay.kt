@@ -26,12 +26,24 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
+import dev.chrisbanes.haze.HazeInputScale
 import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.hazeEffect
+import dev.chrisbanes.haze.blur.blurEffect
 import pk.edu.ucp.saharaai.ui.theme.SaharaBorderGray
+import pk.edu.ucp.saharaai.ui.theme.SaharaHazeMaterials
 
 /**
  * A popup rendered in the same composition as the screen (not a Dialog/Popup
- * window), so it can sit above the app chrome and dim the full screen.
+ * window), so it can sit above the app chrome, dim the full screen, AND blur
+ * the content behind it as real glass.
+ *
+ * The blur is the same recipe the Welcome privacy popup uses via
+ * SaharaCard(GLASS): the blurred + tinted backdrop *is* the panel fill, so the
+ * screen shows through. For that to render, the host screen must mark its
+ * content with `Modifier.hazeSource(hazeState)` and pass the **same**
+ * `hazeState` here — otherwise the blur has no source to read and the panel
+ * looks empty.
  *
  * Host it at the top level of a screen's root Box, e.g.:
  *
@@ -41,14 +53,16 @@ import pk.edu.ucp.saharaai.ui.theme.SaharaBorderGray
  */
 @Composable
 fun GlassOverlay(
-    @Suppress("UNUSED_PARAMETER")
     hazeState: HazeState,
     onDismiss: () -> Unit,
     isDark: Boolean = isSystemInDarkTheme(),
     dismissOnScrimTap: Boolean = true,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    val panelColor = if (isDark) Color(0xFF111C22) else Color(0xFFFAFCFC)
+    val shape = RoundedCornerShape(24.dp)
+    // Style resolved here (composable scope) because the hazeEffect lambda below
+    // is not composable. Mirrors SaharaCard's GLASS variant exactly.
+    val glassStyle = SaharaHazeMaterials.defaultGlass(isDark)
     val borderColor = if (isDark) Color.White.copy(alpha = 0.16f) else SaharaBorderGray.copy(alpha = 0.40f)
     Box(
         modifier = Modifier
@@ -66,13 +80,13 @@ fun GlassOverlay(
                 // (long forms, avatar grids, time pickers) never overflows
                 // the screen.
                 .heightIn(max = 560.dp)
-                .clip(RoundedCornerShape(24.dp))
-                .background(panelColor)
-                .border(
-                    1.dp,
-                    borderColor,
-                    RoundedCornerShape(24.dp),
-                )
+                .clip(shape)
+                // The blurred glass backdrop — replaces the old opaque panel fill.
+                .hazeEffect(state = hazeState) {
+                    inputScale = HazeInputScale.Auto
+                    blurEffect { style = glassStyle }
+                }
+                .border(1.dp, borderColor, shape)
                 .pointerInput(Unit) { detectTapGestures(onTap = {}) }
                 .padding(22.dp)
                 .verticalScroll(rememberScrollState()),

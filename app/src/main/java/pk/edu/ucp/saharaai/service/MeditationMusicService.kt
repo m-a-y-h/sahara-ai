@@ -12,15 +12,26 @@ import android.media.AudioAttributes
 import android.media.MediaPlayer
 import android.os.Binder
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
+import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import pk.edu.ucp.saharaai.activities.MainActivity
+import pk.edu.ucp.saharaai.utils.MeditationAudioCache
 
 
 class MeditationMusicService : Service() {
 
-    
+
     companion object {
         const val CHANNEL_ID = "sahara_meditation_music"
         const val NOTIF_ID   = 7001
@@ -32,22 +43,22 @@ class MeditationMusicService : Service() {
         const val ACTION_NEXT    = "pk.edu.ucp.saharaai.MED_NEXT"
         const val ACTION_PREV    = "pk.edu.ucp.saharaai.MED_PREV"
 
-        const val EXTRA_RES_ID          = "res_id"
+        const val EXTRA_FILE            = "song_file"
         const val EXTRA_TITLE           = "song_title"
-        const val EXTRA_PLAYLIST_IDS    = "playlist_ids"
+        const val EXTRA_PLAYLIST_FILES  = "playlist_files"
         const val EXTRA_PLAYLIST_TITLES = "playlist_titles"
 
         fun playIntent(
             ctx: Context,
-            resId: Int,
+            file: String,
             title: String,
-            playlistIds: IntArray,
+            playlistFiles: Array<String>,
             playlistTitles: Array<String>
         ) = Intent(ctx, MeditationMusicService::class.java).also { i ->
             i.action = ACTION_PLAY
-            i.putExtra(EXTRA_RES_ID, resId)
-            i.putExtra(EXTRA_TITLE,  title)
-            i.putExtra(EXTRA_PLAYLIST_IDS,    playlistIds)
+            i.putExtra(EXTRA_FILE,  file)
+            i.putExtra(EXTRA_TITLE, title)
+            i.putExtra(EXTRA_PLAYLIST_FILES,  playlistFiles)
             i.putExtra(EXTRA_PLAYLIST_TITLES, playlistTitles)
         }
 
@@ -55,32 +66,40 @@ class MeditationMusicService : Service() {
             Intent(ctx, MeditationMusicService::class.java).also { it.action = action }
     }
 
-    
+
     inner class LocalBinder : Binder() {
         val service: MeditationMusicService get() = this@MeditationMusicService
     }
     private val binder = LocalBinder()
     override fun onBind(intent: Intent?): IBinder = binder
 
-    
+
     var currentTitle: String   = ""
         private set
     var isPlaying: Boolean     = false
         private set
+    var isLoading: Boolean     = false
+        private set
     var currentIndex: Int      = 0
         private set
 
-    private var playlistIds:    IntArray      = intArrayOf()
+    private var playlistFiles:  Array<String> = emptyArray()
     private var playlistTitles: Array<String> = emptyArray()
     private var mediaPlayer: MediaPlayer?     = null
 
-    
+    // Each play() downloads off the main thread; keep the job so a fast
+    // skip/stop cancels the in-flight fetch instead of racing it.
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private var prepareJob: Job? = null
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+
     private val listeners = mutableListOf<() -> Unit>()
     fun addListener(cb: () -> Unit)    { listeners += cb }
     fun removeListener(cb: () -> Unit) { listeners -= cb }
-    private fun notify2() = listeners.forEach { it() }   
+    private fun notify2() = listeners.forEach { it() }
 
-    
+
 
     override fun onCreate() {
         super.onCreate()
@@ -90,10 +109,16 @@ class MeditationMusicService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_PLAY -> {
-                playlistIds    = intent.getIntArrayExtra(EXTRA_PLAYLIST_IDS)    ?: intArrayOf()
+                playlistFiles  = intent.getStringArrayExtra(EXTRA_PLAYLIST_FILES)  ?: emptyArray()
                 playlistTitles = intent.getStringArrayExtra(EXTRA_PLAYLIST_TITLES) ?: emptyArray()
-                val resId      = intent.getIntExtra(EXTRA_RES_ID, -1)
-                currentIndex   = playlistIds.indexOf(resId).coerceAtLeast(0)
+                val file       = intent.getStringExtra(EXTRA_FILE).orEmpty()
+                currentIndex   = playlistFiles.indexOf(file).coerceAtLeast(0)
+                currentTitle   = playlistTitles.getOrNull(currentIndex) ?: intent.getStringExtra(EXTRA_TITLE).orEmpty()
+                // Foreground immediately: the download below can outlast the
+                // startForeground() deadline, so we can't wait for playback.
+                isLoading = true; isPlaying = false
+                startForegroundNow()
+                notify2()
                 playAt(currentIndex)
             }
             ACTION_PAUSE  -> pause()
@@ -102,73 +127,97 @@ class MeditationMusicService : Service() {
             ACTION_NEXT   -> skipNext()
             ACTION_PREV   -> skipPrev()
         }
-        return START_STICKY   
+        return START_STICKY
     }
 
     override fun onDestroy() {
+        prepareJob?.cancel()
+        scope.cancel()
         releasePlayer()
         super.onDestroy()
     }
 
-    
+
 
     private fun playAt(index: Int) {
-        if (playlistIds.isEmpty()) return
-        currentIndex = index.coerceIn(0, playlistIds.lastIndex)
+        if (playlistFiles.isEmpty()) return
+        currentIndex = index.coerceIn(0, playlistFiles.lastIndex)
         currentTitle = playlistTitles.getOrNull(currentIndex) ?: ""
+        val fileName = playlistFiles[currentIndex]
         releasePlayer()
+        isLoading = true; isPlaying = false
+        updateNotif(); notify2()
 
-        mediaPlayer = MediaPlayer().apply {
-            setAudioAttributes(
-                AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_MEDIA)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                    .build()
-            )
-            resources.openRawResourceFd(playlistIds[currentIndex])
-                .also { fd -> setDataSource(fd.fileDescriptor, fd.startOffset, fd.length); fd.close() }
-            isLooping = false
-            setOnCompletionListener { skipNext() }
-            prepare()
-            start()
+        prepareJob?.cancel()
+        prepareJob = scope.launch {
+            val file = try {
+                withContext(Dispatchers.IO) { MeditationAudioCache.resolve(this@MeditationMusicService, fileName) }
+            } catch (e: Exception) {
+                onTrackError(e.message ?: "couldn't load track")
+                return@launch
+            }
+            try {
+                mediaPlayer = MediaPlayer().apply {
+                    setAudioAttributes(
+                        AudioAttributes.Builder()
+                            .setUsage(AudioAttributes.USAGE_MEDIA)
+                            .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                            .build()
+                    )
+                    setDataSource(file.absolutePath)
+                    isLooping = false
+                    setOnCompletionListener { skipNext() }
+                    setOnErrorListener { _, what, extra ->
+                        onTrackError("playback error ($what/$extra)"); true
+                    }
+                    setOnPreparedListener { mp ->
+                        // A fast skip can release this player while it was still
+                        // preparing; if it's no longer the current one, drop it.
+                        if (mediaPlayer !== mp) { runCatching { mp.release() }; return@setOnPreparedListener }
+                        // Qualified: inside MediaPlayer.apply, bare isPlaying would
+                        // bind to MediaPlayer.isPlaying (a read-only getter).
+                        this@MeditationMusicService.isLoading = false
+                        this@MeditationMusicService.isPlaying = true
+                        mp.start()
+                        updateNotif(); notify2()
+                    }
+                    prepareAsync()
+                }
+            } catch (e: Exception) {
+                onTrackError(e.message ?: "couldn't open track")
+            }
         }
-        isPlaying = true
-        val serviceType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
-        } else {
-            0
-        }
-        ServiceCompat.startForeground(
-            this,
-            NOTIF_ID,
-            buildNotification(),
-            serviceType
-        )
-        notify2()
+    }
+
+    private fun onTrackError(message: String) {
+        isLoading = false; isPlaying = false
+        releasePlayer()
+        mainHandler.post { Toast.makeText(this, "Meditation: $message", Toast.LENGTH_SHORT).show() }
+        updateNotif(); notify2()
     }
 
     fun pause() {
-        mediaPlayer?.pause()
+        runCatching { mediaPlayer?.pause() }
         isPlaying = false
         updateNotif()
         notify2()
     }
 
     fun resume() {
-        mediaPlayer?.start()
-        isPlaying = true
+        runCatching { mediaPlayer?.start() }
+        isPlaying = mediaPlayer != null
         updateNotif()
         notify2()
     }
 
     fun skipNext() {
-        if (playlistIds.isEmpty()) return
-        playAt((currentIndex + 1) % playlistIds.size)
+        if (playlistFiles.isEmpty()) return
+        playAt((currentIndex + 1) % playlistFiles.size)
     }
 
     fun skipPrev() {
-        if (playlistIds.isEmpty()) return
-        playAt(if (currentIndex == 0) playlistIds.lastIndex else currentIndex - 1)
+        if (playlistFiles.isEmpty()) return
+        playAt(if (currentIndex == 0) playlistFiles.lastIndex else currentIndex - 1)
     }
 
     val durationMs: Int get() = try { mediaPlayer?.duration ?: 0 } catch (_: Exception) { 0 }
@@ -181,7 +230,7 @@ class MeditationMusicService : Service() {
         isPlaying   = false
     }
 
-    
+
 
     private fun ensureChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -191,6 +240,13 @@ class MeditationMusicService : Service() {
             ).apply { description = "Background meditation music" }
             getSystemService(NotificationManager::class.java).createNotificationChannel(ch)
         }
+    }
+
+    private fun startForegroundNow() {
+        val serviceType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+        } else 0
+        ServiceCompat.startForeground(this, NOTIF_ID, buildNotification(), serviceType)
     }
 
     private fun pi(action: String): PendingIntent =
@@ -213,7 +269,7 @@ class MeditationMusicService : Service() {
             .setSmallIcon(android.R.drawable.ic_media_play)
             .setContentTitle("🎵 Sahara Meditation")
             .setContentText(currentTitle)
-            .setSubText(if (isPlaying) "Now Playing" else "Paused")
+            .setSubText(if (isLoading) "Loading…" else if (isPlaying) "Now Playing" else "Paused")
             .setContentIntent(openApp)
             .setSilent(true)
             .setOngoing(true)

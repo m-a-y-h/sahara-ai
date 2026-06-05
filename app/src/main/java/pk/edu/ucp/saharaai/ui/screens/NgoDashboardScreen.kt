@@ -468,19 +468,19 @@ fun NgoDashboardScreen(
                             isDark        = isDark,
                             onCallClick   = {
                                 val cId = counselor.counselorId.ifBlank { counselor.userId }
-                                val cName = counselor.name.replace(" ", "_").ifBlank { "Counselor" }
-                                if (cId.isNotBlank()) navController.navigate("counselor-call/$cId/$cName/voice/self")
+                                val cName = counselor.name.ifBlank { "Counselor" }
+                                if (cId.isNotBlank()) navController.navigate("counselor-call/${Uri.encode(cId)}/${Uri.encode(cName)}/voice/self")
                             },
                             onVideoClick  = {
                                 val cId = counselor.counselorId.ifBlank { counselor.userId }
-                                val cName = counselor.name.replace(" ", "_").ifBlank { "Counselor" }
-                                if (cId.isNotBlank()) navController.navigate("counselor-call/$cId/$cName/video/self")
+                                val cName = counselor.name.ifBlank { "Counselor" }
+                                if (cId.isNotBlank()) navController.navigate("counselor-call/${Uri.encode(cId)}/${Uri.encode(cName)}/video/self")
                             },
                             onChatClick   = {
                                 val cId   = counselor.counselorId.ifBlank { counselor.userId }
-                                val cName = counselor.name.replace(" ", "_")
+                                val cName = counselor.name.ifBlank { "Counselor" }
                                 if (cId.isNotBlank()) {
-                                    navController.navigate("counselor-chat/$cId/$cName")
+                                    navController.navigate("counselor-chat/${Uri.encode(cId)}/${Uri.encode(cName)}")
                                 }
                             }
                         )

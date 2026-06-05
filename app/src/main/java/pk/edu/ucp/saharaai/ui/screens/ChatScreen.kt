@@ -113,57 +113,6 @@ data class ChatMessage(
         return SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date(timestamp))
     }
 }
-object MockAIEngine {
-    fun processInput(input: String, isEnglish: Boolean): ChatMessage {
-        val lowerInput = input.lowercase()
-        return when {
-            lowerInput.contains("relapse") || lowerInput.contains("cravings") || lowerInput.contains("nasha") ||
-                lowerInput.contains("charas") || lowerInput.contains("ganja") || lowerInput.contains("weed") -> {
-                ChatMessage(
-                    text = if (isEnglish) "I hear you. Cravings are intense, but they are temporary. Please use these immediate resources." else "Main samajh raha hoon. Cravings aati hain, par ye waqti hain. Fauri tor par in resources ka istemal karein.",
-                    isBot = true,
-                    type = MessageType.CRISIS_CARD,
-                    actionDestination = "emergency"
-                )
-            }
-            lowerInput.contains("anxious") || lowerInput.contains("panic") || lowerInput.contains("ghabrahat") -> {
-                ChatMessage(
-                    text = if (isEnglish) "Anxiety can feel overwhelming. Let's ground ourselves. Try this quick breathing exercise." else "Ghabrahat bohot hawi ho sakti hai. Aayen mil kar saans ki mashq karte hain.",
-                    isBot = true,
-                    type = MessageType.EXERCISE_CARD,
-                    actionDestination = "meditation"
-                )
-            }
-            lowerInput.contains("sad") || lowerInput.contains("depressed") || lowerInput.contains("udas") -> {
-                ChatMessage(
-                    text = if (isEnglish) "I'm sorry you're feeling this way. Would you like to write about it in your journal, or talk to the community?" else "Mujhe afsos hai aap udas hain. Kya aap apne journal mein likhna chahenge ya kisi se baat karna chahenge?",
-                    isBot = true,
-                    type = MessageType.QUICK_REPLIES,
-                    options = if (isEnglish) listOf("Open Journal", "Community", "Just chat") else listOf("Journal Kholein", "Community", "Baat karein")
-                )
-            }
-            else -> {
-                val genericResponsesEn = listOf(
-                    "I understand. Tell me more about that.",
-                    "That sounds challenging, but you are making progress.",
-                    "I'm here for you. What do you think triggered this?",
-                    "Taking it one day at a time is key. How did you handle it?"
-                )
-                val genericResponsesUr = listOf(
-                    "Main samajh raha hoon. Is baray mein aur batayen.",
-                    "Ye mushkil lag raha hai, par aap behtar ho rahe hain.",
-                    "Main yahan aapke liye hoon. Aapko kya lagta hai iski wajah kya thi?",
-                    "Har din ko naye siray se shuru karein. Aapne isay kaise handle kiya?"
-                )
-                ChatMessage(
-                    text = if (isEnglish) genericResponsesEn.random() else genericResponsesUr.random(),
-                    isBot = true,
-                    type = MessageType.TEXT
-                )
-            }
-        }
-    }
-}
 @Composable
 fun ChatScreen(
     navController: NavController,
@@ -530,29 +479,31 @@ private fun ChatConversationScreen(
     }
     val blobMotion = rememberBackdropBlobMotion()
     val handleSendMessage: (String) -> Unit = { text ->
-        if (text.isNotBlank()) {
-            input = ""
-            focusManager.clearFocus()
+        val trimmed = text.trim()
+        if (trimmed.isNotBlank()) {
             if (isAiMode) {
-                isTyping = true
                 if (uid.isNotBlank()) {
-                    chatViewModel.sendUserMessageToAI(text.trim(), isEnglish) {
+                    isTyping = true
+                    chatViewModel.sendUserMessageToAI(trimmed, isEnglish) {
+                        input = ""
+                        focusManager.clearFocus()
                         if (!GlobalAppState.hasCheckedIn) {
                             GlobalAppState.hasCheckedIn = true
                             GlobalAppState.currentStreak++
                         }
                     }
                 } else {
-                    transientMessages.add(ChatMessage(text = text.trim(), isBot = false))
-                    coroutineScope.launch {
-                        delay((900..1600).random().toLong())
-                        isTyping = false
-                        transientMessages.add(MockAIEngine.processInput(text, isEnglish))
-                    }
+                    context.showLocalizedToast(
+                        isEnglish,
+                        "Please check your internet connection and try again.",
+                        "Please check your internet connection and try again.",
+                    )
                 }
             } else {
+                input = ""
+                focusManager.clearFocus()
                 if (uid.isNotBlank()) {
-                    chatViewModel.sendMessageToCounselor(text, counselorId)
+                    chatViewModel.sendMessageToCounselor(trimmed, counselorId)
                 }
             }
         }
@@ -569,39 +520,42 @@ private fun ChatConversationScreen(
         } else {
             val mode = if (video) "video" else "voice"
             val target = if (isCounselorSide) forUserId else "self"
-            val nameArg = counselorName.replace(" ", "_").ifBlank { "Counselor" }
-            navController.navigate("counselor-call/$counselorId/$nameArg/$mode/$target")
+            val keyArg = Uri.encode(counselorId)
+            val nameArg = Uri.encode(counselorName.ifBlank { "Counselor" })
+            navController.navigate("counselor-call/$keyArg/$nameArg/$mode/${Uri.encode(target)}")
         }
     }
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .hazeSource(state = hazeState)
-            .background(
-                Brush.verticalGradient(
-                    listOf(
-                        SaharaStrongGreen.copy(alpha = if (isDark) 0.15f else 0.1f),
-                        MaterialTheme.colorScheme.background.copy(alpha = 0.8f),
-                        MaterialTheme.colorScheme.background
+    Box(modifier = Modifier.fillMaxSize()) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .hazeSource(state = hazeState)
+                .background(
+                    Brush.verticalGradient(
+                        listOf(
+                            SaharaStrongGreen.copy(alpha = if (isDark) 0.15f else 0.1f),
+                            MaterialTheme.colorScheme.background.copy(alpha = 0.8f),
+                            MaterialTheme.colorScheme.background
+                        )
                     )
                 )
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(350.dp)
+                    .offset(x = (-80).dp, y = (-50).dp)
+                    .primaryBlobMotion(blobMotion)
+                    .background(Brush.radialGradient(listOf(SaharaStrongGreen.copy(alpha = 0.15f), Color.Transparent)))
             )
-    ) {
-        Box(
-            modifier = Modifier
-                .size(350.dp)
-                .offset(x = (-80).dp, y = (-50).dp)
-                .primaryBlobMotion(blobMotion)
-                .background(Brush.radialGradient(listOf(SaharaStrongGreen.copy(alpha = 0.15f), Color.Transparent)))
-        )
-        Box(
-            modifier = Modifier
-                .size(400.dp)
-                .align(Alignment.BottomEnd)
-                .offset(x = 100.dp, y = 50.dp)
-                .secondaryBlobMotion(blobMotion)
-                .background(Brush.radialGradient(listOf(SaharaSky.copy(alpha = 0.15f), Color.Transparent)))
-        )
+            Box(
+                modifier = Modifier
+                    .size(400.dp)
+                    .align(Alignment.BottomEnd)
+                    .offset(x = 100.dp, y = 50.dp)
+                    .secondaryBlobMotion(blobMotion)
+                    .background(Brush.radialGradient(listOf(SaharaSky.copy(alpha = 0.15f), Color.Transparent)))
+            )
+        }
 
         Scaffold(
             bottomBar = { BottomNav(navController = navController, hazeState = hazeState) },
@@ -904,35 +858,37 @@ private fun CounselorFrameOverview(
         }
     }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .hazeSource(state = hazeState)
-            .background(
-                Brush.verticalGradient(
-                    listOf(
-                        SaharaSky.copy(alpha = if (isDark) 0.18f else 0.12f),
-                        MaterialTheme.colorScheme.background.copy(alpha = 0.8f),
-                        MaterialTheme.colorScheme.background,
+    Box(modifier = Modifier.fillMaxSize()) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .hazeSource(state = hazeState)
+                .background(
+                    Brush.verticalGradient(
+                        listOf(
+                            SaharaSky.copy(alpha = if (isDark) 0.18f else 0.12f),
+                            MaterialTheme.colorScheme.background.copy(alpha = 0.8f),
+                            MaterialTheme.colorScheme.background,
+                        )
                     )
                 )
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(320.dp)
+                    .offset(x = (-90).dp, y = (-40).dp)
+                    .primaryBlobMotion(blobMotion)
+                    .background(Brush.radialGradient(listOf(SaharaSky.copy(alpha = 0.16f), Color.Transparent)))
             )
-    ) {
-        Box(
-            modifier = Modifier
-                .size(320.dp)
-                .offset(x = (-90).dp, y = (-40).dp)
-                .primaryBlobMotion(blobMotion)
-                .background(Brush.radialGradient(listOf(SaharaSky.copy(alpha = 0.16f), Color.Transparent)))
-        )
-        Box(
-            modifier = Modifier
-                .size(380.dp)
-                .align(Alignment.BottomEnd)
-                .offset(x = 120.dp, y = 60.dp)
-                .secondaryBlobMotion(blobMotion)
-                .background(Brush.radialGradient(listOf(SaharaStrongGreen.copy(alpha = 0.14f), Color.Transparent)))
-        )
+            Box(
+                modifier = Modifier
+                    .size(380.dp)
+                    .align(Alignment.BottomEnd)
+                    .offset(x = 120.dp, y = 60.dp)
+                    .secondaryBlobMotion(blobMotion)
+                    .background(Brush.radialGradient(listOf(SaharaStrongGreen.copy(alpha = 0.14f), Color.Transparent)))
+            )
+        }
 
         Scaffold(
             bottomBar = { BottomNav(navController = navController, hazeState = hazeState) },

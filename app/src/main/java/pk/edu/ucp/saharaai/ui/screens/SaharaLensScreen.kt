@@ -756,15 +756,6 @@ private fun ResultPane(
             )
         }
 
-        Spacer(Modifier.height(8.dp))
-        response.modelVersion?.let {
-            Text(
-                text = if (isEnglish) "Model: $it" else "Model: $it",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 4.dp),
-            )
-        }
     }
 }
 

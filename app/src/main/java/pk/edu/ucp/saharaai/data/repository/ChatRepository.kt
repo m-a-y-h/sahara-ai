@@ -1,6 +1,7 @@
 package pk.edu.ucp.saharaai.data.repository
 
 import com.google.firebase.Timestamp
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import pk.edu.ucp.saharaai.BuildConfig
 import pk.edu.ucp.saharaai.data.model.AiChatSession
@@ -187,6 +188,10 @@ object ChatRepository {
         val viaLiveModel: Boolean,
     )
 
+    class SaharaUnavailableException(
+        message: String = "Please check your internet connection and try again.",
+    ) : IllegalStateException(message)
+
     
     suspend fun askSahara(
         userText: String,
@@ -200,17 +205,14 @@ object ChatRepository {
         // for what is fundamentally an Android-talks-to-Gemini call, and
         // Firebase AI Logic is the industry-standard pattern: first-party
         // SDK, key off-device, no extra deploy surface.
-        val raw = runCatching {
-            GeminiChatService.reply(
-                userText = userText,
-                history = history,
-                priorSummaries = priorSummaries,
-                isEnglish = isEnglish,
-            )
-        }.getOrDefault("")
-        val rawReply = raw.trim()
+        val rawReply = askGeminiWithOneRetry(
+            userText = userText,
+            history = history,
+            priorSummaries = priorSummaries,
+            isEnglish = isEnglish,
+        ).trim()
         if (rawReply.isBlank()) {
-            return fallback(userText, isEnglish, messageId)
+            throw SaharaUnavailableException()
         }
 
         // Crisis / substance signalling moved from server-side response
@@ -218,15 +220,18 @@ object ChatRepository {
         // structured flags, just text. The inline crisis-card attachment
         // still fires correctly because ChatScreen reads
         // [SaharaChatTurnMetadata.triggerCounselor] and message_type below.
-        val substanceDetected = detectLocalSubstance(userText)
+        val specificSubstance = detectLocalSubstance(userText)
+        val substanceDetected = specificSubstance
+            ?: if (userText.hasGenericSubstanceConcern()) "Substance use concern" else null
         val isCrisis = detectLocalCrisis(userText)
         val shouldAttachSupport = isCrisis || substanceDetected != null
         val reply = refineLiveReply(
             reply = rawReply,
-            substanceDetected = substanceDetected,
+            substanceDetected = specificSubstance,
             userIntent = if (substanceDetected != null) "substance_use_support" else null,
             isEnglish = isEnglish,
         ).normalizeSaharaSelfGender(isEnglish)
+            .compactSaharaReply(isEnglish)
         return SaharaReply(
             text = reply,
             metadata = SaharaChatTurnMetadata(
@@ -253,29 +258,25 @@ object ChatRepository {
         )
     }
 
-    private fun fallback(userText: String, isEnglish: Boolean, messageId: String): SaharaReply {
-        val localSubstance = detectLocalSubstance(userText)
-        val reply = localSubstance?.let { localSubstanceReply(it, isEnglish) }
-            ?: buildLocalAIReply(userText, isEnglish)
-        return SaharaReply(
-            text = reply,
-            metadata = SaharaChatTurnMetadata(
-                messageId = messageId,
-                messageType = if (localSubstance != null) SaharaMessageType.CRISIS_CARD else SaharaMessageType.TEXT,
-                riskLevel = if (localSubstance != null) SaharaRiskLevel.MEDIUM else SaharaRiskLevel.UNKNOWN,
-                triggerCounselor = localSubstance != null,
-                substanceDetected = localSubstance,
-                substancesDetected = localSubstance?.let { listOf(it) }.orEmpty(),
-                actionDestination = if (localSubstance != null) "emergency" else null,
-                quickReplies = if (localSubstance != null) {
-                    if (isEnglish) listOf("Talk to counselor", "Safety check", "Open journal")
-                    else listOf("Counselor se baat", "Safety check", "Journal kholo")
-                } else emptyList(),
-                safetyFlags = listOf("sahara_ai_unreachable"),
-                userIntent = if (localSubstance != null) "substance_use_support" else null,
-            ),
-            viaLiveModel = false,
-        )
+    private suspend fun askGeminiWithOneRetry(
+        userText: String,
+        history: List<SaharaAiClient.HistoryTurn>,
+        priorSummaries: List<String>,
+        isEnglish: Boolean,
+    ): String {
+        repeat(2) { attempt ->
+            val reply = runCatching {
+                GeminiChatService.reply(
+                    userText = userText,
+                    history = history,
+                    priorSummaries = priorSummaries,
+                    isEnglish = isEnglish,
+                )
+            }.getOrDefault("").trim()
+            if (reply.isNotBlank()) return reply
+            if (attempt == 0) delay(450)
+        }
+        return ""
     }
 
     private fun refineLiveReply(
@@ -311,6 +312,45 @@ object ChatRepository {
                 Regex("\\bnahi\\s+de\\s+sakti\\b", RegexOption.IGNORE_CASE),
                 "nahi de sakta",
             )
+    }
+
+    private fun String.compactSaharaReply(isEnglish: Boolean): String {
+        var text = trim()
+            .replace(Regex("\\s+"), " ")
+            .removeLeadingFiller(isEnglish)
+            .trim()
+        if (text.isBlank()) return trim()
+
+        val sentences = text.split(Regex("(?<=[.!?])\\s+"))
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+        if (sentences.size > 2) {
+            text = sentences.take(2).joinToString(" ")
+        }
+        if (text.length <= 360) return text
+
+        val compact = text.take(360).trimEnd()
+        val lastStop = listOf(
+            compact.lastIndexOf('.'),
+            compact.lastIndexOf('!'),
+            compact.lastIndexOf('?'),
+        ).maxOrNull() ?: -1
+        return if (lastStop >= 120) compact.take(lastStop + 1) else "$compact..."
+    }
+
+    private fun String.removeLeadingFiller(isEnglish: Boolean): String {
+        val pattern = if (isEnglish) {
+            Regex(
+                "^\\s*(I understand[^.!?]*[.!?]\\s*|I hear you[^.!?]*[.!?]\\s*|I'm sorry[^.!?]*[.!?]\\s*|I am sorry[^.!?]*[.!?]\\s*)",
+                RegexOption.IGNORE_CASE,
+            )
+        } else {
+            Regex(
+                "^\\s*(Main samajh raha hoon[^.!?]*[.!?]\\s*|Main sun raha hoon[^.!?]*[.!?]\\s*|Main aapki baat sun raha hoon[^.!?]*[.!?]\\s*|Main aapke saath hoon[^.!?]*[.!?]\\s*|Mujhe afsos hai[^.!?]*[.!?]\\s*)",
+                RegexOption.IGNORE_CASE,
+            )
+        }
+        return replace(pattern, "")
     }
 
     /**
@@ -358,56 +398,19 @@ object ChatRepository {
             else -> substance
         }
         return if (isEnglish) {
-            "I am reading this as $label. Tell me when you took it and what your body feels now. If breathing, chest pain, fainting, seizure, or blue lips are involved, open emergency immediately."
+            "This sounds like $label. When did you last take it, and what is happening in your body now? If breathing, chest pain, fainting, seizure, or blue lips are involved, open emergency."
         } else {
-            "Main isay $label samajh raha hoon. Kab li/ki, aur ab body mein kya feel ho raha hai? Saans, chest pain, fainting, fit, ya neelay hont ka masla ho to emergency foran kholo."
+            "Yeh $label lag raha hai. Last kab li, aur ab body mein kya ho raha hai? Saans rukna, seenay mein dard, behoshi, fit, ya neelay hont ho to emergency kholo."
         }
     }
 
-    
-    fun buildLocalAIReply(userText: String, isEnglish: Boolean): String {
-        val lower = userText.lowercase()
-        return when {
-            lower.containsAny("relapse", "cravings", "nasha", "overdose", "saans", "behosh") ->
-                if (isEnglish)
-                    "I'm here. Cravings can peak and pass. If breathing, fainting, or overdose is involved, please use the Emergency button or call 1122/115 right now."
-                else
-                    "Main yahin hoon. Cravings aati hain par guzar bhi jati hain. Agar saans, fainting, ya overdose ka masla hai to abhi Emergency button dabayein ya 1122/115 call karein."
-
-            lower.containsAny("anxious", "panic", "ghabrahat", "nervous") ->
-                if (isEnglish)
-                    "Anxiety can feel overwhelming. Let's do a slow breath: in 4 seconds, out 6 seconds, five times. The Meditation tab has guided exercises too."
-                else
-                    "Ghabrahat bohot ho sakti hai. Aayen ek saans ki mashq karte hain: 4 seconds andar, 6 seconds bahar, 5 dafa. Meditation tab mein guided mashqein bhi hain."
-
-            lower.containsAny("sad", "depressed", "udas", "cry", "hopeless") ->
-                if (isEnglish)
-                    "I'm sorry you're feeling this way. Writing one line in your Journal can help unload some of it — would you like to try?"
-                else
-                    "Mujhe afsos hai aap udas hain. Journal mein ek line likhna boj kam kar sakta hai — try karein?"
-
-            lower.containsAny("help", "emergency", "madad", "sos") ->
-                if (isEnglish)
-                    "I'm here. If this is urgent, please tap the Emergency button or call 1122/115."
-                else
-                    "Main yahan hoon. Agar urgency hai, Emergency button dabayein ya 1122/115 call karein."
-
-            else -> {
-                val en = listOf(
-                    "I'm listening. Tell me more about what's going on today.",
-                    "That sounds heavy. What's the hardest part right now?",
-                    "I'm here with you. What would help you feel even a little safer?",
-                    "Taking it one moment at a time is okay. What just happened?",
-                )
-                val ur = listOf(
-                    "Main sun raha hoon. Aaj kya ho raha hai, aur batayein.",
-                    "Ye bhari lag raha hai. Abhi sab se mushkil kya hai?",
-                    "Main aapke saath hoon. Thori si bhi safety kis cheez se aayegi?",
-                    "Ek lamhe par ek lamha — theek hai. Abhi kya hua?",
-                )
-                if (isEnglish) en.random() else ur.random()
-            }
-        }
+    private fun String.hasGenericSubstanceConcern(): Boolean {
+        val clean = lowercase()
+        return clean.containsAny(
+            "nashay ki", "nashe ki", "nasha ki", "nashay", "nashe", "nasha",
+            "latt", "lat lag", "lat lagi", "lat lag gayi", "aadat lag",
+            "addiction", "addicted", "craving", "cravings",
+        )
     }
 
     private fun String.containsAny(vararg keywords: String) = keywords.any { this.contains(it) }
