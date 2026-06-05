@@ -16,11 +16,9 @@ Pre-cache weights:
 Set the Android ``local.properties`` ``sahara.voice.analyze.url`` to the URL
 Modal prints.
 
-HuBERT-base is ~95M params (~190 MB) so the A10G is overkill for inference
-latency but cheap enough that we get the same scale-to-zero behaviour the
-chat endpoint enjoys. If the production traffic is tiny, swap ``gpu="A10G"``
-for ``gpu="T4"`` (or remove ``gpu`` entirely — CPU works for HuBERT-base at
-~3 s per request).
+XLS-R-300M is a better match for the current Urdu checkpoint than English-only
+HuBERT-base. The A10G keeps cold inference tolerable while preserving Modal
+scale-to-zero behaviour.
 """
 
 # NB: deliberately NO `from __future__ import annotations` here.
@@ -90,7 +88,7 @@ app = modal.App(name=APP_NAME, image=image)
     secrets=[modal.Secret.from_name("huggingface-secret", required_keys=["HF_TOKEN"])],
 )
 class SaharaVoiceService:
-    """Long-lived class so HuBERT is loaded once per container, not per request."""
+    """Long-lived class so the model is loaded once per container."""
 
     @modal.enter()
     def load_model(self) -> None:
@@ -137,18 +135,26 @@ def fastapi_app():
             raise HTTPException(status_code=413, detail="Audio too large.")
         if not data:
             raise HTTPException(status_code=400, detail="Empty upload.")
-        return service.analyze.remote(data)
+        return await service.analyze.remote.aio(data)
 
     return api
 
 
 @app.function(image=image, timeout=TIMEOUT_SECONDS, volumes={HF_CACHE_PATH: weights_volume})
 def prewarm_weights() -> dict:
-    """Pre-download HuBERT weights into the persistent volume."""
+    """Pre-download speech-backbone weights into the persistent volume."""
     from huggingface_hub import snapshot_download
-    from sahara_voice.config import DEFAULT_MODEL_CONFIG
+    from sahara_voice.config import DEFAULT_MODEL_CONFIG, load_voice_model_config
 
-    backbone = os.environ.get("SAHARA_VOICE_BACKBONE", DEFAULT_MODEL_CONFIG.backbone)
+    backbone = os.environ.get("SAHARA_VOICE_BACKBONE")
+    model_config_path = os.environ.get("SAHARA_VOICE_MODEL_CONFIG")
+    if not backbone and model_config_path and os.path.exists(model_config_path):
+        import json
+        with open(model_config_path, "r", encoding="utf-8") as fh:
+            model_config = load_voice_model_config(json.load(fh), DEFAULT_MODEL_CONFIG)
+        backbone = model_config.backbone
+    if not backbone:
+        backbone = DEFAULT_MODEL_CONFIG.backbone
     snapshot_download(backbone, cache_dir=HF_CACHE_PATH)
     weights_volume.commit()
     return {"prewarmed": backbone}

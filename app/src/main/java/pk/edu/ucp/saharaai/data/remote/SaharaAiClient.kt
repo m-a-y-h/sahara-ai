@@ -17,7 +17,7 @@ object SaharaAiClient {
 
     private val gson = Gson()
 
-    /** One turn of conversation history sent to Qalb. */
+    /** One turn of conversation history used by Gemini chat and legacy service clients. */
     data class HistoryTurn(
         @SerializedName("role")         val role: String,         // "user" | "assistant"
         @SerializedName("content")      val content: String,
@@ -89,9 +89,8 @@ object SaharaAiClient {
     }
 
     /**
-     * Asks the same Qalb endpoint to compress a 16-message batch into a
-     * short paragraph. The endpoint is the same Modal-deployed FastAPI
-     * service, just with the `/v1/chat` path swapped for `/v1/summarize`.
+     * Legacy service summarization endpoint. Live app summarization now uses
+     * [pk.edu.ucp.saharaai.data.repository.GeminiChatService] directly.
      */
     suspend fun postSummarize(
         chatEndpoint: String,

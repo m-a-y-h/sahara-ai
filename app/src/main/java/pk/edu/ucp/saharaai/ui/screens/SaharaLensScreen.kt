@@ -2,6 +2,9 @@ package pk.edu.ucp.saharaai.ui.screens
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.hardware.camera2.CaptureRequest
+import androidx.camera.camera2.interop.Camera2Interop
+import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
@@ -343,8 +346,9 @@ private fun CapturePane(
 
     val imageCapture = remember {
         ImageCapture.Builder()
-            .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+            .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
             .setTargetRotation(android.view.Surface.ROTATION_0)
+            .applyUnfilteredCaptureOptions()
             .build()
     }
 
@@ -406,10 +410,14 @@ private fun CapturePane(
                     runCatching {
                         val cameraProvider = cameraProviderFuture.get()
                         cameraProvider.unbindAll()
-                        val preview = Preview.Builder().build().apply {
-                            surfaceProvider = previewView.surfaceProvider
-                        }
+                        val preview = Preview.Builder()
+                            .applyUnfilteredCaptureOptions()
+                            .build()
+                            .apply {
+                                surfaceProvider = previewView.surfaceProvider
+                            }
                         val analysis = ImageAnalysis.Builder()
+                            .applyUnfilteredCaptureOptions()
                             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                             .setImageQueueDepth(3)
                             .build()
@@ -499,16 +507,7 @@ private fun CapturePane(
                     trackColor = Color.White.copy(alpha = 0.25f),
                 )
             }
-            Spacer(Modifier.height(6.dp))
-            Text(
-                text = if (isEnglish) {
-                    "Anti-spoof still checks real face, neutral expression, and light"
-                } else {
-                    "Anti-spoof ab bhi asli chehra, neutral expression, aur roshni check karta hai"
-                },
-                color = Color.White.copy(alpha = 0.75f),
-                style = MaterialTheme.typography.bodySmall,
-            )
+            Spacer(Modifier.height(24.dp))
         }
     }
 }
@@ -884,6 +883,33 @@ private fun colorForScreeningLabel(label: String): Color = when (label.lowercase
     "sadness" -> SaharaSky
     "fear"    -> SaharaCoral
     else      -> SaharaWarning
+}
+
+@androidx.annotation.OptIn(ExperimentalCamera2Interop::class)
+private fun ImageCapture.Builder.applyUnfilteredCaptureOptions(): ImageCapture.Builder = apply {
+    Camera2Interop.Extender(this)
+        .setCaptureRequestOption(
+            CaptureRequest.CONTROL_EFFECT_MODE,
+            CaptureRequest.CONTROL_EFFECT_MODE_OFF,
+        )
+}
+
+@androidx.annotation.OptIn(ExperimentalCamera2Interop::class)
+private fun Preview.Builder.applyUnfilteredCaptureOptions(): Preview.Builder = apply {
+    Camera2Interop.Extender(this)
+        .setCaptureRequestOption(
+            CaptureRequest.CONTROL_EFFECT_MODE,
+            CaptureRequest.CONTROL_EFFECT_MODE_OFF,
+        )
+}
+
+@androidx.annotation.OptIn(ExperimentalCamera2Interop::class)
+private fun ImageAnalysis.Builder.applyUnfilteredCaptureOptions(): ImageAnalysis.Builder = apply {
+    Camera2Interop.Extender(this)
+        .setCaptureRequestOption(
+            CaptureRequest.CONTROL_EFFECT_MODE,
+            CaptureRequest.CONTROL_EFFECT_MODE_OFF,
+        )
 }
 
 

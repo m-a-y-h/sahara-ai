@@ -7,6 +7,7 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.media.AudioManager
 import android.media.ToneGenerator
+import android.graphics.drawable.Animatable
 import android.net.Uri
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
@@ -49,6 +50,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -59,6 +61,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import dev.chrisbanes.haze.HazeInputScale
@@ -91,9 +94,10 @@ import java.text.SimpleDateFormat
 import java.util.*
 import android.os.VibratorManager
 import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
+import android.widget.ImageView
 import kotlin.math.abs
+import pk.edu.ucp.saharaai.R
 
 enum class MessageType { TEXT, QUICK_REPLIES, CRISIS_CARD, EXERCISE_CARD, VOICE_NOTE }
 data class ChatMessage(
@@ -113,7 +117,8 @@ object MockAIEngine {
     fun processInput(input: String, isEnglish: Boolean): ChatMessage {
         val lowerInput = input.lowercase()
         return when {
-            lowerInput.contains("relapse") || lowerInput.contains("cravings") || lowerInput.contains("nasha") -> {
+            lowerInput.contains("relapse") || lowerInput.contains("cravings") || lowerInput.contains("nasha") ||
+                lowerInput.contains("charas") || lowerInput.contains("ganja") || lowerInput.contains("weed") -> {
                 ChatMessage(
                     text = if (isEnglish) "I hear you. Cravings are intense, but they are temporary. Please use these immediate resources." else "Main samajh raha hoon. Cravings aati hain, par ye waqti hain. Fauri tor par in resources ka istemal karein.",
                     isBot = true,
@@ -303,6 +308,9 @@ private fun ChatConversationScreen(
     val isDark = isSystemInDarkTheme()
     val hazeState = remember { HazeState() }
     val focusManager = LocalFocusManager.current
+    val density = LocalDensity.current
+    val layoutDirection = LocalLayoutDirection.current
+    val isKeyboardVisible = WindowInsets.ime.getBottom(density) > 0
     val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
     val microphonePermissionRequester = rememberAppPermissionRequester(
@@ -565,54 +573,61 @@ private fun ChatConversationScreen(
             navController.navigate("counselor-call/$counselorId/$nameArg/$mode/$target")
         }
     }
-    Box(modifier = Modifier.fillMaxSize()) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .hazeSource(state = hazeState)
-                .background(
-                    Brush.verticalGradient(
-                        listOf(
-                            SaharaStrongGreen.copy(alpha = if (isDark) 0.15f else 0.1f),
-                            MaterialTheme.colorScheme.background.copy(alpha = 0.8f),
-                            MaterialTheme.colorScheme.background
-                        )
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .hazeSource(state = hazeState)
+            .background(
+                Brush.verticalGradient(
+                    listOf(
+                        SaharaStrongGreen.copy(alpha = if (isDark) 0.15f else 0.1f),
+                        MaterialTheme.colorScheme.background.copy(alpha = 0.8f),
+                        MaterialTheme.colorScheme.background
                     )
                 )
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(350.dp)
-                    .offset(x = (-80).dp, y = (-50).dp)
-                    .primaryBlobMotion(blobMotion)
-                    .background(Brush.radialGradient(listOf(SaharaStrongGreen.copy(alpha = 0.15f), Color.Transparent)))
             )
-            Box(
-                modifier = Modifier
-                    .size(400.dp)
-                    .align(Alignment.BottomEnd)
-                    .offset(x = 100.dp, y = 50.dp)
-                    .secondaryBlobMotion(blobMotion)
-                    .background(Brush.radialGradient(listOf(SaharaSky.copy(alpha = 0.15f), Color.Transparent)))
-            )
-        }
+    ) {
+        Box(
+            modifier = Modifier
+                .size(350.dp)
+                .offset(x = (-80).dp, y = (-50).dp)
+                .primaryBlobMotion(blobMotion)
+                .background(Brush.radialGradient(listOf(SaharaStrongGreen.copy(alpha = 0.15f), Color.Transparent)))
+        )
+        Box(
+            modifier = Modifier
+                .size(400.dp)
+                .align(Alignment.BottomEnd)
+                .offset(x = 100.dp, y = 50.dp)
+                .secondaryBlobMotion(blobMotion)
+                .background(Brush.radialGradient(listOf(SaharaSky.copy(alpha = 0.15f), Color.Transparent)))
+        )
 
         Scaffold(
-        bottomBar = { BottomNav(navController = navController, hazeState = hazeState) },
-        containerColor = Color.Transparent,
-        contentWindowInsets = WindowInsets(0, 0, 0, 0)
-    ) { innerPadding ->
-        Box(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
-            Column(
+            bottomBar = { BottomNav(navController = navController, hazeState = hazeState) },
+            containerColor = Color.Transparent,
+            contentWindowInsets = WindowInsets(0, 0, 0, 0)
+        ) { innerPadding ->
+            Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .imePadding()
-                    .pointerInput(Unit) {
-                        detectDragGestures { _, dragAmount ->
-                            if (dragAmount.y > 20) focusManager.clearFocus()
-                        }
-                    }
+                    .padding(
+                        start = innerPadding.calculateStartPadding(layoutDirection),
+                        top = innerPadding.calculateTopPadding(),
+                        end = innerPadding.calculateEndPadding(layoutDirection),
+                        bottom = if (isKeyboardVisible) 0.dp else innerPadding.calculateBottomPadding(),
+                    )
             ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .imePadding()
+                        .pointerInput(Unit) {
+                            detectDragGestures { _, dragAmount ->
+                                if (dragAmount.y > 20) focusManager.clearFocus()
+                            }
+                        }
+                ) {
                 ChatTopBar(
                     onNavigateBack = onNavigateBack,
                     hazeState = hazeState,
@@ -654,8 +669,8 @@ private fun ChatConversationScreen(
                     LazyColumn(
                         state = listState,
                         modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(vertical = 12.dp),
-                        verticalArrangement = Arrangement.spacedBy(3.dp)
+                        contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 14.dp, bottom = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         items(displayMessages) { message ->
                             val saharaMeta = aiMetadata[message.id]
@@ -682,12 +697,9 @@ private fun ChatConversationScreen(
                                         message = message,
                                         isDark = isDark,
                                         isEnglish = isEnglish,
-                                        // Crisis attachment always sends the user
-                                        // to the counselors screen — the AI is
-                                        // saying "talk to a real person," not
-                                        // "open the toolkit." actionDestination
-                                        // from the model is ignored for this
-                                        // variant.
+                                        onOpenEmergency = {
+                                            navController.navigate("emergency") { launchSingleTop = true }
+                                        },
                                         onOpenCounselors = {
                                             navController.navigate("counselors") { launchSingleTop = true }
                                         },
@@ -789,14 +801,12 @@ private fun ChatConversationScreen(
                     isEnglish = isEnglish,
                     onHideIdentity = { chatViewModel.setIdentityVisible(false) },
                 )
-                Spacer(modifier = Modifier.height(innerPadding.calculateBottomPadding()))
             }
         }
         }
         TwoFingerGestureHintOverlay(
             visible = showFrameHint,
             isAiMode = isAiMode,
-            isEnglish = isEnglish,
         )
         if (showHistorySheet) {
             if (isAiMode) {
@@ -894,41 +904,40 @@ private fun CounselorFrameOverview(
         }
     }
 
-    Box(modifier = Modifier.fillMaxSize()) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .hazeSource(state = hazeState)
-                .background(
-                    Brush.verticalGradient(
-                        listOf(
-                            SaharaSky.copy(alpha = if (isDark) 0.18f else 0.12f),
-                            MaterialTheme.colorScheme.background.copy(alpha = 0.8f),
-                            MaterialTheme.colorScheme.background,
-                        )
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .hazeSource(state = hazeState)
+            .background(
+                Brush.verticalGradient(
+                    listOf(
+                        SaharaSky.copy(alpha = if (isDark) 0.18f else 0.12f),
+                        MaterialTheme.colorScheme.background.copy(alpha = 0.8f),
+                        MaterialTheme.colorScheme.background,
                     )
                 )
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(320.dp)
-                    .offset(x = (-90).dp, y = (-40).dp)
-                    .primaryBlobMotion(blobMotion)
-                    .background(Brush.radialGradient(listOf(SaharaSky.copy(alpha = 0.16f), Color.Transparent)))
             )
-            Box(
-                modifier = Modifier
-                    .size(380.dp)
-                    .align(Alignment.BottomEnd)
-                    .offset(x = 120.dp, y = 60.dp)
-                    .secondaryBlobMotion(blobMotion)
-                    .background(Brush.radialGradient(listOf(SaharaStrongGreen.copy(alpha = 0.14f), Color.Transparent)))
-            )
-        }
+    ) {
+        Box(
+            modifier = Modifier
+                .size(320.dp)
+                .offset(x = (-90).dp, y = (-40).dp)
+                .primaryBlobMotion(blobMotion)
+                .background(Brush.radialGradient(listOf(SaharaSky.copy(alpha = 0.16f), Color.Transparent)))
+        )
+        Box(
+            modifier = Modifier
+                .size(380.dp)
+                .align(Alignment.BottomEnd)
+                .offset(x = 120.dp, y = 60.dp)
+                .secondaryBlobMotion(blobMotion)
+                .background(Brush.radialGradient(listOf(SaharaStrongGreen.copy(alpha = 0.14f), Color.Transparent)))
+        )
 
         Scaffold(
             bottomBar = { BottomNav(navController = navController, hazeState = hazeState) },
             containerColor = Color.Transparent,
+            contentWindowInsets = WindowInsets(0, 0, 0, 0),
         ) { innerPadding ->
             Column(
                 modifier = Modifier
@@ -936,8 +945,13 @@ private fun CounselorFrameOverview(
                     .padding(innerPadding)
                     .padding(horizontal = 20.dp)
             ) {
-                Spacer(modifier = Modifier.height(18.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .statusBarsPadding()
+                        .padding(top = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     HazeBackButton(onClick = onNavigateBack, hazeState = hazeState)
                     Spacer(modifier = Modifier.width(14.dp))
                     Column {
@@ -948,7 +962,7 @@ private fun CounselorFrameOverview(
                             color = SaharaStrongGreen,
                         )
                         Text(
-                            text = if (isEnglish) "Swipe left with two fingers to reach this frame" else "Is frame ke liye 2 ungliyon se left swipe karein",
+                            text = if (isEnglish) "Swipe right with two fingers to return to SAHARA AI" else "SAHARA AI par wapas jane ke liye 2 ungliyon se right swipe karein",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -1083,7 +1097,6 @@ private fun CounselorFrameOverview(
         TwoFingerGestureHintOverlay(
             visible = showFrameHint,
             isAiMode = false,
-            isEnglish = isEnglish,
         )
     }
 }
@@ -1154,8 +1167,8 @@ private fun ChatNotice(
             textAlign = TextAlign.Center,
             modifier = Modifier
                 .fillMaxWidth()
-                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.9f))
-                .padding(horizontal = 16.dp, vertical = 6.dp),
+                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.72f))
+                .padding(horizontal = 16.dp, vertical = 5.dp),
         )
         isCounselorUserSide && !identityVisible -> Text(
             text = if (isEnglish)
@@ -1167,8 +1180,8 @@ private fun ChatNotice(
             textAlign = TextAlign.Center,
             modifier = Modifier
                 .fillMaxWidth()
-                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.9f))
-                .padding(horizontal = 16.dp, vertical = 6.dp),
+                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.72f))
+                .padding(horizontal = 16.dp, vertical = 5.dp),
         )
         isCounselorUserSide -> Text(
             text = buildAnnotatedString {
@@ -1183,9 +1196,9 @@ private fun ChatNotice(
             textAlign = TextAlign.Center,
             modifier = Modifier
                 .fillMaxWidth()
-                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.9f))
+                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.72f))
                 .clickable { onHideIdentity() }
-                .padding(horizontal = 16.dp, vertical = 6.dp),
+                .padding(horizontal = 16.dp, vertical = 5.dp),
         )
     }
 }
@@ -1194,13 +1207,12 @@ private fun ChatNotice(
 private fun TwoFingerGestureHintOverlay(
     visible: Boolean,
     isAiMode: Boolean,
-    isEnglish: Boolean,
 ) {
     var show by remember(visible, isAiMode) { mutableStateOf(visible) }
     LaunchedEffect(visible, isAiMode) {
         if (visible) {
             show = true
-            delay(2600)
+            delay(4200)
             show = false
         }
     }
@@ -1210,88 +1222,33 @@ private fun TwoFingerGestureHintOverlay(
     ) {
         AnimatedVisibility(
             visible = show,
-            enter = fadeIn() + scaleIn(initialScale = 0.96f),
-            exit = fadeOut() + scaleOut(targetScale = 0.96f),
+            enter = fadeIn(),
+            exit = fadeOut(),
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 18.dp),
+                .fillMaxWidth(0.94f)
+                .aspectRatio(1f)
+                .offset(y = 88.dp),
         ) {
-            // Use a TouchApp hand icon for a recognisable gesture cue, then
-            // drive its position with a per-frame layout-phase offset lambda
-            // (not the value-capturing Modifier.offset overload, which only
-            // sees the value at composition time and made the dots look
-            // static). Alpha also pulses so the eye can't miss the motion.
-            val transition = rememberInfiniteTransition(label = "twoFingerHint")
-            val travel = 56f
-            val start = if (isAiMode) travel else -travel
-            val end = -start
-            val offsetX by transition.animateFloat(
-                initialValue = start,
-                targetValue = end,
-                animationSpec = infiniteRepeatable(
-                    animation = tween(1100, easing = FastOutSlowInEasing),
-                    repeatMode = RepeatMode.Reverse,
-                ),
-                label = "twoFingerHintOffset",
-            )
-            val pulseAlpha by transition.animateFloat(
-                initialValue = 0.55f,
-                targetValue = 1f,
-                animationSpec = infiniteRepeatable(
-                    animation = tween(1100, easing = FastOutSlowInEasing),
-                    repeatMode = RepeatMode.Reverse,
-                ),
-                label = "twoFingerHintAlpha",
-            )
-            val density = LocalDensity.current
-            Surface(
-                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
-                shape = RoundedCornerShape(18.dp),
-                tonalElevation = 4.dp,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .width(96.dp)
-                            .height(38.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.TouchApp,
-                            contentDescription = null,
-                            tint = SaharaStrongGreen,
-                            modifier = Modifier
-                                .size(28.dp)
-                                // Layout-phase offset = recomputed every
-                                // frame from the animated state, so the
-                                // hand actually slides.
-                                .offset {
-                                    IntOffset(
-                                        x = with(density) { offsetX.dp.roundToPx() },
-                                        y = 0,
-                                    )
-                                }
-                                .graphicsLayer { alpha = pulseAlpha },
-                        )
+            val drawableRes = if (isAiMode) R.drawable.swipe_left else R.drawable.swipe_right
+            AndroidView(
+                modifier = Modifier.fillMaxSize(),
+                factory = { context ->
+                    ImageView(context).apply {
+                        alpha = 0.2f
+                        scaleType = ImageView.ScaleType.FIT_CENTER
+                        adjustViewBounds = true
+                        importantForAccessibility = ImageView.IMPORTANT_FOR_ACCESSIBILITY_NO
                     }
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = if (isAiMode) {
-                            if (isEnglish) "Use two fingers and swipe left for counselor chats."
-                            else "2 ungliyon se left swipe karein counselor chats ke liye."
-                        } else {
-                            if (isEnglish) "Use two fingers and swipe right for SAHARA AI."
-                            else "2 ungliyon se right swipe karein SAHARA AI ke liye."
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
+                },
+                update = { imageView ->
+                    if (imageView.tag != drawableRes) {
+                        imageView.setImageResource(drawableRes)
+                        imageView.tag = drawableRes
+                    }
+                    imageView.alpha = 0.2f
+                    (imageView.drawable as? Animatable)?.start()
                 }
-            }
+            )
         }
     }
 }
@@ -1634,10 +1591,25 @@ fun ChatTopBar(
     onToggleIdentity: () -> Unit,
 ) {
     var showMenu by remember { mutableStateOf(false) }
-    Surface(
-        color = MaterialTheme.colorScheme.surface.copy(alpha = if (isDark) 0.6f else 0.85f),
-        shape = RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp),
-        modifier = Modifier.fillMaxWidth()
+    val shape = RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp)
+    val glassStyle = SaharaHazeMaterials.defaultGlass(isDark)
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .hazeEffect(state = hazeState) {
+                inputScale = HazeInputScale.Auto
+                blurEffect { style = glassStyle }
+            }
+            .background(
+                if (isDark) Color(0xFF101E25).copy(alpha = 0.58f)
+                else Color.White.copy(alpha = 0.62f)
+            )
+            .border(
+                width = 1.dp,
+                color = if (isDark) Color.White.copy(alpha = 0.14f) else Color.White.copy(alpha = 0.55f),
+                shape = shape,
+            )
     ) {
         Row(
             modifier = Modifier
@@ -1772,94 +1744,122 @@ fun ChatBubbleTextWithCrisisInline(
     message: ChatMessage,
     isDark: Boolean,
     isEnglish: Boolean,
+    onOpenEmergency: () -> Unit,
     onOpenCounselors: () -> Unit,
 ) {
-    val shape = RoundedCornerShape(topStart = 4.dp, topEnd = 16.dp, bottomStart = 16.dp, bottomEnd = 16.dp)
-    val bgColor = if (isDark) Color(0xFF1F2C34) else Color.White
+    val shape = RoundedCornerShape(topStart = 6.dp, topEnd = 20.dp, bottomStart = 20.dp, bottomEnd = 20.dp)
+    val bgColor = if (isDark) Color(0xFF17242D).copy(alpha = 0.94f) else Color.White.copy(alpha = 0.94f)
     val textColor = if (isDark) Color.White else Color(0xFF111111)
-    val timeColor = if (isDark) Color.White.copy(alpha = 0.65f) else Color(0xFF8696A0)
+    val timeColor = if (isDark) Color.White.copy(alpha = 0.72f) else Color(0xFF65727B)
     val dividerColor = if (isDark) Color.White.copy(alpha = 0.10f) else Color.Black.copy(alpha = 0.08f)
 
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 12.dp),
+        modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.Start,
     ) {
-        Column(
+        Surface(
             modifier = Modifier
-                .widthIn(min = 80.dp, max = 280.dp)
-                .clip(shape)
-                .background(bgColor)
-                .padding(start = 10.dp, end = 10.dp, top = 8.dp, bottom = 8.dp),
+                .widthIn(min = 88.dp, max = 320.dp),
+            shape = shape,
+            color = bgColor,
+            tonalElevation = 2.dp,
+            border = BorderStroke(1.dp, if (isDark) Color.White.copy(0.08f) else Color.White.copy(0.55f)),
         ) {
-            Text(
-                text = message.text,
-                color = textColor,
-                fontSize = 15.sp,
-                lineHeight = 20.sp,
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(1.dp)
-                    .background(dividerColor),
-            )
-            Spacer(modifier = Modifier.height(10.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    Icons.Default.Warning,
-                    contentDescription = null,
-                    tint = SaharaCoral,
-                    modifier = Modifier.size(18.dp),
-                )
-                Spacer(modifier = Modifier.width(6.dp))
+            Column(Modifier.padding(start = 12.dp, end = 12.dp, top = 10.dp, bottom = 8.dp)) {
                 Text(
-                    if (isEnglish) "Talk to a counselor" else "Counselor se baat karein",
-                    fontWeight = FontWeight.Bold,
-                    color = SaharaCoral,
-                    style = MaterialTheme.typography.labelLarge,
+                    text = message.text,
+                    color = textColor,
+                    fontSize = 15.sp,
+                    lineHeight = 21.sp,
                 )
-            }
-            Spacer(modifier = Modifier.height(6.dp))
-            Text(
-                if (isEnglish)
-                    "I can connect you with a verified Sahara counselor right now."
-                else
-                    "Main aapko abhi ek verified Sahara counselor se mila sakta hoon.",
-                style = MaterialTheme.typography.bodySmall,
-                color = textColor.copy(alpha = 0.75f),
-            )
-            Spacer(modifier = Modifier.height(10.dp))
-            Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = SaharaStrongGreen,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                    ) { onOpenCounselors() },
-            ) {
-                Text(
-                    text = if (isEnglish) "Open Counselors" else "Counselors Kholein",
-                    color = Color.White,
-                    fontWeight = FontWeight.Bold,
-                    style = MaterialTheme.typography.titleSmall,
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                Spacer(modifier = Modifier.height(10.dp))
+                Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(vertical = 10.dp),
+                        .height(1.dp)
+                        .background(dividerColor),
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        Icons.Default.Warning,
+                        contentDescription = null,
+                        tint = SaharaCoral,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        if (isEnglish) "Talk to a counselor" else "Counselor se baat karein",
+                        fontWeight = FontWeight.Bold,
+                        color = SaharaCoral,
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                }
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    if (isEnglish)
+                        "I can connect you with a verified Sahara counselor right now."
+                    else
+                        "Main aapko abhi ek verified Sahara counselor se mila sakta hoon.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = textColor.copy(alpha = 0.78f),
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = SaharaCoral,
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null,
+                            ) { onOpenEmergency() },
+                    ) {
+                        Text(
+                            text = if (isEnglish) "Emergency" else "Emergency",
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            style = MaterialTheme.typography.labelLarge,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 10.dp),
+                        )
+                    }
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = Color(0xFF0E8062),
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null,
+                            ) { onOpenCounselors() },
+                    ) {
+                        Text(
+                            text = if (isEnglish) "Counselor" else "Counselor",
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            style = MaterialTheme.typography.labelLarge,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 10.dp),
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = message.getFormattedTime(),
+                    color = timeColor,
+                    fontSize = 11.sp,
+                    modifier = Modifier.align(Alignment.End),
                 )
             }
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = message.getFormattedTime(),
-                color = timeColor,
-                fontSize = 11.sp,
-                modifier = Modifier.align(Alignment.End),
-            )
         }
     }
 }
@@ -1869,44 +1869,73 @@ fun ChatBubbleText(message: ChatMessage, isDark: Boolean) {
     val isReceived = message.isBot
 
     val shape = if (isReceived)
-        RoundedCornerShape(topStart = 4.dp, topEnd = 16.dp, bottomStart = 16.dp, bottomEnd = 16.dp)
+        RoundedCornerShape(topStart = 6.dp, topEnd = 20.dp, bottomStart = 20.dp, bottomEnd = 20.dp)
     else
-        RoundedCornerShape(topStart = 16.dp, topEnd = 4.dp, bottomStart = 16.dp, bottomEnd = 16.dp)
+        RoundedCornerShape(topStart = 20.dp, topEnd = 6.dp, bottomStart = 20.dp, bottomEnd = 20.dp)
 
     val bgColor = when {
-        isReceived && isDark  -> Color(0xFF1F2C34)
-        isReceived            -> Color.White
-        else                  -> SaharaStrongGreen
+        isReceived && isDark  -> Color(0xFF17242D).copy(alpha = 0.94f)
+        isReceived            -> Color.White.copy(alpha = 0.94f)
+        isDark                -> Color(0xFF0E6F58)
+        else                  -> Color(0xFF0F8467)
     }
-    val textColor = if (isReceived && !isDark) Color(0xFF111111) else Color.White
-    val timeColor = if (isReceived && !isDark) Color(0xFF8696A0) else Color.White.copy(alpha = 0.65f)
+    val textColor = if (isReceived && !isDark) Color(0xFF101820) else Color.White
+    val timeColor = when {
+        isReceived && !isDark -> Color(0xFF65727B)
+        isReceived            -> Color.White.copy(alpha = 0.72f)
+        else                  -> Color.White.copy(alpha = 0.90f)
+    }
+    val borderColor = when {
+        isReceived && !isDark -> Color.White.copy(alpha = 0.55f)
+        isReceived            -> Color.White.copy(alpha = 0.08f)
+        else                  -> Color.White.copy(alpha = 0.16f)
+    }
 
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 12.dp),
+        modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = if (isReceived) Arrangement.Start else Arrangement.End
     ) {
-        Column(
+        Surface(
             modifier = Modifier
-                .widthIn(min = 80.dp, max = 260.dp)
-                .clip(shape)
-                .background(bgColor)
-                .padding(start = 10.dp, end = 10.dp, top = 8.dp, bottom = 5.dp)
+                .widthIn(min = 56.dp, max = 320.dp),
+            shape = shape,
+            color = bgColor,
+            tonalElevation = if (isReceived) 2.dp else 3.dp,
+            shadowElevation = 1.dp,
+            border = BorderStroke(1.dp, borderColor),
         ) {
-            Text(
-                text      = message.text,
-                color     = textColor,
-                fontSize  = 15.sp,
-                lineHeight = 20.sp
-            )
-            Spacer(modifier = Modifier.height(2.dp))
-            Text(
-                text     = message.getFormattedTime(),
-                color    = timeColor,
-                fontSize = 11.sp,
-                modifier = Modifier.align(Alignment.End)
-            )
+            Column(
+                modifier = Modifier
+                    .padding(start = 12.dp, end = 12.dp, top = 10.dp, bottom = 7.dp)
+            ) {
+                Text(
+                    text      = message.text,
+                    color     = textColor,
+                    fontSize  = 15.sp,
+                    lineHeight = 21.sp
+                )
+                Spacer(modifier = Modifier.height(5.dp))
+                Row(
+                    modifier = Modifier.align(Alignment.End),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text     = message.getFormattedTime(),
+                        color    = timeColor,
+                        fontSize = 11.sp,
+                        fontWeight = if (isReceived) FontWeight.Normal else FontWeight.Medium,
+                    )
+                    if (!isReceived) {
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Icon(
+                            Icons.Default.DoneAll,
+                            contentDescription = null,
+                            tint = timeColor,
+                            modifier = Modifier.size(13.dp),
+                        )
+                    }
+                }
+            }
         }
     }
 }
@@ -2006,44 +2035,60 @@ fun ChatBubbleExerciseCard(isEnglish: Boolean, navController: NavController, des
 fun ChatBubbleVoice(message: ChatMessage, isDark: Boolean) {
     val isReceived = message.isBot
     val shape = if (isReceived)
-        RoundedCornerShape(topStart = 4.dp, topEnd = 16.dp, bottomStart = 16.dp, bottomEnd = 16.dp)
+        RoundedCornerShape(topStart = 6.dp, topEnd = 20.dp, bottomStart = 20.dp, bottomEnd = 20.dp)
     else
-        RoundedCornerShape(topStart = 16.dp, topEnd = 4.dp, bottomStart = 16.dp, bottomEnd = 16.dp)
+        RoundedCornerShape(topStart = 20.dp, topEnd = 6.dp, bottomStart = 20.dp, bottomEnd = 20.dp)
     val bgColor = when {
-        isReceived && isDark  -> Color(0xFF1F2C34)
-        isReceived            -> Color.White
-        else                  -> SaharaStrongGreen
+        isReceived && isDark  -> Color(0xFF17242D).copy(alpha = 0.94f)
+        isReceived            -> Color.White.copy(alpha = 0.94f)
+        isDark                -> Color(0xFF0E6F58)
+        else                  -> Color(0xFF0F8467)
     }
     val iconTint   = if (isReceived && !isDark) SaharaStrongGreen else Color.White
-    val waveColor  = if (isReceived && !isDark) Color(0xFF8696A0) else Color.White.copy(0.8f)
-    val timeColor  = if (isReceived && !isDark) Color(0xFF8696A0) else Color.White.copy(0.65f)
+    val waveColor  = if (isReceived && !isDark) Color(0xFF65727B) else Color.White.copy(0.84f)
+    val timeColor  = if (isReceived && !isDark) Color(0xFF65727B) else Color.White.copy(0.90f)
+    val borderColor = if (isReceived && !isDark) Color.White.copy(alpha = 0.55f) else Color.White.copy(alpha = 0.14f)
 
     Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+        modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = if (isReceived) Arrangement.Start else Arrangement.End
     ) {
-        Column(
+        Surface(
             modifier = Modifier
-                .widthIn(min = 160.dp, max = 240.dp)
-                .clip(shape)
-                .background(bgColor)
-                .padding(start = 10.dp, end = 10.dp, top = 8.dp, bottom = 5.dp)
+                .widthIn(min = 170.dp, max = 260.dp),
+            shape = shape,
+            color = bgColor,
+            tonalElevation = if (isReceived) 2.dp else 3.dp,
+            shadowElevation = 1.dp,
+            border = BorderStroke(1.dp, borderColor),
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.PlayArrow, contentDescription = "Play", tint = iconTint, modifier = Modifier.size(26.dp))
-                Spacer(modifier = Modifier.width(6.dp))
+            Column(Modifier.padding(start = 12.dp, end = 12.dp, top = 10.dp, bottom = 7.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.PlayArrow, contentDescription = "Play", tint = iconTint, modifier = Modifier.size(26.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        listOf(0.4f, 0.8f, 0.6f, 1f, 0.5f, 0.9f, 0.3f, 0.7f, 0.5f).forEach { h ->
+                            Box(modifier = Modifier.width(3.dp).height((20 * h).dp).background(waveColor, CircleShape))
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(6.dp))
                 Row(
-                    modifier = Modifier.weight(1f),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
-                    verticalAlignment = Alignment.CenterVertically
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    listOf(0.4f, 0.8f, 0.6f, 1f, 0.5f, 0.9f, 0.3f, 0.7f, 0.5f).forEach { h ->
-                        Box(modifier = Modifier.width(3.dp).height((20 * h).dp).background(waveColor, CircleShape))
+                    Text(text = message.getFormattedTime(), color = timeColor, fontSize = 11.sp, fontWeight = if (isReceived) FontWeight.Normal else FontWeight.Medium)
+                    if (!isReceived) {
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Icon(Icons.Default.DoneAll, contentDescription = null, tint = timeColor, modifier = Modifier.size(13.dp))
                     }
                 }
             }
-            Spacer(modifier = Modifier.height(2.dp))
-            Text(text = message.getFormattedTime(), color = timeColor, fontSize = 11.sp, modifier = Modifier.align(Alignment.End))
         }
     }
 }
@@ -2053,20 +2098,26 @@ fun TypingIndicator(isDark: Boolean) {
     val dot2 = rememberFrameOscillation(0f, 1f, 600, phaseFraction = 0.17f)
     val dot3 = rememberFrameOscillation(0f, 1f, 600, phaseFraction = 0.33f)
     val dotColor = if (isDark) Color.White.copy(0.6f) else Color(0xFF8696A0)
-    val bgColor  = if (isDark) Color(0xFF1F2C34) else Color.White
+    val bgColor  = if (isDark) Color(0xFF17242D).copy(alpha = 0.94f) else Color.White.copy(alpha = 0.94f)
 
     Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+        modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.Start
     ) {
-        Box(
+        Surface(
             modifier = Modifier
                 .wrapContentSize()
-                .clip(RoundedCornerShape(topStart = 4.dp, topEnd = 16.dp, bottomStart = 16.dp, bottomEnd = 16.dp))
-                .background(bgColor)
-                .padding(horizontal = 16.dp, vertical = 14.dp)
+                .widthIn(min = 58.dp),
+            shape = RoundedCornerShape(topStart = 6.dp, topEnd = 20.dp, bottomStart = 20.dp, bottomEnd = 20.dp),
+            color = bgColor,
+            tonalElevation = 2.dp,
+            border = BorderStroke(1.dp, if (isDark) Color.White.copy(0.08f) else Color.White.copy(0.55f)),
         ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Box(modifier = Modifier.size(7.dp).offset { IntOffset(0, (-5 * dot1).dp.roundToPx()) }.background(dotColor, CircleShape))
                 Box(modifier = Modifier.size(7.dp).offset { IntOffset(0, (-5 * dot2).dp.roundToPx()) }.background(dotColor, CircleShape))
                 Box(modifier = Modifier.size(7.dp).offset { IntOffset(0, (-5 * dot3).dp.roundToPx()) }.background(dotColor, CircleShape))
@@ -2086,8 +2137,8 @@ fun ChatInputArea(
     isEnglish: Boolean,
     isDark: Boolean
 ) {
-    val barBg   = if (isDark) Color(0xFF1F2C34) else Color(0xFFF0F2F5)
-    val fieldBg = if (isDark) Color(0xFF2A3942) else Color.White
+    val barBg   = if (isDark) Color(0xFF101E25).copy(alpha = 0.58f) else Color.White.copy(alpha = 0.56f)
+    val fieldBg = if (isDark) Color(0xFF17242D).copy(alpha = 0.86f) else Color.White.copy(alpha = 0.94f)
     val hintColor = if (isDark) Color.White.copy(0.4f) else Color(0xFF8696A0)
     val textColor = if (isDark) Color.White else Color(0xFF111111)
 
@@ -2130,6 +2181,11 @@ fun ChatInputArea(
                     .heightIn(min = 44.dp, max = 120.dp)
                     .clip(RoundedCornerShape(24.dp))
                     .background(fieldBg)
+                    .border(
+                        1.dp,
+                        if (isDark) Color.White.copy(alpha = 0.10f) else Color.White.copy(alpha = 0.65f),
+                        RoundedCornerShape(24.dp),
+                    )
                     .padding(horizontal = 16.dp, vertical = 10.dp),
                 contentAlignment = Alignment.CenterStart
             ) {
@@ -2160,7 +2216,7 @@ fun ChatInputArea(
                 modifier = Modifier
                     .size(44.dp)
                     .clip(CircleShape)
-                    .background(SaharaStrongGreen)
+                    .background(Color(0xFF0F8467))
                     .pointerInput(inputIsBlank) {
                         if (inputIsBlank) {
                             awaitEachGesture {

@@ -23,27 +23,6 @@ object SaharaHazeMaterials {
         )
     }
 
-    /** Modal-popup variant: large blur radius for a real frosted look.
-     *
-     *  Light-theme tint bumped from 0.30 -> 0.55 because the earlier value
-     *  was so subtle the dialogs read as plain translucent rectangles on
-     *  bright backdrops — no glassmorphism feeling at all. Dark-theme
-     *  tint kept where it was; popups read fine against dark backgrounds
-     *  at the lower alpha. */
-    @Composable
-    fun popupGlass(isDark: Boolean = isSystemInDarkTheme()): HazeBlurStyle {
-        return HazeBlurStyle(
-            blurRadius = 55.dp,
-            noiseFactor = 0.06f,
-            colorEffects = listOf(
-                HazeColorEffect.tint(
-                    if (isDark) Color.Black.copy(alpha = 0.28f)
-                    else Color.White.copy(alpha = 0.55f)
-                )
-            )
-        )
-    }
-
     @Composable
     fun selectedGlass(isDark: Boolean = isSystemInDarkTheme()): HazeBlurStyle {
         return HazeBlurStyle(

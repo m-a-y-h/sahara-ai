@@ -109,14 +109,13 @@ export SAHARA_LENS_CHECKPOINT=sahara_lens/checkpoints/run_01/best.pt
 uvicorn sahara_lens.api:app --host 0.0.0.0 --port 8000
 ```
 
-To merge with the existing Sahara AI chat service:
+To mount the Lens router inside another FastAPI process:
 
 ```python
 from fastapi import FastAPI
 from sahara_lens.api import router as lens_router
 
 app = FastAPI()
-# … include chat router, etc.
 app.include_router(lens_router, prefix="/v1/lens")
 ```
 

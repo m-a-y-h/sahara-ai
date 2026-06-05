@@ -53,28 +53,9 @@ The drugs the prescription layer recognises include common Pakistani-prescribed 
 
 ## Deployment
 
-Sahara AI is deployment-agnostic. `sahara_ai/app.py` exposes the FastAPI app object every modern Python host can serve. There is **no ngrok** anywhere in this repo — pick whichever managed host fits the budget:
+The Android app now uses Firebase AI Logic's Gemini SDK directly for live chat, so there is no Sahara AI chat Modal proxy to deploy. Keep this package for protocol tests, service-style experiments, and model-evaluation work.
 
-### Modal.com (recommended — A10G GPU, pay-per-second)
-
-`sahara_ai/modal_deploy.py` is a complete Modal app: 24 GB A10G, persistent volume for cached HF weights, automatic scale-to-zero between requests. Deploy:
-
-```bash
-pip install modal>=0.65
-modal token new                                        # first time only
-modal secret create huggingface-secret HF_TOKEN=<hf token>
-modal deploy sahara_ai/modal_deploy.py
-```
-
-Modal prints a public HTTPS URL (e.g. `https://<user>--sahara-ai-chat-endpoint.modal.run`). Set it as `sahara.ai.chat.url` in the Android `local.properties`.
-
-Pre-download the weights once after deploy so the first real chat request doesn't pay for the 16 GB download:
-
-```bash
-modal run sahara_ai/modal_deploy.py::prewarm_weights
-```
-
-Override the model id by passing `--env-var SAHARA_AI_MODEL_ID=enstazao/<your-fine-tune>` on `modal deploy`.
+`sahara_ai/app.py` remains deployment-agnostic for research hosts that need the `/v1/chat` JSON contract. There is **no ngrok** anywhere in this repo — pick whichever managed host fits the budget:
 
 ### Hugging Face Spaces (recommended for FYP / research)
 
@@ -85,7 +66,7 @@ sahara-ai-space/
 └── app.py            # just: from sahara_ai.app import app
 ```
 
-The Space exposes a public HTTPS URL. Set it as `sahara.ai.chat.url=https://<space>.hf.space/v1/chat` in the Android app's `local.properties`.
+The Space exposes a public HTTPS URL for service-style clients that need the legacy `/v1/chat` contract.
 
 ### Google Cloud Run
 

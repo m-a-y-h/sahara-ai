@@ -159,8 +159,8 @@ def screen_from_probs(payload: RawProbsRequest = Body(...)) -> dict:
 def build_standalone_app() -> "FastAPI":
     """Convenience constructor: ``uvicorn sahara_lens.api:app`` deploys just lens.
 
-    The Sahara AI chat service can also include this ``router`` directly so a
-    single FastAPI process serves both ``/v1/chat`` and ``/v1/lens/*``.
+    Other FastAPI hosts can include this ``router`` directly if they want Lens
+    to share a process with another service.
     """
     from fastapi import FastAPI
 

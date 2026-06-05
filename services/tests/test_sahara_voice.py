@@ -67,6 +67,69 @@ class TestVoiceConfig(unittest.TestCase):
         with self.assertRaises(ValueError):
             load_id2label({"angry": "anger"})
 
+    def test_load_voice_model_config_reads_model_shape(self):
+        from sahara_voice.config import DEFAULT_MODEL_CONFIG, load_voice_model_config
+
+        cfg = load_voice_model_config(
+            {
+                "backbone": "facebook/wav2vec2-xls-r-300m",
+                "hidden1": 256,
+                "hidden2": 128,
+                "id2label": {str(i): f"label_{i}" for i in range(6)},
+            },
+            DEFAULT_MODEL_CONFIG,
+        )
+        self.assertEqual(cfg.backbone, "facebook/wav2vec2-xls-r-300m")
+        self.assertEqual(cfg.num_classes, 6)
+        self.assertEqual(cfg.hidden1, 256)
+        self.assertEqual(cfg.hidden2, 128)
+
+    def test_load_voice_model_config_accepts_colab_v3_json(self):
+        from sahara_voice.config import DEFAULT_MODEL_CONFIG, load_voice_model_config
+
+        labels = ["angry", "disgust", "fear", "happy", "neutral", "sad"]
+        cfg = load_voice_model_config(
+            {
+                "backbone": "facebook/wav2vec2-xls-r-300m",
+                "num_classes": len(labels),
+                "id2label": {str(i): label for i, label in enumerate(labels)},
+                "screening_map": {
+                    "angry": "stress",
+                    "disgust": "stress",
+                    "fear": "fear",
+                    "sad": "sadness",
+                    "happy": "neutral",
+                    "neutral": "neutral",
+                },
+                "screening_classes": ["neutral", "stress", "sadness", "fear"],
+                "split_mode": "stratified",
+            },
+            DEFAULT_MODEL_CONFIG,
+        )
+        self.assertEqual(cfg.backbone, "facebook/wav2vec2-xls-r-300m")
+        self.assertEqual(cfg.num_classes, 6)
+        self.assertEqual(cfg.hidden1, 256)
+        self.assertEqual(cfg.hidden2, 128)
+
+    def test_load_voice_model_config_reads_nested_model_config(self):
+        from sahara_voice.config import DEFAULT_MODEL_CONFIG, load_voice_model_config
+
+        cfg = load_voice_model_config(
+            {
+                "model_config": {
+                    "model_name_or_path": "facebook/wav2vec2-xls-r-300m",
+                    "hidden1": 256,
+                    "hidden2": 128,
+                },
+                "id2label": {str(i): f"label_{i}" for i in range(6)},
+            },
+            DEFAULT_MODEL_CONFIG,
+        )
+        self.assertEqual(cfg.backbone, "facebook/wav2vec2-xls-r-300m")
+        self.assertEqual(cfg.num_classes, 6)
+        self.assertEqual(cfg.hidden1, 256)
+        self.assertEqual(cfg.hidden2, 128)
+
 
 
 
@@ -227,7 +290,7 @@ class TestModelSmoke(unittest.TestCase):
         try:
             model = HubertEmotionClassifier(num_classes=8, pretrained=False)
         except Exception as e:
-            self.skipTest(f"could not instantiate HuBERT shell: {e}")
+            self.skipTest(f"could not instantiate speech model shell: {e}")
 
         x = torch.zeros(1, 16_000)   
         with torch.no_grad():

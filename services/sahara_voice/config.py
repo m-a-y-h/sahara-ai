@@ -17,7 +17,7 @@ the right `.pt`.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Mapping
+from typing import Any, Mapping
 
 
 
@@ -99,12 +99,11 @@ HIGH_THRESHOLD: float = 0.65
 
 @dataclass(frozen=True)
 class VoiceModelConfig:
-    """Hyperparameters for the HuBERT-based emotion classifier.
+    """Hyperparameters for the speech-backbone emotion classifier.
 
-    Defaults match the teammate's snippet (HuBERT-base, 8 classes) but every
-    field is overridable from ``model_config.json`` at load time. The upstream
-    repo used HuBERT-large; if you fine-tune from that, set
-    ``backbone="facebook/hubert-large-ls960-ft"`` and the model will adapt.
+    The default backbone stays small for smoke tests. Production checkpoints
+    should provide ``backbone`` in ``model_config.json``; the current Urdu
+    fine-tune uses ``facebook/wav2vec2-xls-r-300m``.
     """
 
     backbone: str = "facebook/hubert-base-ls960"
@@ -112,11 +111,67 @@ class VoiceModelConfig:
     dropout_in: float = 0.35
     dropout_mid: float = 0.30
     dropout_out: float = 0.20
-    hidden1: int = 512
-    hidden2: int = 256
+    hidden1: int = 256
+    hidden2: int = 128
 
 
 DEFAULT_MODEL_CONFIG = VoiceModelConfig()
+
+
+def load_voice_model_config(
+    raw: Mapping[str, Any],
+    base: VoiceModelConfig = DEFAULT_MODEL_CONFIG,
+) -> VoiceModelConfig:
+    """Load backbone/head settings from ``model_config.json`` data."""
+    raw_cfg = raw.get("model_config") or raw.get("config") or raw
+    if not isinstance(raw_cfg, Mapping):
+        raw_cfg = raw
+    default_num_classes = base.num_classes
+    raw_labels = raw.get("id2label")
+    if isinstance(raw_labels, Mapping):
+        default_num_classes = len(raw_labels)
+
+    def _str_field(*keys: str, default: str) -> str:
+        for key in keys:
+            value = raw_cfg.get(key)
+            if value is None and raw_cfg is not raw:
+                value = raw.get(key)
+            if value is not None:
+                return str(value)
+        return default
+
+    def _int_field(key: str, default: int) -> int:
+        value = raw_cfg.get(key)
+        if value is None and raw_cfg is not raw:
+            value = raw.get(key)
+        if value is None:
+            return default
+        return int(value)
+
+    def _float_field(key: str, default: float) -> float:
+        value = raw_cfg.get(key)
+        if value is None and raw_cfg is not raw:
+            value = raw.get(key)
+        if value is None:
+            return default
+        return float(value)
+
+    return VoiceModelConfig(
+        backbone=_str_field(
+            "backbone",
+            "model_name",
+            "model_name_or_path",
+            "hubert_model",
+            "hubert_model_name",
+            default=base.backbone,
+        ),
+        num_classes=_int_field("num_classes", default_num_classes),
+        dropout_in=_float_field("dropout_in", base.dropout_in),
+        dropout_mid=_float_field("dropout_mid", base.dropout_mid),
+        dropout_out=_float_field("dropout_out", base.dropout_out),
+        hidden1=_int_field("hidden1", base.hidden1),
+        hidden2=_int_field("hidden2", base.hidden2),
+    )
 
 
 

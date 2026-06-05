@@ -220,26 +220,27 @@ object ChatRepository {
         // [SaharaChatTurnMetadata.triggerCounselor] and message_type below.
         val substanceDetected = detectLocalSubstance(userText)
         val isCrisis = detectLocalCrisis(userText)
+        val shouldAttachSupport = isCrisis || substanceDetected != null
         val reply = refineLiveReply(
             reply = rawReply,
             substanceDetected = substanceDetected,
             userIntent = if (substanceDetected != null) "substance_use_support" else null,
             isEnglish = isEnglish,
-        )
+        ).normalizeSaharaSelfGender(isEnglish)
         return SaharaReply(
             text = reply,
             metadata = SaharaChatTurnMetadata(
                 messageId          = messageId,
-                messageType        = if (isCrisis) SaharaMessageType.CRISIS_CARD else SaharaMessageType.TEXT,
+                messageType        = if (shouldAttachSupport) SaharaMessageType.CRISIS_CARD else SaharaMessageType.TEXT,
                 riskLevel          = when {
                     isCrisis -> SaharaRiskLevel.HIGH
                     substanceDetected != null -> SaharaRiskLevel.MEDIUM
                     else -> SaharaRiskLevel.LOW
                 },
-                triggerCounselor   = isCrisis,
+                triggerCounselor   = shouldAttachSupport,
                 substanceDetected  = substanceDetected,
                 substancesDetected = substanceDetected?.let { listOf(it) }.orEmpty(),
-                actionDestination  = if (isCrisis) "counselors" else null,
+                actionDestination  = if (shouldAttachSupport) "emergency" else null,
                 quickReplies       = emptyList(),
                 safetyFlags        = buildList {
                     if (isCrisis) add("crisis")
@@ -262,9 +263,10 @@ object ChatRepository {
                 messageId = messageId,
                 messageType = if (localSubstance != null) SaharaMessageType.CRISIS_CARD else SaharaMessageType.TEXT,
                 riskLevel = if (localSubstance != null) SaharaRiskLevel.MEDIUM else SaharaRiskLevel.UNKNOWN,
+                triggerCounselor = localSubstance != null,
                 substanceDetected = localSubstance,
                 substancesDetected = localSubstance?.let { listOf(it) }.orEmpty(),
-                actionDestination = if (localSubstance != null) "counselors" else null,
+                actionDestination = if (localSubstance != null) "emergency" else null,
                 quickReplies = if (localSubstance != null) {
                     if (isEnglish) listOf("Talk to counselor", "Safety check", "Open journal")
                     else listOf("Counselor se baat", "Safety check", "Journal kholo")
@@ -291,6 +293,24 @@ object ChatRepository {
             lower.contains("what you used")
         if (!asksUnknownSubstance) return reply
         return localSubstanceReply(substance, isEnglish)
+    }
+
+    private fun String.normalizeSaharaSelfGender(isEnglish: Boolean): String {
+        if (isEnglish) return this
+        return this
+            .replace(
+                Regex("\\b[Mm]ain\\b([^.!?\\n]{0,180}?)\\bsakti\\s+hoon\\b")
+            ) { match -> "Main${match.groupValues[1]}sakta hoon" }
+            .replace(
+                Regex("\\b[Mm]ain\\b([^.!?\\n]{0,180}?)\\brahi\\s+hoon\\b")
+            ) { match -> "Main${match.groupValues[1]}raha hoon" }
+            .replace(
+                Regex("\\b[Mm]ain\\b([^.!?\\n]{0,180}?)\\bkarungi\\b")
+            ) { match -> "Main${match.groupValues[1]}karunga" }
+            .replace(
+                Regex("\\bnahi\\s+de\\s+sakti\\b", RegexOption.IGNORE_CASE),
+                "nahi de sakta",
+            )
     }
 
     /**

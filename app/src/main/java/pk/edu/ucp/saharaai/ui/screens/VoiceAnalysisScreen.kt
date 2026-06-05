@@ -663,12 +663,13 @@ private fun ErrorPane(
         Modifier.fillMaxSize().padding(24.dp),
         contentAlignment = Alignment.Center,
     ) {
+        val displayMessage = friendlyVoiceErrorMessage(message, isEnglish)
         SaharaCard(variant = CardVariant.GLASS, hazeState = hazeState, modifier = Modifier.fillMaxWidth()) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Icon(Icons.Filled.MicOff, null, tint = SaharaCoral, modifier = Modifier.size(48.dp))
                 Spacer(Modifier.height(12.dp))
                 Text(
-                    text = message,
+                    text = displayMessage,
                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
                 )
             }
@@ -710,6 +711,41 @@ private fun formatSeconds(s: Int): String {
     val mm = s / 60
     val ss = s % 60
     return "%02d:%02d".format(mm, ss)
+}
+
+private fun friendlyVoiceErrorMessage(raw: String, isEnglish: Boolean): String {
+    val lower = raw.lowercase()
+    return when {
+        lower.contains("too short") -> if (isEnglish) {
+            "Recording was too short. Please try again with a longer clip."
+        } else {
+            "Recording bohat choti thi. Thora lamba clip dobara record karein."
+        }
+        lower.contains("timeout") || lower.contains("timed out") -> if (isEnglish) {
+            "Voice service took too long. Please try again."
+        } else {
+            "Voice analysis mein waqt zyada lag gaya. Dobara try karein."
+        }
+        lower.contains("not configured") -> if (isEnglish) {
+            "Voice analysis URL is not configured."
+        } else {
+            "Voice analysis URL set nahi hai."
+        }
+        lower.contains("http 5") ||
+            lower.contains("inference failed") ||
+            lower.contains("remoteerror") ||
+            lower.contains("parent input") -> if (isEnglish) {
+                "Voice service could not analyse the clip right now. Please try again shortly."
+            } else {
+                "Voice analysis abhi available nahi hai. Thori der baad dobara try karein."
+            }
+        raw.isBlank() -> if (isEnglish) {
+            "Sahara Voice couldn't reach the server."
+        } else {
+            "Sahara Voice server tak nahi pohanch saka."
+        }
+        else -> raw
+    }
 }
 
 private fun colorForScreeningLabel(label: String): Color = when (label.lowercase()) {

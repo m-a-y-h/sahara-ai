@@ -11,7 +11,7 @@ additions:
     * The decoder accepts raw bytes via ``soundfile`` so the FastAPI route can
       hand the request body straight in — no temp-file dance.
     * A short-audio guard ensures the resulting tensor is always at least
-      0.5 s long. HuBERT's convolutional stem otherwise emits an empty
+      0.5 s long. Speech encoders with convolutional stems otherwise emit an empty
       sequence and the attention pooling layer collapses.
 """
 
@@ -32,26 +32,81 @@ _MIN_LENGTH_SAMPLES = SAMPLE_RATE // 2
 
 
 def _decode_audio_bytes(data: bytes) -> tuple[np.ndarray, int]:
-    """Decode WAV/FLAC/OGG/MP3 bytes to (mono float32 PCM, sample_rate)."""
+    """Decode audio bytes to (mono float32 PCM, sample_rate).
+
+    libsndfile (``soundfile``) reads WAV/FLAC/OGG straight from memory — the
+    fast path. Phone recorders, however, hand us compressed MPEG-4/AAC (Android
+    ``MediaRecorder`` ``.m4a``), MP3 or 3GP/AMR, none of which libsndfile can
+    decode; and librosa's audioread fallback refuses an in-memory ``BytesIO``
+    (it needs a real path). So for anything soundfile rejects we transcode
+    through ffmpeg, which ships in the serving image and handles every container
+    the mobile client can emit.
+    """
     try:
-        import soundfile as sf  
+        import soundfile as sf
         with sf.SoundFile(io.BytesIO(data)) as f:
             audio = f.read(dtype="float32", always_2d=False)
             sr = f.samplerate
         if audio.ndim > 1:
             audio = audio.mean(axis=1)
         return audio.astype(np.float32, copy=False), int(sr)
-    except Exception:
-        
-        
+    except Exception as sf_exc:
         try:
-            import librosa  
-        except ImportError as exc:
+            return _decode_via_ffmpeg(data)
+        except Exception as ff_exc:
             raise RuntimeError(
-                "Neither soundfile nor librosa is installed; cannot decode audio."
-            ) from exc
-        audio, sr = librosa.load(io.BytesIO(data), sr=None, mono=True)
-        return audio.astype(np.float32, copy=False), int(sr)
+                f"could not decode audio: soundfile said {sf_exc!r}; "
+                f"ffmpeg fallback said {ff_exc!r}"
+            ) from ff_exc
+
+
+def _decode_via_ffmpeg(data: bytes) -> tuple[np.ndarray, int]:
+    """Transcode arbitrary container bytes to mono float32 PCM via ffmpeg.
+
+    MP4/M4A needs a *seekable* input (the ``moov`` atom can sit at the end of
+    the file), so the bytes go to a temp file rather than ffmpeg's stdin pipe.
+    ffmpeg decodes straight to 32-bit float, mono, at the model's sample rate,
+    which we read into numpy with no second decode hop — so the returned sr is
+    always ``SAMPLE_RATE`` and the downstream resample is a no-op.
+    """
+    import os
+    import shutil
+    import subprocess
+    import tempfile
+
+    ffmpeg = shutil.which("ffmpeg")
+    if ffmpeg is None:
+        raise RuntimeError("ffmpeg not found on PATH; cannot decode compressed audio")
+
+    tmp_path: Optional[str] = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".audio", delete=False) as tmp:
+            tmp.write(data)
+            tmp_path = tmp.name
+        proc = subprocess.run(
+            [
+                ffmpeg, "-nostdin", "-loglevel", "error",
+                "-i", tmp_path,
+                "-f", "f32le", "-ac", "1", "-ar", str(SAMPLE_RATE), "pipe:1",
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        detail = exc.stderr.decode("utf-8", "ignore").strip()[-300:]
+        raise RuntimeError(f"ffmpeg failed to decode audio: {detail}") from exc
+    finally:
+        if tmp_path is not None:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+
+    # frombuffer is read-only and backed by ffmpeg's bytes; copy so the rest of
+    # the pipeline (denoise, in-place normalise) can write to it.
+    audio = np.frombuffer(proc.stdout, dtype="<f4").astype(np.float32)
+    return audio, SAMPLE_RATE
 
 
 def _resample(audio: np.ndarray, src_sr: int, dst_sr: int) -> np.ndarray:

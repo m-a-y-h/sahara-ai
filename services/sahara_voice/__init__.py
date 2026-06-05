@@ -1,14 +1,13 @@
 """Sahara Voice — speech-emotion screening for distress detection.
 
-A HuBERT-based classifier that runs over a captured voice note and produces
+A speech-backbone classifier that runs over a captured voice note and produces
 the same 4-class screening output (NEUTRAL / STRESS / SADNESS / FEAR /
 UNCERTAIN) as Sahara Lens — so the Android client can route the user to the
 counselor, meditation, or emergency surface based on either modality with
 identical UI logic.
 
-The package was finalised from a teammate's HuBERT fine-tune (8-class
-RAVDESS-style) on top of an upstream Urdu repo (4-class SEMOUR+: anger,
-happiness, neutral, sadness). Both label spaces are supported via the
+The package was finalised from teammate speech-emotion experiments, including
+RAVDESS-style and UrduSER-style label spaces. Both are supported via the
 ``id2label`` map persisted in ``model_config.json`` alongside the checkpoint.
 
 Public surface re-exports the lightweight pieces so screening/quality tests

@@ -46,7 +46,10 @@ data class NavItem(
 )
 
 @Composable
-fun BottomNav(navController: NavController, hazeState: HazeState) {
+fun BottomNav(
+    navController: NavController,
+    hazeState: HazeState,
+) {
     val isDark = isSystemInDarkTheme()
     val context = LocalContext.current
     val isEnglish = context.getSharedPreferences("sahara_prefs", Context.MODE_PRIVATE)
@@ -100,7 +103,12 @@ fun BottomNav(navController: NavController, hazeState: HazeState) {
         val currentRoute = navBackStackEntry?.destination?.route
 
         items.forEach { item ->
-            val isSelected = currentRoute == item.route
+            val isSelected = when (item.route) {
+                "chat" -> currentRoute == "chat" ||
+                    currentRoute?.startsWith("counselor-chat") == true ||
+                    currentRoute?.startsWith("counselor-opens-chat") == true
+                else -> currentRoute == item.route
+            }
             val isLocked = item.requiresAssessment && !GlobalAppState.hasCompletedInitialAssessment
             val itemScale by animateFloatAsState(
                 targetValue = if (isSelected) 1.05f else 1f,

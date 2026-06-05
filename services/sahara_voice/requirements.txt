@@ -1,4 +1,4 @@
-# Sahara Voice (HuBERT emotion classifier) dependencies.
+# Sahara Voice (speech emotion classifier) dependencies.
 #
 # Two install profiles:
 #   - serving + training:    pip install -r sahara_voice/requirements.txt

@@ -12,9 +12,10 @@ Checks performed (in order, short-circuiting on first failure):
     1. The image decodes and is at least ``min_resolution`` pixels per side.
     2. Brightness (mean luminance) is within the acceptable band.
     3. Contrast (luminance std-dev) exceeds the minimum.
-    4. Sharpness (variance of Laplacian) exceeds the minimum (rejects blur).
-    5. A face is detected and occupies a sensible fraction of the frame,
+    4. A face is detected and occupies a sensible fraction of the frame,
        roughly centered.
+    5. Sharpness (variance of Laplacian) exceeds the minimum (rejects blur),
+       measured on the detected face crop when possible.
 
 Face detection is implemented two ways:
 
@@ -74,14 +75,18 @@ class QualityGateResult:
 
 @dataclass(frozen=True)
 class QualityThresholds:
-    """Tunable quality thresholds. The defaults reflect typical smartphone
-    front-camera captures under reasonable indoor lighting."""
+    """Tunable quality thresholds.
+
+    Sharpness is measured on a padded face crop when OpenCV detects a face.
+    Front cameras often apply skin smoothing/noise reduction, so this threshold
+    is intentionally lower than scene-level rear-camera blur checks.
+    """
 
     min_resolution: int = 200
     min_brightness: float = 50.0   
     max_brightness: float = 220.0
     min_contrast: float = 25.0     
-    min_sharpness: float = 80.0    
+    min_sharpness: float = 18.0
     min_face_fraction: float = 0.12  
     max_face_fraction: float = 0.85
     center_tolerance: float = 0.30   
@@ -104,8 +109,7 @@ def _laplacian_variance(gray: np.ndarray) -> float:
     """Variance of the 3x3 Laplacian — a classic blur detector.
 
     A high variance means lots of high-frequency edges (sharp image); a low
-    variance means smooth/blurry. Threshold ~80 works well for 224+ resolution
-    smartphone selfies; lower for downscaled web thumbnails.
+    variance means smooth/blurry.
     """
     
     
@@ -154,6 +158,23 @@ def _try_detect_face_opencv(gray: np.ndarray) -> Optional[tuple[tuple[int, int, 
     
     x, y, w, h = max(faces, key=lambda f: int(f[2]) * int(f[3]))
     return (int(x), int(y), int(w), int(h)), "opencv-haar-frontalface"
+
+
+def _crop_with_padding(
+    gray: np.ndarray,
+    box: tuple[int, int, int, int],
+    padding_fraction: float = 0.15,
+) -> np.ndarray:
+    """Return a padded face crop constrained to image bounds."""
+    x, y, w, h = box
+    pad_x = int(w * padding_fraction)
+    pad_y = int(h * padding_fraction)
+    left = max(0, x - pad_x)
+    top = max(0, y - pad_y)
+    right = min(gray.shape[1], x + w + pad_x)
+    bottom = min(gray.shape[0], y + h + pad_y)
+    crop = gray[top:bottom, left:right]
+    return crop if crop.size else gray
 
 
 
@@ -217,23 +238,11 @@ def run_quality_gate(
         )
         return result
 
-    
-    sharpness = _laplacian_variance(gray)
-    result.metrics["sharpness"] = sharpness
-    if sharpness < thresholds.min_sharpness:
-        result.reasons.append(
-            f"image too blurry (laplacian variance {sharpness:.1f} < {thresholds.min_sharpness:.1f})"
-        )
-        return result
-
-    
     detection = _try_detect_face_opencv(gray)
+    face_detector_unavailable = False
+    sharpness_region = gray
+    sharpness_scope = "image"
     if detection is None:
-        
-        if "import cv2" in "":  
-            pass
-        
-        
         try:
             import cv2  
             
@@ -241,41 +250,57 @@ def run_quality_gate(
             result.face_detector = "opencv-haar-frontalface"
             return result
         except ImportError:
-            result.reasons.append(
-                "face detector unavailable (opencv-python not installed); "
-                "passing on brightness/contrast/sharpness only — install opencv-python in production"
-            )
+            face_detector_unavailable = True
             result.face_detector = "fallback-none"
-            result.passed = True
+    else:
+        (fx, fy, fw, fh), detector_name = detection
+        result.face_box = (fx, fy, fw, fh)
+        result.face_detector = detector_name
+
+        face_fraction = (fw * fh) / float(w * h)
+        result.metrics["face_fraction"] = face_fraction
+        if face_fraction < thresholds.min_face_fraction:
+            result.reasons.append(
+                f"face too small ({face_fraction:.2%} of frame < {thresholds.min_face_fraction:.0%})"
+            )
+            return result
+        if face_fraction > thresholds.max_face_fraction:
+            result.reasons.append(
+                f"face too close ({face_fraction:.2%} of frame > {thresholds.max_face_fraction:.0%})"
+            )
             return result
 
-    (fx, fy, fw, fh), detector_name = detection
-    result.face_box = (fx, fy, fw, fh)
-    result.face_detector = detector_name
+        face_cx = fx + fw / 2
+        face_cy = fy + fh / 2
+        off_x = abs(face_cx - w / 2) / w
+        off_y = abs(face_cy - h / 2) / h
+        result.metrics["off_center_x"] = off_x
+        result.metrics["off_center_y"] = off_y
+        if off_x > thresholds.center_tolerance or off_y > thresholds.center_tolerance:
+            result.reasons.append(
+                f"face is off-center (Δx={off_x:.2%}, Δy={off_y:.2%}; tolerance {thresholds.center_tolerance:.0%})"
+            )
+            return result
 
-    face_fraction = (fw * fh) / float(w * h)
-    result.metrics["face_fraction"] = face_fraction
-    if face_fraction < thresholds.min_face_fraction:
+        sharpness_region = _crop_with_padding(gray, result.face_box)
+        sharpness_scope = "face"
+
+    sharpness = _laplacian_variance(sharpness_region)
+    result.metrics["sharpness"] = sharpness
+    result.metrics["sharpness_region_width"] = float(sharpness_region.shape[1])
+    result.metrics["sharpness_region_height"] = float(sharpness_region.shape[0])
+    if sharpness < thresholds.min_sharpness:
         result.reasons.append(
-            f"face too small ({face_fraction:.2%} of frame < {thresholds.min_face_fraction:.0%})"
+            f"{sharpness_scope} too blurry (laplacian variance {sharpness:.1f} < {thresholds.min_sharpness:.1f})"
         )
         return result
-    if face_fraction > thresholds.max_face_fraction:
-        result.reasons.append(
-            f"face too close ({face_fraction:.2%} of frame > {thresholds.max_face_fraction:.0%})"
-        )
-        return result
 
-    face_cx = fx + fw / 2
-    face_cy = fy + fh / 2
-    off_x = abs(face_cx - w / 2) / w
-    off_y = abs(face_cy - h / 2) / h
-    result.metrics["off_center_x"] = off_x
-    result.metrics["off_center_y"] = off_y
-    if off_x > thresholds.center_tolerance or off_y > thresholds.center_tolerance:
+    if face_detector_unavailable:
         result.reasons.append(
-            f"face is off-center (Δx={off_x:.2%}, Δy={off_y:.2%}; tolerance {thresholds.center_tolerance:.0%})"
+            "face detector unavailable (opencv-python not installed); "
+            "passing on brightness/contrast/sharpness only — install opencv-python in production"
         )
+        result.passed = True
         return result
 
     result.passed = True

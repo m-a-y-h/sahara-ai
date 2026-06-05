@@ -30,24 +30,23 @@ The app combines culturally aware chat support, Sahara AI harm-reduction respons
 | Database | Cloud Firestore + Firebase Realtime Database |
 | Android data layer | `data/model`, `data/remote`, and `data/repository` |
 | Android state layer | `viewmodels` |
-| AI chat endpoint | Sahara AI (Modal proxy to `huggingface_hub.InferenceClient` against `enstazao/Qalb-1.0-8B-Instruct`) |
+| AI chat endpoint | Firebase AI Logic SDK calling Gemini directly from Android |
 | AI chat protocol | Prompting, safety parser, and SFT tooling in `services/sahara_ai/` |
 | Base model credit | Fine-tuned from Qalb/Llama 3.1 |
 | Facial-emotion screening (Lens) | Pretrained `dima806/facial_emotions_image_detection` ViT served on Modal (~91.9% on 25k FER test set) |
 | Voice screening | `facebook/wav2vec2-xls-r-300m` fine-tuned on UrduSER, served on Modal (~91% precision on flagged distress, 86.6% accuracy on conf ≥ 0.65) |
 | Maps/location | Google Play Services / Google Maps |
 | Voice & video calls | LiveKit (in-app WebRTC); tokens minted by `services/sahara_livekit/` |
-| Python model hosting | Modal (scale-to-zero) — `services/sahara_*/modal_deploy.py` |
+| Python service hosting | Modal for Lens, Voice, LiveKit tokens, risk jobs, listening jobs, and push jobs |
 | OAuth connections helper | Node Express on Render — `services/connections_poc_server/` (Bluesky / Steam / Spotify; YouTube authorised on-device) |
 | Push notifications | Firebase Cloud Messaging; sender + admin notifier + key-delivery cron in `services/sahara_push/` |
 
 ### Deployed endpoints
 
-All five Python services run on the same Modal account (`its-asattar`). The Node OAuth helper runs on Render. URLs to drop into `local.properties`:
+Python services run on the same Modal account (`its-asattar`). The Node OAuth helper runs on Render. URLs to drop into `local.properties`:
 
 | Service | URL |
 |---|---|
-| Sahara AI chat | `https://its-asattar--chat-endpoint.modal.run/v1/chat` |
 | Sahara Lens scan | `https://its-asattar--sahara-lens.modal.run/v1/lens/scan` |
 | Sahara Voice analyze | `https://its-asattar--voice-endpoint.modal.run/v1/voice/analyze` |
 | LiveKit token | `https://its-asattar--livekit-token.modal.run/token` |
@@ -61,26 +60,26 @@ Firebase Auth, Firestore, and Realtime Database are the app backend services. Th
 
 ```text
 .
-├─ app/                                Android app module (Kotlin + Jetpack Compose)
+├─ app/                                        Android app module (Kotlin + Jetpack Compose)
 │  └─ src/main/java/pk/edu/ucp/saharaai/
-│     ├─ data/                         Firebase/Firestore/RealtimeDB repositories + models
-│     ├─ viewmodels/                   Compose screen state holders
-│     ├─ ui/screens/                   Compose screens
-│     ├─ ui/components/                Reusable Compose components
-│     └─ service/                      Foreground services (app tracker, meditation music)
-├─ services/                           Python services (FastAPI, deployed on Modal)
-│  ├─ sahara_ai/                       Chat protocol, safety parser, SFT tooling
-│  ├─ sahara_lens/                     Facial-emotion screening model + API
-│  ├─ sahara_voice/                    Voice-emotion screening model + API
-│  ├─ sahara_listening/                Listening-signal classifier (research)
-│  ├─ sahara_livekit/                  LiveKit token server (in-app calls)
-│  ├─ sahara_push/                     FCM push sender
-│  ├─ connections_poc_server/          Local Bluesky/Steam/Spotify OAuth helper
-│  ├─ firebase/                        Firestore + Realtime DB security rules + seed data
-│  └─ tests/                           Python service tests
-├─ secrets/                            Local-only secrets (gitignored) — see "Secrets"
-├─ docs/assets/                        README/documentation images
-└─ gradle/, gradlew*, *.gradle.kts     Android/Gradle project configuration
+│     ├─ data/                                 Firebase/Firestore/RealtimeDB repositories + models
+│     ├─ viewmodels/                           Compose screen state holders
+│     ├─ ui/screens/                           Compose screens
+│     ├─ ui/components/                        Reusable Compose components
+│     └─ service/                              Foreground services (app tracker, meditation music)
+├─ services/                                   Python services (FastAPI, deployed on Modal)
+│  ├─ sahara_ai/                               Chat protocol, safety parser, SFT tooling
+│  ├─ sahara_lens/                             Facial-emotion screening model + API
+│  ├─ sahara_voice/                            Voice-emotion screening model + API
+│  ├─ sahara_listening/                        Listening-signal classifier (research)
+│  ├─ sahara_livekit/                          LiveKit token server (in-app calls)
+│  ├─ sahara_push/                             FCM push sender
+│  ├─ connections_poc_server/                  Local Bluesky/Steam/Spotify OAuth helper
+│  ├─ firebase/                                Firestore + Realtime DB security rules + seed data
+│  └─ tests/                                   Python service tests
+├─ secrets/                                    Local-only secrets (gitignored) — see "Secrets"
+├─ docs/assets/                                README/documentation images
+└─ gradle/, gradlew*, *.gradle.kts             Android/Gradle project configuration
 ```
 
 The Android module is `:app`, so application source and Android resources live
@@ -111,11 +110,8 @@ SHA-256: D4:54:A5:70:C1:FE:EF:75:03:CE:61:6F:FF:0D:82:DD:74:E4:BD:E3:DE:48:12:7D
 
 The checked-in configuration currently contains a different Android certificate fingerprint, so a locally signed debug APK cannot complete Google sign-in until Firebase is updated.
 
-5. Point the chat screen at your live Sahara AI/FastAPI endpoint by adding this to `local.properties`:
-
-```properties
-sahara.ai.chat.url=https://your-colab-or-api-url/v1/chat
-```
+5. AI chat uses Firebase AI Logic's Gemini SDK directly. No `sahara.ai.chat.url`
+   local property is required for the app.
 
 6. Other optional local secrets:
 
@@ -368,16 +364,7 @@ Model:
 
 ## Sahara AI Protocol
 
-The `services/sahara_ai/` package contains the Sahara AI safety/router layer that backs the `/v1/chat` endpoint. It handles Pakistani slang, misspellings, JSON validation, emergency escalation, and harm-reduction response constraints — and the actual token generation is routed via an injectable `text_generator(prompt) -> str`, so the protocol can run against a local model or a remote inference provider without changing the call sites.
-
-The default Modal deploy ([`services/sahara_ai/modal_deploy.py`](./services/sahara_ai/modal_deploy.py)) is a thin proxy: it instantiates `huggingface_hub.InferenceClient` (provider `featherless-ai` by default), hits the Qalb instruct model (`enstazao/Qalb-1.0-8B-Instruct`), and wraps the call in the same prompt template the local model uses. Modal cold-starts in milliseconds because there are no weights to load; cost moves from per-second Modal GPU time to per-token Inference billing. The provider and model id are env-overridable so the same deploy can repoint at a different fine-tune without a redeploy.
-
-Deploy (one-time):
-
-```bash
-modal secret create huggingface-secret HF_TOKEN=<your hf token>
-cd services && modal deploy sahara_ai/modal_deploy.py
-```
+The Android app now uses Firebase AI Logic's Gemini SDK directly for live AI chat, so there is no Sahara AI chat Modal proxy to deploy. The `services/sahara_ai/` package remains as the safety/protocol reference and offline test layer: it handles Pakistani slang, misspellings, JSON validation, emergency escalation, and harm-reduction response constraints for service-style deployments or model evaluation.
 
 Run protocol tests:
 

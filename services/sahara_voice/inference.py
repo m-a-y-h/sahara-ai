@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import threading
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Optional
 
@@ -22,6 +23,7 @@ from .config import (
     SAMPLE_RATE,
     VoiceModelConfig,
     load_id2label,
+    load_voice_model_config,
 )
 from .preprocess import preprocess_audio_bytes
 from .screening import VoiceScreeningResult, screen_voice_emotions
@@ -79,20 +81,11 @@ class VoiceInferenceEngine:
 
         self.device = self._resolve_device(device)
         cfg = model_config or DEFAULT_MODEL_CONFIG
-        self.id2label = self._resolve_id2label(model_config_path, cfg)
+        cfg, self.id2label = self._resolve_model_metadata(model_config_path, cfg)
 
         self.feature_extractor = Wav2Vec2FeatureExtractor.from_pretrained(cfg.backbone)
 
-        
-        cfg = VoiceModelConfig(
-            backbone=cfg.backbone,
-            num_classes=len(self.id2label),
-            dropout_in=cfg.dropout_in,
-            dropout_mid=cfg.dropout_mid,
-            dropout_out=cfg.dropout_out,
-            hidden1=cfg.hidden1,
-            hidden2=cfg.hidden2,
-        )
+        cfg = replace(cfg, num_classes=len(self.id2label))
 
         if checkpoint_path is not None:
             from .model import load_classifier_from_checkpoint
@@ -123,26 +116,32 @@ class VoiceInferenceEngine:
             return "cpu"
 
     @staticmethod
-    def _resolve_id2label(
+    def _resolve_model_metadata(
         model_config_path: Optional[str | Path],
         cfg: VoiceModelConfig,
-    ) -> dict[int, str]:
+    ) -> tuple[VoiceModelConfig, dict[int, str]]:
+        data: dict[str, Any] = {}
         if model_config_path is not None and Path(model_config_path).exists():
             data = json.loads(Path(model_config_path).read_text())
-            return load_id2label(data["id2label"])
-        
-        
-        
+            cfg = load_voice_model_config(data, cfg)
+            if "id2label" in data:
+                id2label = load_id2label(data["id2label"])
+                if cfg.num_classes != len(id2label):
+                    raise ValueError(
+                        "model_config.json num_classes does not match id2label: "
+                        f"num_classes={cfg.num_classes}, labels={len(id2label)}"
+                    )
+                return cfg, id2label
+
         if cfg.num_classes == len(DEFAULT_LABELS_8CLASS):
-            return {i: l for i, l in enumerate(DEFAULT_LABELS_8CLASS)}
+            return cfg, {i: l for i, l in enumerate(DEFAULT_LABELS_8CLASS)}
         if cfg.num_classes == len(DEFAULT_LABELS_4CLASS):
-            return {i: l for i, l in enumerate(DEFAULT_LABELS_4CLASS)}
+            return cfg, {i: l for i, l in enumerate(DEFAULT_LABELS_4CLASS)}
         raise ValueError(
             f"No model_config.json supplied and num_classes={cfg.num_classes} doesn't "
             f"match a known label space (4-class Urdu or 8-class RAVDESS)."
         )
 
-    
     def predict(self, audio_bytes: bytes) -> VoiceInferenceResult:
         import torch
 

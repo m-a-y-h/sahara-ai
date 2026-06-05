@@ -26,19 +26,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
-import dev.chrisbanes.haze.HazeInputScale
 import dev.chrisbanes.haze.HazeState
-import dev.chrisbanes.haze.hazeEffect
-import dev.chrisbanes.haze.blur.blurEffect
-import pk.edu.ucp.saharaai.ui.theme.SaharaHazeMaterials
+import pk.edu.ucp.saharaai.ui.theme.SaharaBorderGray
 
 /**
- * A glassmorphic popup rendered IN THE SAME COMPOSITION as the screen (not a
- * Dialog/Popup window). Because it shares the screen's [hazeState], its card
- * actually blurs the content behind it — which a Dialog window can never do.
+ * A popup rendered in the same composition as the screen (not a Dialog/Popup
+ * window), so it can sit above the app chrome and dim the full screen.
  *
- * Host it at the top level of a screen's root Box (the same Box whose content is
- * a `hazeSource(hazeState)`), e.g.:
+ * Host it at the top level of a screen's root Box, e.g.:
  *
  *     if (showConfirm) GlassOverlay(hazeState, onDismiss = { showConfirm = false }) { ... }
  *
@@ -46,17 +41,19 @@ import pk.edu.ucp.saharaai.ui.theme.SaharaHazeMaterials
  */
 @Composable
 fun GlassOverlay(
+    @Suppress("UNUSED_PARAMETER")
     hazeState: HazeState,
     onDismiss: () -> Unit,
     isDark: Boolean = isSystemInDarkTheme(),
     dismissOnScrimTap: Boolean = true,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    val glassStyle = SaharaHazeMaterials.popupGlass(isDark)
+    val panelColor = if (isDark) Color(0xFF111C22) else Color(0xFFFAFCFC)
+    val borderColor = if (isDark) Color.White.copy(alpha = 0.16f) else SaharaBorderGray.copy(alpha = 0.40f)
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.35f))
+            .background(Color.Black.copy(alpha = if (isDark) 0.62f else 0.48f))
             .pointerInput(dismissOnScrimTap) {
                 detectTapGestures(onTap = { if (dismissOnScrimTap) onDismiss() })
             },
@@ -70,30 +67,10 @@ fun GlassOverlay(
                 // the screen.
                 .heightIn(max = 560.dp)
                 .clip(RoundedCornerShape(24.dp))
-                // Two-layer surface: the hazeEffect blurs the screen behind
-                // the popup (real glass on devices that support it). On top
-                // of that we paint a *gentle* translucent tint — light enough
-                // that the blur shows through and the popup still feels like
-                // glass, opaque enough to give the popup a readable surface
-                // when blur is unavailable. Earlier 0.75-alpha background
-                // killed the glass look; this is the deliberate compromise.
-                .hazeEffect(state = hazeState) {
-                    inputScale = HazeInputScale.Auto
-                    blurEffect { style = glassStyle }
-                }
-                // Light-mode fill bumped from 0.22 -> 0.35. With the new
-                // popupGlass tint (0.55 white) sitting above this layer,
-                // 0.35 gives the card a definite "frosted glass slab"
-                // presence even when the screen behind is bright. Dark
-                // mode is fine at 0.06 — popups already read against the
-                // dark surface.
-                .background(
-                    if (isDark) Color.White.copy(alpha = 0.06f)
-                    else Color.White.copy(alpha = 0.35f)
-                )
+                .background(panelColor)
                 .border(
                     1.dp,
-                    Color.White.copy(alpha = if (isDark) 0.18f else 0.7f),
+                    borderColor,
                     RoundedCornerShape(24.dp),
                 )
                 .pointerInput(Unit) { detectTapGestures(onTap = {}) }
@@ -105,14 +82,13 @@ fun GlassOverlay(
 }
 
 /**
- * A near drop-in glassmorphic replacement for Material3's [androidx.compose.material3.AlertDialog].
+ * A near drop-in in-app replacement for Material3's [androidx.compose.material3.AlertDialog].
  * Keeps the familiar `icon` / `title` / `text` / `confirmButton` / `dismissButton`
- * slots, but renders through [GlassOverlay] so the popup is real glass (it blurs
- * the screen behind it) instead of an opaque windowed dialog.
+ * slots, but renders through [GlassOverlay] so the popup can dim the whole app
+ * and stay visually consistent with the custom navigation chrome.
  *
- * Because it relies on [GlassOverlay], host it at the root of a screen whose
- * background is a `hazeSource(hazeState)` — not nested inside a padded column,
- * since the overlay fills the whole screen.
+ * Host it at the root of a screen, not nested inside a padded column, since the
+ * overlay fills the whole screen.
  */
 @Composable
 fun GlassAlertDialog(

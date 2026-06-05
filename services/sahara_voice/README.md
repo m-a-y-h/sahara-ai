@@ -7,7 +7,7 @@ Run the commands in this document from the repository's `services/` directory.
 > standalone clinical decision. Treat every ELEVATED / HIGH level the same way
 > you would treat a self-reported "I'm not okay" check-in.
 
-This package finalises a teammate's HuBERT-based voice-emotion classifier and
+This package serves the speech-backbone voice-emotion classifier and
 wires it into the same `/v1/lens/scan`-style screening API the Sahara Lens
 camera flow uses, so the Android client can route NEUTRAL / ELEVATED / HIGH /
 UNCERTAIN results through one shared UI.
@@ -20,9 +20,10 @@ The package supports **two label spaces** out of the box:
 * **8-class RAVDESS** — `anger`, `calm`, `disgust`, `fearful`, `happy`,
   `neutral`, `sad`, `surprised`. Matches the teammate's published checkpoint.
 
-The active label space is read at load time from a sibling `model_config.json`
-(`{"id2label": {"0": "Anger", ...}, "num_classes": 8, "sample_rate": 16000,
-"max_length": 96000}`), so a single binary works for both.
+The active label space and model shape are read at load time from a sibling
+`model_config.json`. The current Urdu Colab fine-tune uses
+`facebook/wav2vec2-xls-r-300m`; the loader also infers the classifier head
+dimensions from the checkpoint.
 
 ## Package layout
 
@@ -30,7 +31,7 @@ The active label space is read at load time from a sibling `model_config.json`
 sahara_voice/
 ├── __init__.py        public surface re-exports
 ├── config.py          label spaces, screening thresholds, model defaults
-├── model.py           HubertEmotionClassifier + checkpoint loader
+├── model.py           speech encoder classifier + checkpoint loader
 ├── preprocess.py      bytes → decode → denoise → resample → trim → pad
 ├── noise.py           background-noise reduction (improved over upstream)
 ├── screening.py       raw emotion probs → 4-class Sahara screening output
@@ -47,16 +48,16 @@ sahara_voice/
    batch size 1, which is what the inference API always sends. LayerNorm is
    the obvious fix; checkpoints saved with the BatchNorm head still load via
    `strict=False` and the LayerNorm weights re-initialise.
-2. **Configurable backbone.** Upstream Urdu repo uses `hubert-large-ls960-ft`;
-   teammate's snippet uses `hubert-base-ls960`. Both load with the same head,
-   selected by `VoiceModelConfig.backbone`.
+2. **Configurable backbone.** `VoiceModelConfig.backbone` is loaded with
+   `transformers.AutoModel`, so the same serving code supports XLS-R,
+   HuBERT, and Wav2Vec2-style speech encoders.
 3. **Smarter noise profile.** The original implementation used the first
    0.5 s of audio as the noise profile, which fails when the user starts
    talking immediately. We now find the **quietest** 0.5 s window across the
    whole clip, fall back to stationary mode, and refuse to denoise clips
    shorter than 1 s where the profile would dominate the signal.
 4. **Empty / short / unreadable input safety.** The pipeline pads
-   too-short audio so HuBERT's conv stem doesn't collapse, returns a
+   too-short audio so the speech encoder's conv stem doesn't collapse, returns a
    structured "preprocess failed" response (rather than 500) when
    `soundfile` / `librosa` can't decode, and never writes the audio to disk.
 5. **Screening contract identical to Sahara Lens.** `screen_voice_emotions`
@@ -81,8 +82,35 @@ pip install numpy
 ```
 sahara_voice/checkpoints/
 ├── best_model.pt        # state_dict (torch.save({"model_state_dict": ...}))
-└── model_config.json    # {"id2label": {...}, "num_classes": N, ...}
+└── model_config.json    # id2label + backbone/head shape used in training
 ```
+
+Example matching the current Colab v3 XLS-R checkpoint:
+
+```json
+{
+  "backbone": "facebook/wav2vec2-xls-r-300m",
+  "num_classes": 6,
+  "hidden1": 256,
+  "hidden2": 128,
+  "dropout_in": 0.35,
+  "dropout_mid": 0.30,
+  "dropout_out": 0.20,
+  "id2label": {
+    "0": "label_0",
+    "1": "label_1",
+    "2": "label_2",
+    "3": "label_3",
+    "4": "label_4",
+    "5": "label_5"
+  }
+}
+```
+
+Replace the placeholder labels and keep `id2label` in the exact class order
+used during training. If your saved Colab `model_config.json` omits `hidden1`
+and `hidden2`, serving still works because the loader infers those dimensions
+from `best.pt`.
 
 ### Serve
 
@@ -107,8 +135,10 @@ app.include_router(voice_router, prefix="/v1/voice")
 ### Deploy on Modal
 
 ```bash
-modal deploy sahara_voice/modal_deploy.py
+modal volume put sahara-voice-weights ./best_model.pt /checkpoints/best.pt
+modal volume put sahara-voice-weights ./model_config.json /checkpoints/model_config.json
 modal run sahara_voice/modal_deploy.py::prewarm_weights
+modal deploy sahara_voice/modal_deploy.py
 ```
 
 Modal prints a public HTTPS URL; paste it into `local.properties:sahara.voice.analyze.url`.
