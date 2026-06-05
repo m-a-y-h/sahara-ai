@@ -1,6 +1,8 @@
 package pk.edu.ucp.saharaai.utils
 
 import android.util.Log
+import com.google.firebase.Firebase
+import com.google.firebase.auth.auth
 import com.google.firebase.database.FirebaseDatabase
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.tasks.await
@@ -74,9 +76,72 @@ object EmailOtpService {
         toEmail   : String,
         toName    : String,
         otp       : String,
+        mailerUrl : String,
         serviceId : String,
         templateId: String,
         publicKey : String
+    ): SendResult {
+        if (mailerUrl.isNotBlank()) {
+            when (val modalResult = sendOtpWithSaharaMailer(toEmail, toName, otp, mailerUrl)) {
+                is SendResult.Success -> return modalResult
+                is SendResult.NotConfigured -> Unit
+                is SendResult.RateLimited -> return modalResult
+                is SendResult.Failure -> Log.w(TAG, "Sahara mailer failed; falling back to EmailJS: ${modalResult.error}")
+            }
+        }
+        return sendOtpWithEmailJs(toEmail, toName, otp, serviceId, templateId, publicKey)
+    }
+
+    private suspend fun sendOtpWithSaharaMailer(
+        toEmail: String,
+        toName: String,
+        otp: String,
+        mailerUrl: String,
+    ): SendResult {
+        val idToken = try {
+            Firebase.auth.currentUser?.getIdToken(false)?.await()?.token.orEmpty()
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not get Firebase ID token for Sahara mailer", e)
+            ""
+        }
+        if (idToken.isBlank()) return SendResult.NotConfigured
+
+        return withContext(Dispatchers.IO) {
+            try {
+                val payload = JSONObject().apply {
+                    put("id_token", idToken)
+                    put("to_email", toEmail)
+                    put("to_name", toName)
+                    put("otp_code", otp)
+                    put("expiry_minutes", (OTP_EXPIRY_MS / 60_000).toString())
+                }.toString()
+
+                val request = Request.Builder()
+                    .url(mailerUrl.trim().trimEnd('/'))
+                    .addHeader("Content-Type", "application/json")
+                    .post(payload.toRequestBody("application/json".toMediaType()))
+                    .build()
+
+                val response = httpClient.newCall(request).execute()
+                val body = response.body?.string().orEmpty()
+                Log.d(TAG, "Sahara mailer response ${response.code}: $body")
+
+                if (response.isSuccessful) SendResult.Success
+                else SendResult.Failure("Sahara mailer ${response.code}: $body")
+            } catch (e: Exception) {
+                Log.e(TAG, "sendOtpWithSaharaMailer failed", e)
+                SendResult.Failure(e.message ?: "Network error")
+            }
+        }
+    }
+
+    private suspend fun sendOtpWithEmailJs(
+        toEmail: String,
+        toName: String,
+        otp: String,
+        serviceId: String,
+        templateId: String,
+        publicKey: String,
     ): SendResult = withContext(Dispatchers.IO) {
 
         

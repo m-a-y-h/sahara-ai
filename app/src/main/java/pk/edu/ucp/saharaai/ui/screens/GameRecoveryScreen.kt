@@ -58,6 +58,7 @@ import pk.edu.ucp.saharaai.ui.components.SaharaCard
 import pk.edu.ucp.saharaai.ui.components.GlassAlertDialog
 import pk.edu.ucp.saharaai.ui.components.HazeBackButton
 import pk.edu.ucp.saharaai.ui.theme.*
+import pk.edu.ucp.saharaai.utils.DesiAliasGenerator
 import pk.edu.ucp.saharaai.utils.NetworkUtils
 import pk.edu.ucp.saharaai.utils.ObservePermissionState
 import pk.edu.ucp.saharaai.utils.PermissionCopy
@@ -93,28 +94,7 @@ fun fetchRealLocation(context: Context, onLocationFetched: (String) -> Unit) {
     catch  (e: Exception)          { onLocationFetched("Location Error")     }
 }
 
-fun generateDesiAlias(): String {
-    val isMuzakar = listOf(true, false).random()
-    val (adjs, nouns) = if (isMuzakar) {
-        listOf("Bindaas","Toofani","Jalali","Ninja","Aflatoon","Tez","Masoom","Thanda",
-            "Khatta","Meetha","Karara","Chatpata","Zaalim","Shahi","Nawabi","Khufiya",
-            "Mast","Chalaak","Rangeela","Classic","Desi","Epic","Kadak","Shandar",
-            "Zabardast","Zordaar","Asli","Anokha","Sakht","Kurkura","Lazeez") to
-        listOf("Samosa","BunKabab","Roll","Paratha","Tikka","Kabab","Pulao","Zarda",
-            "Pakora","Chargha","GolGappa","Broast","Shawarma","DahiBhalla","Naan",
-            "Katakat","GolaGanda","AndaShami","RoohAfza","Falooda","Halwa","Qorma",
-            "ChapliKabab","GannayKaRas","Gajrela","Amrood","Tarbooz")
-    } else {
-        listOf("Bindaas","Toofani","Jalali","Ninja","Aflatoon","Tez","Masoom","Thandi",
-            "Khatti","Meethi","Karari","Chatpati","Zaalim","Shahi","Nawabi","Khufiya",
-            "Mast","Chalaak","Rangeeli","Classic","Desi","Epic","Kadak","Shandar",
-            "Zabardast","Zordaar","Asli","Anokhi","Sakht","Kurkuri","Lazeez") to
-        listOf("Chutni","Biryani","Lassi","Sewiyaan","Nihari","Karahi","Haleem","Sajji",
-            "Chaat","FruitChaat","DahiPhulki","Kachori","Nimko","Jalebi","Kulfi",
-            "Kheer","Firni","Barfi","ChanaChaat","AlooTikki","KashmiriChai","Pheni")
-    }
-    return "${adjs.random()}${nouns.random()}"
-}
+fun generateDesiAlias(): String = DesiAliasGenerator.generate()
 
 
 

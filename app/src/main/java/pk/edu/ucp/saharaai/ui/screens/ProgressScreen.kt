@@ -146,7 +146,7 @@ fun ProgressScreenContent(
         containerColor   = Color.Transparent,
         contentWindowInsets = WindowInsets(0, 0, 0, 0)
     ) { innerPadding ->
-        Box(modifier = Modifier.fillMaxSize()) {
+        Box(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
 
             if (progress.isLoading) {
                 Box(Modifier.fillMaxSize(), Alignment.Center) {

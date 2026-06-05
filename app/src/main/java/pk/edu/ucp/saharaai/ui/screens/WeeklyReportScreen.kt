@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -28,6 +29,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -41,6 +43,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -56,6 +59,7 @@ import pk.edu.ucp.saharaai.viewmodels.WeeklyReportViewModel
 import pk.edu.ucp.saharaai.ui.components.HazeBackButton
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeSource
+import pk.edu.ucp.saharaai.ui.components.BottomNav
 import pk.edu.ucp.saharaai.ui.components.GlassAlertDialog
 
 /**
@@ -97,67 +101,73 @@ fun WeeklyReportScreen(
                 )
             )
     ) {
-        Column(Modifier.fillMaxSize().statusBarsPadding()) {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                HazeBackButton(onClick = { navController.popBackStack() }, hazeState = hazeState)
-                Spacer(Modifier.width(4.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        text = if (isEnglish) "Weekly listening reports" else "Hafta-wari reports",
-                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.SemiBold),
-                    )
-                    Text(
-                        text = if (isEnglish) {
-                            "Saved digests — open any week to see flagged tracks."
-                        } else {
-                            "Save kiye gaye digests — kisi bhi hafte ki flag hui tracks dekhein."
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-
-            when {
-                isLoading && reports.isEmpty() -> {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator(color = SaharaStrongGreen, strokeWidth = 4.dp)
-                    }
-                }
-                error != null && reports.isEmpty() -> {
-                    Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
+        Scaffold(
+            bottomBar = { BottomNav(navController = navController, hazeState = hazeState) },
+            containerColor = Color.Transparent,
+            contentWindowInsets = WindowInsets(0, 0, 0, 0),
+        ) { innerPadding ->
+            Column(Modifier.fillMaxSize().padding(innerPadding).statusBarsPadding()) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    HazeBackButton(onClick = { navController.popBackStack() }, hazeState = hazeState)
+                    Spacer(Modifier.width(4.dp))
+                    Column(Modifier.weight(1f)) {
                         Text(
-                            text = error ?: "",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = SaharaCoral,
+                            text = if (isEnglish) "Weekly listening reports" else "Hafta-wari reports",
+                            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.SemiBold),
+                        )
+                        Text(
+                            text = if (isEnglish) {
+                                "Saved digests — open any week to see flagged tracks."
+                            } else {
+                                "Save kiye gaye digests — kisi bhi hafte ki flag hui tracks dekhein."
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 }
-                reports.isEmpty() -> {
-                    Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
-                        EmptyState(isEnglish)
+
+                when {
+                    isLoading && reports.isEmpty() -> {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator(color = SaharaStrongGreen, strokeWidth = 4.dp)
+                        }
                     }
-                }
-                else -> {
-                    LazyColumn(
-                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
-                    ) {
-                        items(reports, key = { it.weekStartIso }) { report ->
-                            ReportRow(
-                                report = report,
-                                isEnglish = isEnglish,
-                                expanded = expanded == report.weekStartIso,
-                                onToggle = {
-                                    expanded = if (expanded == report.weekStartIso) null else report.weekStartIso
-                                },
-                                onDelete = { pendingDeletion = report },
+                    error != null && reports.isEmpty() -> {
+                        Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
+                            Text(
+                                text = error ?: "",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = SaharaCoral,
                             )
+                        }
+                    }
+                    reports.isEmpty() -> {
+                        Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
+                            EmptyState(isEnglish)
+                        }
+                    }
+                    else -> {
+                        LazyColumn(
+                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            items(reports, key = { it.weekStartIso }) { report ->
+                                ReportRow(
+                                    report = report,
+                                    isEnglish = isEnglish,
+                                    expanded = expanded == report.weekStartIso,
+                                    onToggle = {
+                                        expanded = if (expanded == report.weekStartIso) null else report.weekStartIso
+                                    },
+                                    onDelete = { pendingDeletion = report },
+                                )
+                            }
                         }
                     }
                 }

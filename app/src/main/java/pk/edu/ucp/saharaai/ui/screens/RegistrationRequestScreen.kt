@@ -1,11 +1,17 @@
 package pk.edu.ucp.saharaai.ui.screens
 
 import android.Manifest
+import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.location.LocationManager
 import android.net.Uri
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -21,7 +27,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -72,6 +83,15 @@ fun RegistrationRequestScreen(
     var details by remember { mutableStateOf("") }
     var activeDocumentKey by remember { mutableStateOf<String?>(null) }
     var documentUris by remember { mutableStateOf<Map<String, Uri>>(emptyMap()) }
+    var locationPermissionGranted by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.ACCESS_FINE_LOCATION,
+            ) == PackageManager.PERMISSION_GRANTED
+        )
+    }
+    var locationServicesEnabled by remember { mutableStateOf(context.areLocationServicesEnabled()) }
     val evidenceRequirements = remember(isNgo, counselorIsMedical) {
         registrationEvidenceRequirements(isNgo, counselorIsMedical)
     }
@@ -82,6 +102,16 @@ fun RegistrationRequestScreen(
     val submitted = requestViewModel.submitted
     val error = requestViewModel.error
     val hazeState = remember { dev.chrisbanes.haze.HazeState() }
+    LaunchedEffect(submitted) {
+        if (submitted) {
+            context.showLocalizedToast(
+                isEnglish,
+                "Request submitted. You will receive an email while the team reviews your documents.",
+                "Request submit ho gayi. Team documents review karegi aur aapko email milegi.",
+                android.widget.Toast.LENGTH_LONG,
+            )
+        }
+    }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         val key = activeDocumentKey
         activeDocumentKey = null
@@ -109,7 +139,24 @@ fun RegistrationRequestScreen(
         }
         documentUris = documentUris + (key to uri)
     }
-    val applyPreciseLocation: () -> Unit = {
+    val applyPreciseLocation: (Boolean) -> Unit = applyLocation@ { openSettingsIfDisabled ->
+        locationServicesEnabled = context.areLocationServicesEnabled()
+        if (!locationServicesEnabled) {
+            requestViewModel.reportLocationError(
+                if (isEnglish) "Turn on device location in system settings, then return to continue."
+                else "System settings mein device location on karein, phir wapis aa kar continue karein."
+            )
+            if (openSettingsIfDisabled) {
+                context.showLocalizedToast(
+                    isEnglish,
+                    "Turn on device location to verify the applicant region.",
+                    "Applicant region verify karne ke liye device location on karein.",
+                    android.widget.Toast.LENGTH_LONG,
+                )
+                context.openSystemLocationSettings()
+            }
+            return@applyLocation
+        }
         requestViewModel.fetchPreciseLocation(context, isEnglish) { result ->
             city = result.city
             district = result.district
@@ -125,8 +172,12 @@ fun RegistrationRequestScreen(
             settingsEn = "Enable precise location in App settings to verify the applicant region.",
             settingsUr = "Applicant region verify karne ke liye App settings mein precise location dein.",
         ),
-        onGranted = applyPreciseLocation,
+        onGranted = {
+            locationPermissionGranted = true
+            applyPreciseLocation(true)
+        },
         onDenied = {
+            locationPermissionGranted = false
             requestViewModel.reportError(
                 if (isEnglish) "Select precise location access to submit this request."
                 else "Darkhwast bhejne ke liye precise location ki ijazat dein."
@@ -134,8 +185,10 @@ fun RegistrationRequestScreen(
         },
     )
     ObservePermissionState(locationPermissionRequester) { granted ->
-        if (granted && city.isBlank() && district.isBlank()) {
-            applyPreciseLocation()
+        locationPermissionGranted = granted
+        locationServicesEnabled = context.areLocationServicesEnabled()
+        if (granted && locationServicesEnabled && city.isBlank() && district.isBlank()) {
+            applyPreciseLocation(false)
         }
     }
 
@@ -153,12 +206,13 @@ fun RegistrationRequestScreen(
                 HazeBackButton(onClick = { navController.popBackStack() }, hazeState = hazeState)
                 Text(
                     if (isNgo) {
-                        if (isEnglish) "NGO Registration Request" else "Darkhwast bā-hesiyat-e-NGO"
+                        if (isEnglish) "NGO Registration Request" else "Darkhwast bā-hesiyat NGO"
                     } else {
-                        if (isEnglish) "Counselor Registration Request" else "Darkhwast bā-hesiyat-e-Counselor"
+                        if (isEnglish) "Counselor Registration Request" else "Darkhwast bā-hesiyat Counselor"
                     },
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f).padding(start = 10.dp),
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.ExtraBold,
                     color = SaharaStrongGreen
                 )
             }
@@ -169,15 +223,23 @@ fun RegistrationRequestScreen(
                         Icon(Icons.Default.CheckCircle, null, tint = SaharaStrongGreen, modifier = Modifier.size(40.dp))
                         Spacer(Modifier.height(8.dp))
                         Text(
-                            if (isEnglish) "Request submitted for manual document review." else "Request manual document review ke liye submit ho gayi.",
+                            if (isEnglish) "Request submitted for document review." else "Request document review ke liye submit ho gayi.",
+                            style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            if (isEnglish) "An admin will contact you by email if approved." else "Approve hone par admin email se rabta karega.",
-                            style = MaterialTheme.typography.bodySmall
+                            if (isEnglish) "Please stand by. We will email you when the review team updates your request." else "Barah-e-karam intizaar karein. Review team update degi to aapko email milegi.",
+                            style = MaterialTheme.typography.bodyMedium
                         )
                     }
                 }
+                SaharaButton(
+                    text = if (isEnglish) "Submitted" else "Submit ho gayi",
+                    onClick = {},
+                    variant = ButtonVariant.DEFAULT,
+                    enabled = false,
+                    isFullWidth = true
+                )
                 SaharaButton(
                     text = if (isEnglish) "Back" else "Wapis",
                     onClick = { navController.popBackStack() },
@@ -192,7 +254,7 @@ fun RegistrationRequestScreen(
                     "Submit verifiable credentials, location, and named evidence. Admins review each item before issuing an access key."
                 else
                     "Verifiable credentials, location aur named evidence submit karein. Access key se pehle admin har cheez review karega.",
-                style = MaterialTheme.typography.bodySmall,
+                style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             SectionTitle(if (isEnglish) "Applicant Details" else "Applicant Tafseel")
@@ -253,12 +315,13 @@ fun RegistrationRequestScreen(
             SectionTitle(if (isEnglish) "Verification" else "Tasdeeq")
             RequestField(
                 verificationBody,
-                { verificationBody = it },
+                {},
                 if (isNgo) {
                     if (isEnglish) "Registrar / verification body *" else "Registrar / verification body *"
                 } else {
                     if (isEnglish) "Verification body *" else "Verification body *"
                 },
+                readOnly = true,
             )
             RequestField(
                 registrationNumber,
@@ -281,7 +344,6 @@ fun RegistrationRequestScreen(
                 } else {
                     if (isEnglish) "Qualification and supervised experience summary *" else "Qualification aur supervised experience summary *"
                 },
-                singleLine = false
             )
 
             SectionTitle(if (isEnglish) "Location" else "Location")
@@ -290,14 +352,16 @@ fun RegistrationRequestScreen(
                     "Precise foreground location is used once to set ${if (isNgo) "the NGO city" else "your district and city"}."
                 else
                     "Precise location sirf aik dafa ${if (isNgo) "NGO ka shehar" else "district aur shehar"} set karne ke liye li jayegi.",
-                style = MaterialTheme.typography.bodySmall,
+                style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             OutlinedButton(
                 onClick = {
                     if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
-                        applyPreciseLocation()
+                        locationPermissionGranted = true
+                        applyPreciseLocation(true)
                     } else {
+                        locationPermissionGranted = false
                         locationPermissionRequester.request()
                     }
                 },
@@ -306,12 +370,16 @@ fun RegistrationRequestScreen(
             ) {
                 Icon(Icons.Default.LocationOn, null)
                 Spacer(Modifier.width(8.dp))
-                Text(
-                    when {
+                val needsLocation = city.isBlank()
+                RequiredLabel(
+                    text = when {
                         requestViewModel.isLocating -> if (isEnglish) "Getting precise location..." else "Precise location li ja rahi hai..."
                         city.isNotBlank() -> if (isEnglish) "Refresh precise location" else "Precise location dobara lein"
-                        else -> if (isEnglish) "Use precise location *" else "Precise location dein *"
-                    }
+                        !locationPermissionGranted -> if (isEnglish) "Enable precise location" else "Precise location enable karein"
+                        !locationServicesEnabled -> if (isEnglish) "Turn on device location" else "Device location on karein"
+                        else -> if (isEnglish) "Use precise location" else "Precise location dein"
+                    },
+                    required = needsLocation && !requestViewModel.isLocating,
                 )
             }
             if (city.isNotBlank()) {
@@ -345,7 +413,7 @@ fun RegistrationRequestScreen(
                     } else {
                         "HEC-attested education evidence use karein. Medical/psychiatry applicants PMDC/PMC registration lazmi dein."
                     },
-                style = MaterialTheme.typography.bodySmall,
+                style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             // Note about accepted formats — surfaced once for the whole
@@ -373,36 +441,40 @@ fun RegistrationRequestScreen(
             }
             RequestField(details, { details = it }, if (isEnglish) "Additional review notes" else "Additional review notes", false)
             if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+            SaharaButton(
+                text = when {
+                    isSubmitting -> if (isEnglish) "Submitting..." else "Submit ho rahi hai..."
+                    submitted -> if (isEnglish) "Submitted" else "Submit ho gayi"
+                    else -> if (isEnglish) "Submit for Review" else "Review ke liye Bhejein"
+                },
+                onClick = {
+                    val region = if (isNgo) city else "$district, $city"
+                    val missingDocuments = requiredDocumentKeys.filterNot { documentUris.containsKey(it) }
+                    when {
+                        name.isBlank() || email.isBlank() || (isNgo && organization.isBlank()) ->
+                            requestViewModel.reportError(if (isEnglish) "Required identity fields must be completed." else "Zaroori shanakhti fields mukammal karein.")
+                        verificationBody.isBlank() || registrationNumber.isBlank() || qualificationSummary.isBlank() ->
+                            requestViewModel.reportError(if (isEnglish) "Verification fields must be completed." else "Verification fields mukammal karein.")
+                        city.isBlank() || (!isNgo && district.isBlank()) ->
+                            requestViewModel.reportError(if (isEnglish) "Precise location is required." else "Precise location zaroori hai.")
+                        missingDocuments.isNotEmpty() ->
+                            requestViewModel.reportError(if (isEnglish) "Attach all required evidence files." else "Tamam required evidence files lagayen.")
+                        else -> {
+                            requestViewModel.submit(
+                                applicantType, name, organization, email,
+                                phone, region, city, if (isNgo) "" else district,
+                                locationAccuracyMeters, verificationBody, registrationNumber,
+                                qualificationSummary, details, documentUris, requiredDocumentKeys
+                            )
+                        }
+                    }
+                },
+                variant = ButtonVariant.DEFAULT,
+                enabled = !isSubmitting && !submitted,
+                isFullWidth = true
+            )
             if (isSubmitting) {
                 LinearProgressIndicator(Modifier.fillMaxWidth(), color = SaharaStrongGreen)
-            } else {
-                SaharaButton(
-                    text = if (isEnglish) "Submit for Review" else "Review ke liye Bhejein",
-                    onClick = {
-                        val region = if (isNgo) city else "$district, $city"
-                        val missingDocuments = requiredDocumentKeys.filterNot { documentUris.containsKey(it) }
-                        when {
-                            name.isBlank() || email.isBlank() || (isNgo && organization.isBlank()) ->
-                                requestViewModel.reportError(if (isEnglish) "Required identity fields must be completed." else "Zaroori shanakhti fields mukammal karein.")
-                            verificationBody.isBlank() || registrationNumber.isBlank() || qualificationSummary.isBlank() ->
-                                requestViewModel.reportError(if (isEnglish) "Verification fields must be completed." else "Verification fields mukammal karein.")
-                            city.isBlank() || (!isNgo && district.isBlank()) ->
-                                requestViewModel.reportError(if (isEnglish) "Precise location is required." else "Precise location zaroori hai.")
-                            missingDocuments.isNotEmpty() ->
-                                requestViewModel.reportError(if (isEnglish) "Attach all required evidence files." else "Tamam required evidence files lagayen.")
-                            else -> {
-                                requestViewModel.submit(
-                                    applicantType, name, organization, email,
-                                    phone, region, city, if (isNgo) "" else district,
-                                    locationAccuracyMeters, verificationBody, registrationNumber,
-                                    qualificationSummary, details, documentUris, requiredDocumentKeys
-                                )
-                            }
-                        }
-                    },
-                    variant = ButtonVariant.DEFAULT,
-                    isFullWidth = true
-                )
             }
             Spacer(Modifier.navigationBarsPadding().height(16.dp))
         }
@@ -413,10 +485,58 @@ fun RegistrationRequestScreen(
 private fun SectionTitle(text: String) {
     Text(
         text = text,
-        style = MaterialTheme.typography.titleSmall,
-        fontWeight = FontWeight.Bold,
+        style = MaterialTheme.typography.titleLarge,
+        fontWeight = FontWeight.ExtraBold,
         color = SaharaStrongGreen,
-        modifier = Modifier.padding(top = 8.dp)
+        modifier = Modifier.padding(top = 16.dp, bottom = 2.dp)
+    )
+}
+
+@Composable
+private fun RequiredLabel(
+    text: String,
+    required: Boolean,
+    modifier: Modifier = Modifier,
+    fontWeight: FontWeight? = null,
+    maxLines: Int = Int.MAX_VALUE,
+    style: TextStyle? = null,
+    overflow: TextOverflow = TextOverflow.Ellipsis,
+) {
+    val cleanText = text.trim().removeSuffix("*").trimEnd()
+    val showRequired = required || text.trimEnd().endsWith("*")
+    Text(
+        modifier = modifier,
+        text = buildAnnotatedString {
+            append(cleanText)
+            if (showRequired) {
+                append(" ")
+                withStyle(
+                    SpanStyle(
+                        color = SaharaCoral,
+                        fontWeight = FontWeight.ExtraBold,
+                    )
+                ) {
+                    append("*")
+                }
+            }
+        },
+        fontWeight = fontWeight,
+        maxLines = maxLines,
+        overflow = overflow,
+        style = style ?: LocalTextStyle.current,
+    )
+}
+
+private fun Context.areLocationServicesEnabled(): Boolean {
+    val manager = getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return false
+    return manager.isProviderEnabled(LocationManager.GPS_PROVIDER) ||
+        manager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+}
+
+private fun Context.openSystemLocationSettings() {
+    startActivity(
+        Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     )
 }
 
@@ -458,34 +578,23 @@ private fun EvidenceUploadRow(
             modifier = Modifier.fillMaxWidth().padding(14.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(
-                if (selected) Icons.Default.CheckCircle else Icons.Default.AttachFile,
-                null,
-                tint = SaharaStrongGreen
-            )
-            Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f)) {
-                // Title with a trailing red asterisk when the document is
-                // required — gives the same hard-required affordance as a
-                // form field. Optional docs keep the existing "Optional…"
-                // subtext.
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                ProvideTextStyle(MaterialTheme.typography.titleSmall) {
+                    RequiredLabel(
                         text = if (isEnglish) requirement.titleEn else requirement.titleUr,
-                        fontWeight = FontWeight.Bold
+                        required = requirement.required,
+                        modifier = Modifier.fillMaxWidth(),
+                        fontWeight = FontWeight.Bold,
                     )
-                    if (requirement.required) {
-                        Text(
-                            text = " *",
-                            color = SaharaCoral,
-                            fontWeight = FontWeight.Bold,
-                        )
-                    }
                 }
                 Text(
                     text = if (isEnglish) requirement.descEn else requirement.descUr,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    modifier = Modifier.fillMaxWidth(),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 if (requirement.required) {
                     Text(
@@ -502,14 +611,40 @@ private fun EvidenceUploadRow(
                 }
             }
             Spacer(Modifier.width(8.dp))
-            TextButton(onClick = onClick) {
-                Text(
-                    if (selected) {
-                        if (isEnglish) "Replace" else "Replace"
-                    } else {
-                        if (isEnglish) "Attach" else "Attach"
-                    }
+            val buttonText = if (selected) {
+                if (isEnglish) "Replace" else "Tabdeel"
+            } else {
+                if (isEnglish) "Attach" else "Attach"
+            }
+            val buttonIcon = if (selected) Icons.Default.CheckCircle else Icons.Default.AttachFile
+            val buttonColors = if (selected) {
+                ButtonDefaults.buttonColors(
+                    containerColor = SaharaStrongGreen.copy(alpha = 0.16f),
+                    contentColor = SaharaStrongGreen,
                 )
+            } else {
+                ButtonDefaults.outlinedButtonColors(contentColor = SaharaStrongGreen)
+            }
+            if (selected) {
+                Button(
+                    onClick = onClick,
+                    colors = buttonColors,
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                ) {
+                    Icon(buttonIcon, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(buttonText, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                }
+            } else {
+                OutlinedButton(
+                    onClick = onClick,
+                    colors = buttonColors,
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                ) {
+                    Icon(buttonIcon, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(buttonText, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                }
             }
         }
     }
@@ -628,16 +763,40 @@ private fun RequestField(
     label: String,
     singleLine: Boolean = true,
     enabled: Boolean = true,
+    required: Boolean = label.trimEnd().endsWith("*"),
+    readOnly: Boolean = false,
 ) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isFocused by interactionSource.collectIsFocusedAsState()
+    val labelText = label.trim().removeSuffix("*").trim()
+    val shouldWrapLabel = labelText.length > 32
+    val labelIsCompact = isFocused || value.isNotEmpty() || shouldWrapLabel
+    val labelStyle = if (labelIsCompact) {
+        MaterialTheme.typography.bodySmall
+    } else {
+        MaterialTheme.typography.bodyMedium
+    }
     OutlinedTextField(
         value = value,
         onValueChange = onChange,
-        label = { Text(label) },
+        label = {
+            RequiredLabel(
+                text = label,
+                required = required,
+                maxLines = if (shouldWrapLabel) 2 else 1,
+                style = labelStyle,
+                overflow = TextOverflow.Clip,
+            )
+        },
         singleLine = singleLine,
-        maxLines = if (singleLine) 1 else 4,
+        minLines = 1,
+        maxLines = if (singleLine) 1 else 2,
         enabled = enabled,
+        readOnly = readOnly,
+        interactionSource = interactionSource,
         shape = RoundedCornerShape(14.dp),
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().height(64.dp),
+        textStyle = MaterialTheme.typography.bodyMedium,
         colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = SaharaStrongGreen)
     )
 }

@@ -34,6 +34,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeSource
+import androidx.navigation.NavController
 import pk.edu.ucp.saharaai.ui.components.*
 import pk.edu.ucp.saharaai.ui.theme.*
 import pk.edu.ucp.saharaai.viewmodels.HelpCenterViewModel
@@ -44,6 +45,7 @@ private data class ContactItem(val icon: ImageVector, val color: Color, val labe
 
 @Composable
 fun HelpCenterScreen(
+    navController: NavController,
     onNavigateBack    : () -> Unit,
     onNavigateToEmergency: () -> Unit,
     isEnglish         : Boolean = false,
@@ -127,70 +129,76 @@ fun HelpCenterScreen(
                 .background(Brush.radialGradient(listOf(SaharaSky.copy(if (isDark) .2f else .18f), Color.Transparent))))
         }
 
-        Column(
-            Modifier
-                .fillMaxSize()
-                .statusBarsPadding()
-                .padding(horizontal = 20.dp)
-                .verticalScroll(rememberScrollState())
-        ) {
-            Spacer(Modifier.height(16.dp))
+        Scaffold(
+            bottomBar = { BottomNav(navController = navController, hazeState = hazeState) },
+            containerColor = Color.Transparent,
+            contentWindowInsets = WindowInsets(0, 0, 0, 0),
+        ) { innerPadding ->
+            Column(
+                Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+                    .statusBarsPadding()
+                    .padding(horizontal = 20.dp)
+                    .verticalScroll(rememberScrollState())
+            ) {
+                Spacer(Modifier.height(16.dp))
 
             
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                HazeBackButton(onClick = onNavigateBack, hazeState = hazeState, tint = primaryGreen)
-                Spacer(Modifier.width(16.dp))
-                Column {
-                    Text(
-                        if (isEnglish) "Help Center" else "Madad",
-                        style      = MaterialTheme.typography.headlineMedium,
-                        fontWeight = FontWeight.Bold,
-                        color      = primaryGreen
-                    )
-                    Text(
-                        if (isEnglish) "FAQs & support resources" else "Sawalaat aur madad",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-
-            Spacer(Modifier.height(24.dp))
-
-            
-            SectionHeading(
-                title = if (isEnglish) "Immediate Help" else "Fauri Madad",
-                subtitle = if (isEnglish) "Emergency and support channels" else "Emergency aur support rabtay",
-                icon = Icons.Default.HealthAndSafety,
-                color = SaharaCoral,
-                softText = softText,
-            )
-
-            UrgentSupportPanel(
-                isEnglish = isEnglish,
-                hazeState = hazeState,
-                unresolvedBugCount = unresolvedBugCount,
-                onEmergency = onNavigateToEmergency,
-                onEmail = {
-                    val intent = Intent(Intent.ACTION_SENDTO).apply {
-                        data = Uri.parse("mailto:support@saharaai.pk")
-                        putExtra(Intent.EXTRA_SUBJECT, "Sahara AI Support")
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    HazeBackButton(onClick = onNavigateBack, hazeState = hazeState, tint = primaryGreen)
+                    Spacer(Modifier.width(16.dp))
+                    Column {
+                        Text(
+                            if (isEnglish) "Help Center" else "Madad",
+                            style      = MaterialTheme.typography.headlineMedium,
+                            fontWeight = FontWeight.Bold,
+                            color      = primaryGreen
+                        )
+                        Text(
+                            if (isEnglish) "FAQs & support resources" else "Sawalaat aur madad",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
-                    context.startActivity(Intent.createChooser(intent, "Send Email"))
-                },
-                onBug = { showBugReports = true },
-            )
+                }
 
-            Spacer(Modifier.height(28.dp))
+                Spacer(Modifier.height(24.dp))
 
             
-            Text(
-                if (isEnglish) "Frequently Asked Questions" else "Aksar Poochhe Jane Wale Sawalaat",
-                style      = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
-                color      = softText,
-                modifier   = Modifier.padding(start = 4.dp, bottom = 12.dp)
-            )
+                SectionHeading(
+                    title = if (isEnglish) "Immediate Help" else "Fauri Madad",
+                    subtitle = if (isEnglish) "Emergency and support channels" else "Emergency aur support rabtay",
+                    icon = Icons.Default.HealthAndSafety,
+                    color = SaharaCoral,
+                    softText = softText,
+                )
+
+                UrgentSupportPanel(
+                    isEnglish = isEnglish,
+                    hazeState = hazeState,
+                    unresolvedBugCount = unresolvedBugCount,
+                    onEmergency = onNavigateToEmergency,
+                    onEmail = {
+                        val intent = Intent(Intent.ACTION_SENDTO).apply {
+                            data = Uri.parse("mailto:support@saharaai.pk")
+                            putExtra(Intent.EXTRA_SUBJECT, "Sahara AI Support")
+                        }
+                        context.startActivity(Intent.createChooser(intent, "Send Email"))
+                    },
+                    onBug = { showBugReports = true },
+                )
+
+                Spacer(Modifier.height(28.dp))
+
+            
+                Text(
+                    if (isEnglish) "Frequently Asked Questions" else "Aksar Poochhe Jane Wale Sawalaat",
+                    style      = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color      = softText,
+                    modifier   = Modifier.padding(start = 4.dp, bottom = 12.dp)
+                )
 
             SaharaCard(variant = CardVariant.GLASS, hazeState = hazeState, modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(vertical = 4.dp)) {
@@ -242,6 +250,7 @@ fun HelpCenterScreen(
             )
         }
     }
+}
 }
 
 @Composable

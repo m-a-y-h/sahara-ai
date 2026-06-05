@@ -81,13 +81,19 @@ fun GlassOverlay(
                     inputScale = HazeInputScale.Auto
                     blurEffect { style = glassStyle }
                 }
+                // Light-mode fill bumped from 0.22 -> 0.35. With the new
+                // popupGlass tint (0.55 white) sitting above this layer,
+                // 0.35 gives the card a definite "frosted glass slab"
+                // presence even when the screen behind is bright. Dark
+                // mode is fine at 0.06 — popups already read against the
+                // dark surface.
                 .background(
                     if (isDark) Color.White.copy(alpha = 0.06f)
-                    else Color.White.copy(alpha = 0.22f)
+                    else Color.White.copy(alpha = 0.35f)
                 )
                 .border(
                     1.dp,
-                    Color.White.copy(alpha = if (isDark) 0.18f else 0.55f),
+                    Color.White.copy(alpha = if (isDark) 0.18f else 0.7f),
                     RoundedCornerShape(24.dp),
                 )
                 .pointerInput(Unit) { detectTapGestures(onTap = {}) }

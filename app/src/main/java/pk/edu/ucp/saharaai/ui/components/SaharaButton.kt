@@ -87,10 +87,13 @@ fun SaharaButton(
                         )
                 ) {
                     Text(
-                        text = text, modifier = Modifier.align(Alignment.Center), fontWeight = FontWeight.Bold,
-                        // White in both light + dark — the green tint behind this
-                        // variant is saturated enough that dark text on it
-                        // (the previous light-mode choice) didn't read.
+                        text = text, modifier = Modifier.align(Alignment.Center),
+                        // ExtraBold (was Bold) so the white text doesn't
+                        // fade against the green tint in screenshots —
+                        // user complaint was that snapshots of the chat /
+                        // login screens lost the button label entirely
+                        // when re-encoded. White in both modes.
+                        fontWeight = FontWeight.ExtraBold,
                         color = Color.White,
                         style = finalTextStyle
                     )

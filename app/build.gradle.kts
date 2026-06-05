@@ -43,6 +43,9 @@ android {
         buildConfigField("String", "EMAILJS_TEMPLATE_ID", "\"$emailjsTemplateId\"")
         buildConfigField("String", "EMAILJS_PUBLIC_KEY",  "\"$emailjsPublicKey\"")
 
+        val saharaMailerUrl = localProperties.getProperty("sahara.mailer.url") ?: ""
+        buildConfigField("String", "SAHARA_MAILER_URL", "\"$saharaMailerUrl\"")
+
         val saharaAiChatUrl        = localProperties.getProperty("sahara.ai.chat.url")        ?: ""
         val saharaLensScanUrl      = localProperties.getProperty("sahara.lens.scan.url")      ?: ""
         val saharaVoiceAnalyzeUrl  = localProperties.getProperty("sahara.voice.analyze.url")  ?: ""

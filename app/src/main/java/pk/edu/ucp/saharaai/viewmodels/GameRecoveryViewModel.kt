@@ -12,6 +12,7 @@ import kotlinx.coroutines.launch
 import pk.edu.ucp.saharaai.data.remote.RealtimeDBService
 import pk.edu.ucp.saharaai.data.repository.ChatRepository
 import pk.edu.ucp.saharaai.ui.screens.GlobalAppState
+import pk.edu.ucp.saharaai.utils.DesiAliasGenerator
 import pk.edu.ucp.saharaai.utils.NotificationManager
 import java.util.Locale
 
@@ -123,50 +124,7 @@ class GameRecoveryViewModel : ViewModel() {
         }
     }
 
-    private fun generateDesiAlias(): String {
-        val isMuzakar = listOf(true, false).random()
-
-        val (adjs, nouns) = if (isMuzakar) {
-            listOf(
-                "Bindaas", "Toofani", "Jalali", "Ninja", "Aflatoon", "Tez", "Masoom",
-                "Thanda", "Khatta", "Meetha", "Karara", "Chatpata", "Zaalim", "Shahi",
-                "Nawabi", "Khufiya", "Mast", "Chalaak", "Rangeela", "Classic", "Desi",
-                "Epic", "Kadak", "Awesome", "Shandar", "Zabardast", "Zordaar", "Asli",
-                "Anokha", "Sakht", "Kurkura", "Lazeez", "Ajeeb", "Pyaara", "Seedha",
-                "Aakhri", "Bhunawa", "Taza", "VVIP", "Royal"
-            ) to listOf(
-                "Samosa", "BunKabab", "Roll", "Paratha", "Tikka", "Kabab", "Pulao",
-                "Zarda", "Pakora", "Chargha", "GolGappa", "Paparh", "Broast", "Shawarma",
-                "DahiBhalla", "Naan", "Kulcha", "Taftan", "Katakat", "GolaGanda",
-                "AndaShami", "Pathoora", "Sandal", "RoohAfza", "Naurus", "JamEShireen",
-                "Talbeena", "Sattu", "LimuPani", "Kaju", "Badam", "Akhrot", "Pista",
-                "Chilghoza", "Makhaana", "Gurh", "Falooda", "Halwa", "Patisa",
-                "SohanHalwa", "Pera", "DoodhSoda", "Qorma", "Keema", "Saag", "SiriPaaye",
-                "Bong", "Anda", "GannayKaRas", "Gajrela", "Amrood", "Aam", "Falsa",
-                "Jamun", "Kharbooza", "Tarbooz", "Singhara", "ChapliKabab"
-            )
-        } else {
-            listOf(
-                "Bindaas", "Toofani", "Jalali", "Ninja", "Aflatoon", "Tez", "Masoom",
-                "Thandi", "Khatti", "Meethi", "Karari", "Chatpati", "Zaalim", "Shahi",
-                "Nawabi", "Khufiya", "Mast", "Chalaak", "Rangeeli", "Classic", "Desi",
-                "Epic", "Kadak", "Awesome", "Shandar", "Zabardast", "Zordaar", "Asli",
-                "Anokhi", "Sakht", "Kurkuri", "Lazeez", "Ajeeb", "Pyaari", "Seedhi",
-                "Aakhri", "Bhuni", "Taza", "VVIP", "Royal"
-            ) to listOf(
-                "Chutni", "Biryani", "Lassi", "Khashkhash", "Sewiyaan", "Nihari",
-                "Karahi", "Haleem", "Sajji", "Chaat", "FruitChaat", "DahiPhulki",
-                "Papri", "Boondi", "Golgappi", "Chhalli", "Makai", "ShamiTikki",
-                "DaalMash", "Kachori", "Nimko", "Mungphali", "Rewari", "Khajoor",
-                "Supari", "Saunf", "Panjeeri", "DoodhPati", "KashmiriChai", "PeshawariChai",
-                "Jalebi", "Kulfi", "Kheer", "Firni", "Barfi", "Gajak", "ChanaChaat",
-                "AlooTikki", "Boti", "Chapati", "Methi", "Lobia", "Ilaichi",
-                "Kishmish", "Khubani", "Anjeer", "Sikanjabeen", "Pheni", "Qulfi",
-                "Baqarkhani", "Chai"
-            )
-        }
-        return "${adjs.random()}${nouns.random()}"
-    }
+    private fun generateDesiAlias(): String = DesiAliasGenerator.generate()
 
     private fun fetchRealLocation(context: Context, onLocationFetched: (String) -> Unit) {
         val fusedLocationClient = LocationServices.getFusedLocationProviderClient(context)

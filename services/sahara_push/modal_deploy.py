@@ -1,6 +1,6 @@
 """FCM push + email sender — delivers SAHARA in-app and approval-flow notifications.
 
-Three jobs run on the same cron (every minute):
+Four jobs run on the same cron (every minute), plus one direct mail endpoint:
 
   * ``push_pending``  — original. Scans ``user_notifications/{uid}/{id}`` for
     notifications that haven't been pushed yet and sends them via FCM to the
@@ -13,11 +13,24 @@ Three jobs run on the same cron (every minute):
     notification when a new approval lands. Stamps each item so admins aren't
     re-pinged about the same case.
 
+  * ``send_application_acknowledgements`` — NEW. Scans new registration
+    requests marked ``ackEmailStatus=PENDING`` and emails the applicant that
+    their documents are in review.
+
+  * ``deliver_registration_rejections`` — NEW. Scans
+    ``registration_rejection_deliveries`` for PENDING entries written when an
+    admin rejects an application and emails the applicant with the review note.
+
   * ``deliver_keys`` — NEW. Scans ``key_deliveries`` for PENDING entries
     written by ``approveRegistrationRequest``, pushes the issued key to the
     applicant's saved FCM token (the app captures it at submission), AND
     sends an email containing the key. Flips the entry to SENT. Email needs
     SMTP env vars (see Setup); without them only the push is attempted.
+
+  * ``send_otp_email`` — direct HTTPS endpoint. The Android app calls this
+    during signup verification so OTPs use the same SAHARA AI SMTP sender
+    instead of the old EmailJS sender. The endpoint verifies the caller's
+    Firebase ID token before sending.
 
 Setup (one time):
     modal secret create firebase-admin \\
@@ -40,7 +53,10 @@ import modal
 
 APP_NAME = "sahara-push"
 
-image = modal.Image.debian_slim(python_version="3.11").pip_install("firebase-admin==6.5.0")
+image = modal.Image.debian_slim(python_version="3.11").pip_install(
+    "firebase-admin==6.5.0",
+    "fastapi[standard]==0.115.6",
+)
 app = modal.App(name=APP_NAME, image=image)
 
 # Firebase service account + RTDB URL — required.
@@ -48,10 +64,10 @@ FB_SECRET = modal.Secret.from_name(
     "firebase-admin", required_keys=["FIREBASE_SERVICE_ACCOUNT", "FIREBASE_DB_URL"]
 )
 
-# SMTP — used only by deliver_keys. Create the secret BEFORE deploying, even if
-# you don't have an SMTP provider yet: an empty value just means "skip the
-# email step". When you have a provider, modal secret create --update with the
-# real values and redeploy:
+# SMTP — used by application acknowledgements and key delivery. Create the
+# secret BEFORE deploying, even if you don't have an SMTP provider yet: an empty
+# value just means "skip the email step". When you have a provider,
+# modal secret create --update with the real values and redeploy:
 #
 #     modal secret create sahara-mail \
 #         SMTP_HOST=smtp.gmail.com SMTP_PORT=587 \
@@ -260,6 +276,243 @@ def _send_email(to_addr: str, subject: str, body: str) -> bool:
 @app.function(
     image=image,
     secrets=[FB_SECRET, MAIL_SECRET],
+    timeout=30,
+    scaledown_window=300,
+)
+@modal.fastapi_endpoint(method="POST", label="sahara-mailer")
+def send_otp_email(data: dict) -> dict:
+    """Immediate transactional OTP sender for Android signup verification.
+    The app supplies the signed-in Firebase user's ID token; we verify it here
+    and only allow sending to that user's own email address."""
+    _init()
+    from fastapi import HTTPException
+    from firebase_admin import auth as fb_auth
+
+    id_token = (data.get("id_token") or "").strip()
+    to_email = (data.get("to_email") or "").strip().lower()
+    to_name = (data.get("to_name") or "").strip() or to_email.split("@")[0] or "there"
+    otp_code = (data.get("otp_code") or "").strip()
+    expiry_minutes = str(data.get("expiry_minutes") or "10").strip()
+
+    if not id_token or not to_email or not otp_code:
+        raise HTTPException(status_code=400, detail="Missing required email payload.")
+    try:
+        decoded = fb_auth.verify_id_token(id_token)
+    except Exception as e:
+        print(f"[sahara-push] OTP token verification failed: {e}")
+        raise HTTPException(status_code=401, detail="Invalid Firebase token.")
+
+    token_email = (decoded.get("email") or "").strip().lower()
+    if token_email != to_email:
+        raise HTTPException(status_code=403, detail="Email does not match signed-in user.")
+
+    body = "\n".join([
+        f"Hello {to_name},",
+        "",
+        f"Your Sahara AI verification code is: {otp_code}",
+        "",
+        f"This code expires in {expiry_minutes} minutes.",
+        "If you did not request this, you can ignore this email.",
+        "",
+        "— Sahara AI",
+    ])
+    ok = _send_email(
+        to_addr=to_email,
+        subject="Your Sahara AI verification code",
+        body=body,
+    )
+    if not ok:
+        raise HTTPException(status_code=503, detail="Email sender is not configured or failed.")
+    return {"ok": True}
+
+
+@app.function(
+    image=image,
+    secrets=[FB_SECRET, MAIL_SECRET],
+    schedule=modal.Period(minutes=1),
+    timeout=120,
+)
+def send_application_acknowledgements() -> int:
+    """Email applicants after the app has stored a new registration request.
+    Only rows explicitly marked ``ackEmailStatus=PENDING`` are processed, so
+    old pending requests are not emailed retroactively after deployment."""
+    _init()
+    import time
+    from firebase_admin import db
+
+    sent = 0
+    smtp_ready = bool(os.environ.get("SMTP_HOST", "").strip())
+    for rid, row in (db.reference("registration_requests").get() or {}).items():
+        if not isinstance(row, dict):
+            continue
+        status = (row.get("status") or "").upper()
+        ack_status = (row.get("ackEmailStatus") or "").upper()
+        if status != "PENDING_REVIEW" or ack_status not in {"PENDING", "ERROR"}:
+            continue
+        attempts = int(row.get("ackEmailAttempts") or 0)
+        if ack_status == "ERROR" and attempts >= 3:
+            continue
+
+        ref = db.reference(f"registration_requests/{rid}")
+        now = int(time.time() * 1000)
+        email = (row.get("email") or "").strip()
+        if not email:
+            ref.update({
+                "ackEmailStatus": "SKIPPED_NO_EMAIL",
+                "ackEmailLastAttemptAt": now,
+            })
+            continue
+        if not smtp_ready:
+            ref.update({
+                "ackEmailStatus": "SKIPPED_NO_SMTP",
+                "ackEmailLastAttemptAt": now,
+            })
+            continue
+
+        kind = (row.get("applicantType") or "applicant").upper()
+        name = row.get("applicantName") or row.get("organizationName") or "there"
+        organization = (row.get("organizationName") or "").strip()
+        display_name = organization if kind == "NGO" and organization else name
+        body = "\n".join([
+            f"Hello {display_name},",
+            "",
+            f"We have received your Sahara AI {kind.title()} application.",
+            "Your documents are now waiting for review. Please stand by while the team verifies the information you submitted.",
+            "",
+            "We will email you again when your application is approved or if more information is needed.",
+            "",
+            "— Sahara AI",
+        ])
+        ok = _send_email(
+            to_addr=email,
+            subject=f"Sahara AI {kind.title()} application received",
+            body=body,
+        )
+        ref.update({
+            "ackEmailStatus": "SENT" if ok else "ERROR",
+            "ackEmailAttempts": attempts + 1,
+            "ackEmailLastAttemptAt": now,
+            **({"ackEmailSentAt": now} if ok else {}),
+        })
+        if ok:
+            sent += 1
+
+    print(f"[sahara-push] application acknowledgements sent={sent}")
+    return sent
+
+
+@app.function(
+    image=image,
+    secrets=[FB_SECRET, MAIL_SECRET],
+    schedule=modal.Period(minutes=1),
+    timeout=120,
+)
+def deliver_registration_rejections() -> int:
+    """Email applicants when an admin rejects a counselor/NGO application."""
+    _init()
+    import time
+    from firebase_admin import db, messaging
+
+    sent = 0
+    smtp_ready = bool(os.environ.get("SMTP_HOST", "").strip())
+    for did, row in (db.reference("registration_rejection_deliveries").get() or {}).items():
+        if not isinstance(row, dict):
+            continue
+        status = (row.get("status") or "").upper()
+        if status not in {"PENDING", "ERROR"}:
+            continue
+        attempts = int(row.get("attempts") or 0)
+        if status == "ERROR" and attempts >= 3:
+            continue
+
+        ref = db.reference(f"registration_rejection_deliveries/{did}")
+        now = int(time.time() * 1000)
+        kind = (row.get("applicantType") or "applicant").upper()
+        name = row.get("applicantName") or row.get("organizationName") or "there"
+        email = (row.get("applicantEmail") or "").strip()
+        token = (row.get("applicantToken") or "").strip()
+        notes = (row.get("reviewNotes") or "").strip()
+
+        if not email:
+            ref.update({
+                "status": "SKIPPED_NO_EMAIL",
+                "lastAttemptAt": now,
+                "attempts": attempts + 1,
+            })
+            continue
+        if not smtp_ready:
+            ref.update({
+                "status": "SKIPPED_NO_SMTP",
+                "lastAttemptAt": now,
+                "attempts": attempts + 1,
+            })
+            continue
+
+        body_lines = [
+            f"Hello {name},",
+            "",
+            f"Your Sahara AI {kind.title()} application was reviewed, but it was not approved at this time.",
+        ]
+        if notes:
+            body_lines.extend([
+                "",
+                f"Review note: {notes}",
+                "",
+                "You may submit a new request after correcting the issue above.",
+            ])
+        else:
+            body_lines.extend([
+                "",
+                "No additional review note was provided.",
+                "You may submit a new request with clearer or updated evidence.",
+            ])
+        body_lines.extend(["", "— Sahara AI"])
+        body = "\n".join(body_lines)
+
+        push_ok = False
+        if token:
+            try:
+                messaging.send(
+                    messaging.Message(
+                        token=token,
+                        notification=messaging.Notification(
+                            title=f"Sahara AI {kind.title()} application update",
+                            body="Your application was not approved. Check your email for details.",
+                        ),
+                        data={
+                            "type": "REGISTRATION_REJECTED",
+                            "applicantType": kind,
+                            "actionRoute": "welcome-settings",
+                        },
+                    )
+                )
+                push_ok = True
+            except Exception as e:
+                print(f"[sahara-push] rejection push failed delivery={did}: {e}")
+
+        email_ok = _send_email(
+            to_addr=email,
+            subject=f"Sahara AI {kind.title()} application update",
+            body=body,
+        )
+        ref.update({
+            "status": "SENT" if email_ok else "ERROR",
+            "attempts": attempts + 1,
+            "lastAttemptAt": now,
+            "pushOk": push_ok,
+            "emailOk": email_ok,
+            **({"sentAt": now} if email_ok else {}),
+        })
+        if email_ok:
+            sent += 1
+
+    print(f"[sahara-push] registration rejections delivered={sent}")
+    return sent
+
+
+@app.function(
+    image=image,
+    secrets=[FB_SECRET, MAIL_SECRET],
     schedule=modal.Period(minutes=1),
     timeout=120,
 )
@@ -347,6 +600,9 @@ def main():
         "Deployed.\n"
         "  push_pending             — user_notifications -> user device tokens (every 1m)\n"
         "  notify_admins_of_pending — new approvals -> 'admins' topic (every 1m)\n"
+        "  send_application_acknowledgements — registration requests -> applicant email (every 1m)\n"
+        "  deliver_registration_rejections — rejected registrations -> applicant email (every 1m)\n"
         "  deliver_keys             — key_deliveries -> applicant push + email (every 1m)\n"
+        "  send_otp_email            — HTTPS OTP sender at / (direct)\n"
         "Test now with: modal run sahara_push/modal_deploy.py"
     )

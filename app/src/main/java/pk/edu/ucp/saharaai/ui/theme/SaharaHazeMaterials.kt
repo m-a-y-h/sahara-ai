@@ -23,20 +23,22 @@ object SaharaHazeMaterials {
         )
     }
 
-    /** Modal-popup variant: a notably larger blur radius than [defaultGlass]
-     *  for a real frosted look, paired with a *gentle* tint so the blur
-     *  remains visible. The tint is intentionally subtle — GlassOverlay
-     *  layers a small surface fill behind this for legibility, which means
-     *  the haze itself can stay light. */
+    /** Modal-popup variant: large blur radius for a real frosted look.
+     *
+     *  Light-theme tint bumped from 0.30 -> 0.55 because the earlier value
+     *  was so subtle the dialogs read as plain translucent rectangles on
+     *  bright backdrops — no glassmorphism feeling at all. Dark-theme
+     *  tint kept where it was; popups read fine against dark backgrounds
+     *  at the lower alpha. */
     @Composable
     fun popupGlass(isDark: Boolean = isSystemInDarkTheme()): HazeBlurStyle {
         return HazeBlurStyle(
-            blurRadius = 45.dp,
+            blurRadius = 55.dp,
             noiseFactor = 0.06f,
             colorEffects = listOf(
                 HazeColorEffect.tint(
                     if (isDark) Color.Black.copy(alpha = 0.28f)
-                    else Color.White.copy(alpha = 0.30f)
+                    else Color.White.copy(alpha = 0.55f)
                 )
             )
         )
@@ -84,6 +86,20 @@ object SaharaHazeMaterials {
         )
     }
 
+    /** The `SAHARASTRONGGREENGLASS` button variant uses this style on the
+     *  haze backdrop.
+     *
+     *  Light-theme tint bumped from 0.35 -> 0.65 because the lower value
+     *  vanished against bright light-mode backgrounds (Login, Register,
+     *  Onboarding, etc.) and made the white text on the button read as
+     *  "white text on white paint." 0.65 keeps the button visibly green
+     *  whether the backdrop is a soft gradient or a pure white surface,
+     *  without going so opaque the haze blur stops mattering.
+     *
+     *  Dark-theme tint untouched at 0.35 because WelcomeScreen passes
+     *  `forceDarkTheme = true` and uses that branch — the user has signed
+     *  off on Welcome looking exactly as it does today. Changing the dark
+     *  alpha here would change Welcome. */
     @Composable
     fun buttonGreenGlass(isDark: Boolean = isSystemInDarkTheme()): HazeBlurStyle {
         return HazeBlurStyle(
@@ -92,7 +108,7 @@ object SaharaHazeMaterials {
             colorEffects = listOf(
                 HazeColorEffect.tint(
                     if (isDark) SaharaStrongGreen.copy(alpha = 0.35f)
-                    else SaharaStrongGreen.copy(alpha = 0.35f)
+                    else SaharaStrongGreen.copy(alpha = 0.65f)
                 )
             )
         )

@@ -188,7 +188,7 @@ fun WelcomeSettingsScreen(
                                 )
                             ) { append("Counselor") }
                         } else {
-                            append("Dakhil hon: ")
+                            append("Dakhil: ")
                             withLink(
                                 LinkAnnotation.Clickable(
                                     tag = "organization",
@@ -472,26 +472,35 @@ fun SecurityKeyOverlay(
 
                 Spacer(modifier = Modifier.height(14.dp))
                 HorizontalDivider(color = textColor.copy(alpha = 0.12f))
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(6.dp))
                 Text(
                     text = if (isEnglish)
                         "Need access? Submit documents for manual review."
                     else
-                        "Access chahiye? Manual review ke liye documents dein.",
+                        "Access chahiye? Review ke liye documents dein.",
                     style = MaterialTheme.typography.labelSmall,
                     color = textColor.copy(alpha = 0.72f),
                     modifier = Modifier.align(Alignment.CenterHorizontally),
                 )
-                TextButton(onClick = onApply, modifier = Modifier.align(Alignment.CenterHorizontally)) {
-                    Text(
-                        text = if (type == "COUNSELOR") {
-                            if (isEnglish) "Apply as Counselor" else "Darkhwast bā-hesiyat-e-Counselor"
-                        } else {
-                            if (isEnglish) "Apply as NGO" else "Darkhwast bā-hesiyat-e-NGO"
-                        },
-                        style = MaterialTheme.typography.labelMedium.copy(fontSize = 12.sp),
-                    )
-                }
+                Text(
+                    text = if (type == "COUNSELOR") {
+                        if (isEnglish) "Apply as Counselor" else "Darkhwast bā-hesiyat-e-Counselor"
+                    } else {
+                        if (isEnglish) "Apply as NGO" else "Darkhwast bā-hesiyat-e-NGO"
+                    },
+                    style = MaterialTheme.typography.labelMedium.copy(fontSize = 12.sp),
+                    color = SaharaStrongGreen,
+                    modifier = Modifier
+                        .align(Alignment.CenterHorizontally)
+                        .padding(top = 2.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            onClick = onApply,
+                        )
+                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                )
             }
         }
     }

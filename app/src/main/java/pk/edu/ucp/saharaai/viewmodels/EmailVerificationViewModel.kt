@@ -45,6 +45,7 @@ class EmailVerificationViewModel : ViewModel() {
                     toEmail = email,
                     toName = name.ifBlank { email.substringBefore("@") },
                     otp = otp,
+                    mailerUrl = BuildConfig.SAHARA_MAILER_URL,
                     serviceId = BuildConfig.EMAILJS_SERVICE_ID,
                     templateId = BuildConfig.EMAILJS_TEMPLATE_ID,
                     publicKey = BuildConfig.EMAILJS_PUBLIC_KEY

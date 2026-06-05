@@ -25,9 +25,22 @@
     "community_likes":        { ".read": "auth != null", ".write": "auth != null" },
     "community_replies":      { ".read": "auth != null", ".write": "auth != null" },
     "leaderboard":            { ".read": "auth != null", ".write": "auth != null" },
-    "game_leaderboard":       { ".read": "auth != null", ".write": "auth != null" },
+    "game_leaderboard":       { ".read": "auth != null", ".write": "auth != null", ".indexOn": ["alias"] },
+    "game_alias_index": {
+      ".read": "auth != null",
+      "$aliasKey": {
+        ".write": "auth != null && (!data.exists() || data.child('uid').val() === auth.uid || newData.child('uid').val() === auth.uid)"
+      }
+    },
     "payment_requests":       { ".read": "auth != null", ".write": "auth != null" },
-    "registration_requests":  { ".read": "auth != null", ".write": "auth != null" },
+    "key_deliveries":         { ".read": "auth != null", ".write": "auth != null" },
+    "registration_rejection_deliveries": { ".read": "auth != null", ".write": "auth != null" },
+    "registration_requests": {
+      ".read": "auth != null",
+      "$requestId": {
+        ".write": "auth != null || (!data.exists() && newData.exists() && newData.child('requestId').val() === $requestId && newData.child('status').val() === 'PENDING_REVIEW' && newData.child('ackEmailStatus').val() === 'PENDING' && !newData.child('issuedKey').exists() && !newData.child('reviewedBy').exists() && !newData.child('reviewedAt').exists() && newData.child('email').isString() && newData.child('applicantType').isString() && (newData.child('applicantType').val() === 'COUNSELOR' || newData.child('applicantType').val() === 'NGO'))"
+      }
+    },
     "avatar_requests":        { ".read": "auth != null", ".write": "auth != null" },
     "bug_reports":            { ".read": "auth != null", ".write": "auth != null" },
     "bug_report_daily_counts":{ ".read": "auth != null", ".write": "auth != null" },

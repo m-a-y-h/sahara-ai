@@ -48,15 +48,19 @@ private const val KEY_LANGUAGE            = "is_english"
 fun SaharaApp() {
     val context = LocalContext.current
     val prefs   = remember { context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE) }
-    val firebaseUser = remember { Firebase.auth.currentUser }
+    val savedCounselorKey = remember { prefs.getString(KEY_COUNSELOR_KEY, "") ?: "" }
+    val savedEmail        = remember { prefs.getString(KEY_USER_EMAIL, "") ?: "" }
+    val rawFirebaseUser = remember { Firebase.auth.currentUser }
+    val firebaseUser = remember(rawFirebaseUser?.uid, savedEmail, savedCounselorKey) {
+        rawFirebaseUser?.takeUnless {
+            it.isAnonymous && savedEmail.isBlank() && savedCounselorKey.isBlank()
+        }
+    }
 
     remember(firebaseUser?.uid) {
         AssessmentCache.restoreToGlobal(context, firebaseUser?.uid)
         true
     }
-
-    val savedCounselorKey = remember { prefs.getString(KEY_COUNSELOR_KEY, "") ?: "" }
-    val savedEmail        = remember { prefs.getString(KEY_USER_EMAIL, "") ?: "" }
 
     val startDestination = remember {
         when {
@@ -356,8 +360,23 @@ fun SaharaApp() {
                         navController.navigate("ngo-dashboard")
                     },
                     onNavigateToAdmin    = {
-                        hasAdminAccess = true
-                        navController.navigate("admin-dashboard")
+                        scope.launch {
+                            if (Firebase.auth.currentUser == null) {
+                                val signedIn = runCatching {
+                                    Firebase.auth.signInAnonymously().await()
+                                }.onFailure {
+                                    context.showLocalizedToast(
+                                        isEnglish,
+                                        "Could not open the admin dashboard. Enable Anonymous sign-in in Firebase Auth, or sign in first.",
+                                        "Admin dashboard nahi khul saka. Firebase Auth mein Anonymous sign-in enable karein, ya pehle sign in karein.",
+                                        android.widget.Toast.LENGTH_LONG,
+                                    )
+                                }.isSuccess
+                                if (!signedIn) return@launch
+                            }
+                            hasAdminAccess = true
+                            navController.navigate("admin-dashboard")
+                        }
                     },
                     onNavigateToCounselor = { key ->
                         counselorKey = key
@@ -615,6 +634,7 @@ fun SaharaApp() {
             composable("activity-log") {
                 RequireCurrentAssessment {
                     ActivityLogScreen(
+                        navController   = navController,
                         onNavigateBack = { navController.popBackStack() },
                         isEnglish      = isEnglish
                     )
@@ -632,6 +652,7 @@ fun SaharaApp() {
 
             composable("help-center") {
                 HelpCenterScreen(
+                    navController        = navController,
                     onNavigateBack        = { navController.popBackStack() },
                     onNavigateToEmergency = {
                         navController.navigate("emergency") { launchSingleTop = true }
@@ -651,6 +672,7 @@ fun SaharaApp() {
             composable("voice-analysis") {
                 RequireCurrentAssessment {
                     VoiceAnalysisScreen(
+                        navController     = navController,
                         onNavigateBack   = { navController.popBackStack() },
                         onNavigateToChat = { navController.navigate("chat") { launchSingleTop = true } },
                         isEnglish        = isEnglish

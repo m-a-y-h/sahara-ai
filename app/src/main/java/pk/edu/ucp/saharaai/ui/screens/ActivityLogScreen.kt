@@ -27,6 +27,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.navigation.NavController
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeSource
 import pk.edu.ucp.saharaai.ui.components.*
@@ -40,6 +41,7 @@ import java.util.*
 
 @Composable
 fun ActivityLogScreen(
+    navController: NavController,
     onNavigateBack: () -> Unit,
     isEnglish     : Boolean = false,
     activityLogViewModel: ActivityLogViewModel = viewModel()
@@ -87,43 +89,52 @@ fun ActivityLogScreen(
                 .background(Brush.radialGradient(listOf(SaharaSky.copy(if (isDark) .2f else .18f), Color.Transparent))))
         }
 
-        Column(
-            Modifier.fillMaxSize().statusBarsPadding()
-                .padding(horizontal = 20.dp).verticalScroll(rememberScrollState())
-        ) {
-            Spacer(Modifier.height(16.dp))
+        Scaffold(
+            bottomBar = { BottomNav(navController = navController, hazeState = hazeState) },
+            containerColor = Color.Transparent,
+            contentWindowInsets = WindowInsets(0, 0, 0, 0),
+        ) { innerPadding ->
+            Column(
+                Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+                    .statusBarsPadding()
+                    .padding(horizontal = 20.dp)
+                    .verticalScroll(rememberScrollState())
+            ) {
+                Spacer(Modifier.height(16.dp))
 
             
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                HazeBackButton(onClick = onNavigateBack, hazeState = hazeState, tint = primaryGreen)
-                Spacer(Modifier.width(12.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(if (isEnglish) "Weekly Report" else "Hafta Wari Report",
-                        style = MaterialTheme.typography.headlineMedium,
-                        fontWeight = FontWeight.Bold, color = primaryGreen)
-                    Text(weekLabel, style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                
-                if (report.memberSinceDays > 0) {
-                    Surface(shape = RoundedCornerShape(20.dp),
-                        color = SaharaStrongGreen.copy(.15f)) {
-                        Text("Day ${report.memberSinceDays}",
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = SaharaStrongGreen,
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    HazeBackButton(onClick = onNavigateBack, hazeState = hazeState, tint = primaryGreen)
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(if (isEnglish) "Weekly Report" else "Hafta Wari Report",
+                            style = MaterialTheme.typography.headlineMedium,
+                            fontWeight = FontWeight.Bold, color = primaryGreen)
+                        Text(weekLabel, style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+
+                    if (report.memberSinceDays > 0) {
+                        Surface(shape = RoundedCornerShape(20.dp),
+                            color = SaharaStrongGreen.copy(.15f)) {
+                            Text("Day ${report.memberSinceDays}",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = SaharaStrongGreen,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp))
+                        }
                     }
                 }
-            }
 
-            Spacer(Modifier.height(20.dp))
+                Spacer(Modifier.height(20.dp))
 
-            if (isLoading) {
-                Box(Modifier.fillMaxWidth().padding(top = 80.dp), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = primaryGreen)
-                }
-            } else {
+                if (isLoading) {
+                    Box(Modifier.fillMaxWidth().padding(top = 80.dp), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(color = primaryGreen)
+                    }
+                } else {
 
                 
                 if (report.flags.isNotEmpty()) {
@@ -233,7 +244,8 @@ fun ActivityLogScreen(
                 }
             }
 
-            Spacer(Modifier.height(40.dp))
+                Spacer(Modifier.height(40.dp))
+            }
         }
     }
 }

@@ -45,6 +45,10 @@ class RegistrationRequestViewModel : ViewModel() {
         error = message
     }
 
+    fun reportLocationError(message: String) {
+        locationError = message
+    }
+
     fun fetchPreciseLocation(
         context: Context,
         isEnglish: Boolean,
@@ -171,9 +175,23 @@ class RegistrationRequestViewModel : ViewModel() {
             ).onSuccess {
                 submitted = true
             }.onFailure {
-                error = it.message.orEmpty()
+                error = friendlySubmitError(it)
             }
             isSubmitting = false
+        }
+    }
+
+    private fun friendlySubmitError(error: Throwable): String {
+        val message = error.message.orEmpty()
+        val lowerMessage = message.lowercase()
+        return when {
+            "permission denied" in lowerMessage || "permission_denied" in lowerMessage ->
+                "Submission is blocked by Firebase Database rules. Deploy the updated database rules, then try again."
+            "network" in lowerMessage || "unable to resolve host" in lowerMessage ->
+                "Network error. Check your internet connection and try again."
+            message.isBlank() ->
+                "Could not submit this request. Please try again."
+            else -> message
         }
     }
 }

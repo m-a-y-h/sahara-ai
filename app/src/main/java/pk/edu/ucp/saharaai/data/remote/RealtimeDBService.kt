@@ -406,7 +406,11 @@ object RealtimeDBService {
                 }
                 trySend(list)
             }
-            override fun onCancelled(error: DatabaseError) { Log.w("RealtimeDBService", "RTDB listener cancelled", error.toException()); close() }
+            override fun onCancelled(error: DatabaseError) {
+                val exception = error.toException()
+                Log.w("RealtimeDBService", "online counselors listener cancelled", exception)
+                close(exception)
+            }
         })
         awaitClose { ref.removeEventListener(listener) }
     }
@@ -416,7 +420,11 @@ object RealtimeDBService {
         val ref = db.getReference("counselor_keys").child(key)
         val listener = ref.addValueEventListener(object : ValueEventListener {
             override fun onDataChange(snap: DataSnapshot) = trySend(snap.value as? Map<String, Any>).let {}
-            override fun onCancelled(error: DatabaseError) { Log.w("RealtimeDBService", "RTDB listener cancelled", error.toException()); close() }
+            override fun onCancelled(error: DatabaseError) {
+                val exception = error.toException()
+                Log.w("RealtimeDBService", "counselor data listener cancelled", exception)
+                close(exception)
+            }
         })
         awaitClose { ref.removeEventListener(listener) }
     }
@@ -1960,7 +1968,7 @@ object RealtimeDBService {
 
     private suspend fun reserveGameAlias(uid: String, alias: String) {
         val aliasKey = gameAliasKey(alias)
-        val existingAliasSnap = db.getReference("game_recovery")
+        val existingAliasSnap = db.getReference("game_leaderboard")
             .orderByChild("alias")
             .equalTo(alias)
             .limitToFirst(1)
@@ -2325,6 +2333,8 @@ object RealtimeDBService {
                 "documentUrls" to documentUrls,
                 "requiredDocumentKeys" to requiredDocumentKeys,
                 "status" to "PENDING_REVIEW",
+                "ackEmailStatus" to "PENDING",
+                "ackEmailAttempts" to 0,
                 "createdAt" to System.currentTimeMillis()
             )
         ).await()
@@ -2476,12 +2486,29 @@ object RealtimeDBService {
         reviewedBy: String,
         reviewNotes: String
     ): Result<Unit> = runCatching {
-        db.getReference("registration_requests").child(requestId).updateChildren(
+        val timestamp = System.currentTimeMillis()
+        val requestRef = db.getReference("registration_requests").child(requestId)
+        requestRef.updateChildren(
             mapOf(
                 "status" to "REJECTED",
                 "reviewedBy" to reviewedBy,
                 "reviewNotes" to reviewNotes.trim(),
-                "reviewedAt" to System.currentTimeMillis()
+                "reviewedAt" to timestamp
+            )
+        ).await()
+
+        val snapshot = requestRef.get().await()
+        db.getReference("registration_rejection_deliveries").child(requestId).setValue(
+            mapOf(
+                "requestId" to requestId,
+                "applicantType" to snapshot.child("applicantType").getValue(String::class.java).orEmpty(),
+                "applicantName" to snapshot.child("applicantName").getValue(String::class.java).orEmpty(),
+                "organizationName" to snapshot.child("organizationName").getValue(String::class.java).orEmpty(),
+                "applicantEmail" to snapshot.child("email").getValue(String::class.java).orEmpty(),
+                "applicantToken" to snapshot.child("applicantFcmToken").getValue(String::class.java).orEmpty(),
+                "reviewNotes" to reviewNotes.trim(),
+                "status" to "PENDING",
+                "createdAt" to timestamp,
             )
         ).await()
     }

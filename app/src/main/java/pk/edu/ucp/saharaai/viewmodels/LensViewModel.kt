@@ -51,9 +51,8 @@ class LensViewModel : ViewModel() {
     )
     val validation: StateFlow<LensValidation> = _validation.asStateFlow()
 
-    
-    private val _holdSeconds = MutableStateFlow(0)
-    val holdSeconds: StateFlow<Int> = _holdSeconds.asStateFlow()
+    private val _holdProgress = MutableStateFlow(0f)
+    val holdProgress: StateFlow<Float> = _holdProgress.asStateFlow()
 
     
     private val _readyToCapture = MutableStateFlow(false)
@@ -68,18 +67,19 @@ class LensViewModel : ViewModel() {
         if (validation is LensValidation.Valid) {
             if (holdJob?.isActive == true) return  
             holdJob = viewModelScope.launch {
-                while (_holdSeconds.value < REQUIRED_HOLD_SECONDS) {
-                    delay(1_000)
-                    
+                val startedAt = System.currentTimeMillis()
+                while (_holdProgress.value < 1f) {
+                    delay(HOLD_TICK_MILLIS)
                     if (_validation.value !is LensValidation.Valid) return@launch
-                    _holdSeconds.value = _holdSeconds.value + 1
+                    val elapsed = System.currentTimeMillis() - startedAt
+                    _holdProgress.value = (elapsed.toFloat() / REQUIRED_HOLD_MILLIS).coerceIn(0f, 1f)
                 }
                 _readyToCapture.value = true
             }
         } else {
             holdJob?.cancel()
             holdJob = null
-            _holdSeconds.value = 0
+            _holdProgress.value = 0f
             _readyToCapture.value = false
         }
     }
@@ -87,7 +87,7 @@ class LensViewModel : ViewModel() {
     
     fun onCaptured(jpegBytes: ByteArray) {
         _readyToCapture.value = false
-        _holdSeconds.value = 0
+        _holdProgress.value = 0f
         holdJob?.cancel()
         holdJob = null
         if (jpegBytes.isEmpty()) {
@@ -139,7 +139,7 @@ class LensViewModel : ViewModel() {
 
     fun reset() {
         _readyToCapture.value = false
-        _holdSeconds.value = 0
+        _holdProgress.value = 0f
         holdJob?.cancel()
         holdJob = null
         _validation.value = LensValidation.Invalid(
@@ -155,6 +155,7 @@ class LensViewModel : ViewModel() {
     }
 
     companion object {
-        const val REQUIRED_HOLD_SECONDS: Int = 5
+        const val REQUIRED_HOLD_MILLIS: Long = 650L
+        private const val HOLD_TICK_MILLIS: Long = 50L
     }
 }

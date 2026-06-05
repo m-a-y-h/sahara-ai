@@ -6,6 +6,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.launch
 import pk.edu.ucp.saharaai.data.model.AvatarRequest
 import pk.edu.ucp.saharaai.data.model.BugReport
@@ -27,16 +28,36 @@ class AdminDashboardViewModel : ViewModel() {
 
     init {
         viewModelScope.launch {
-            RealtimeDBService.listenToRegistrationRequests().collect { applications = it }
+            RealtimeDBService.listenToRegistrationRequests()
+                .catch { reportListenerError("application forms", it) }
+                .collect { applications = it }
         }
         viewModelScope.launch {
-            RealtimeDBService.listenToPaymentRequests().collect { payments = it }
+            RealtimeDBService.listenToPaymentRequests()
+                .catch { reportListenerError("payment requests", it) }
+                .collect { payments = it }
         }
         viewModelScope.launch {
-            RealtimeDBService.listenToBugReports().collect { bugReports = it }
+            RealtimeDBService.listenToBugReports()
+                .catch { reportListenerError("bug reports", it) }
+                .collect { bugReports = it }
         }
         viewModelScope.launch {
-            RealtimeDBService.listenToAvatarRequests().collect { avatarRequests = it }
+            RealtimeDBService.listenToAvatarRequests()
+                .catch { reportListenerError("avatar requests", it) }
+                .collect { avatarRequests = it }
+        }
+    }
+
+    private fun reportListenerError(section: String, throwable: Throwable) {
+        val raw = throwable.message.orEmpty()
+        error = when {
+            raw.contains("permission denied", ignoreCase = true) ->
+                "Admin dashboard cannot read $section yet. Re-enter the admin key after Firebase Auth is ready, and make sure the latest database rules are deployed."
+            raw.isBlank() ->
+                "Admin dashboard could not load $section."
+            else ->
+                "Admin dashboard could not load $section: $raw"
         }
     }
 

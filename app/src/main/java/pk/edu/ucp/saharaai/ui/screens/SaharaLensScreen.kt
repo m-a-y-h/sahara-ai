@@ -19,6 +19,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -28,10 +29,12 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -88,9 +91,12 @@ import pk.edu.ucp.saharaai.lens.FaceScannerAnalyzer
 import pk.edu.ucp.saharaai.lens.LensValidation
 import pk.edu.ucp.saharaai.lens.RectFractional
 import pk.edu.ucp.saharaai.data.model.LensScanResponse
+import pk.edu.ucp.saharaai.ui.components.BottomNav
 import pk.edu.ucp.saharaai.ui.components.ButtonVariant
-import pk.edu.ucp.saharaai.ui.components.SaharaButton
+import pk.edu.ucp.saharaai.ui.components.CardVariant
 import pk.edu.ucp.saharaai.ui.components.HazeBackButton
+import pk.edu.ucp.saharaai.ui.components.SaharaButton
+import pk.edu.ucp.saharaai.ui.components.SaharaCard
 import pk.edu.ucp.saharaai.ui.theme.SaharaCoral
 import pk.edu.ucp.saharaai.ui.theme.SaharaPeach
 import pk.edu.ucp.saharaai.ui.theme.SaharaSky
@@ -116,7 +122,24 @@ fun SaharaLensScreen(
 ) {
     val state by viewModel.state.collectAsState()
     val context = LocalContext.current
+    val isDark = isSystemInDarkTheme()
     val hazeState = remember { HazeState() }
+    val blobMotion = rememberBackdropBlobMotion()
+    val bgGradient = if (isDark) {
+        listOf(
+            SaharaStrongGreen.copy(alpha = 0.20f),
+            MaterialTheme.colorScheme.background.copy(alpha = 0.70f),
+            MaterialTheme.colorScheme.background,
+        )
+    } else {
+        listOf(
+            SaharaStrongGreen.copy(alpha = 0.25f),
+            SaharaSky.copy(alpha = 0.14f),
+            MaterialTheme.colorScheme.background.copy(alpha = 0.35f),
+        )
+    }
+    val blob1Color = SaharaStrongGreen.copy(alpha = if (isDark) 0.25f else 0.16f)
+    val blob2Color = SaharaSky.copy(alpha = if (isDark) 0.20f else 0.18f)
 
     val cameraGranted = remember {
         mutableStateOf(
@@ -144,61 +167,82 @@ fun SaharaLensScreen(
         if (!cameraGranted.value) cameraPermissionRequester.request()
     }
 
-    Scaffold(
-        modifier = Modifier.hazeSource(hazeState),
-        topBar = { LensTopBar(isEnglish, hazeState, onBack = { navController.popBackStack() }) },
-        containerColor = MaterialTheme.colorScheme.background,
-    ) { inner ->
+    Box(Modifier.fillMaxSize()) {
         Box(
             Modifier
                 .fillMaxSize()
-                .padding(inner)
-                .background(
-                    Brush.verticalGradient(
-                        listOf(
-                            SaharaStrongGreen.copy(alpha = 0.10f),
-                            MaterialTheme.colorScheme.background.copy(alpha = 0.8f),
-                            MaterialTheme.colorScheme.background,
-                        )
-                    )
-                )
+                .hazeSource(state = hazeState)
+                .background(Brush.verticalGradient(bgGradient))
         ) {
-            if (!cameraGranted.value) {
-                PermissionGate(
-                    isEnglish = isEnglish,
-                    onRequest = { cameraPermissionRequester.request() },
-                )
-                return@Box
-            }
+            Box(
+                modifier = Modifier
+                    .size(350.dp)
+                    .offset(x = (-80).dp, y = (-50).dp)
+                    .primaryBlobMotion(blobMotion)
+                    .background(Brush.radialGradient(listOf(blob1Color, Color.Transparent)))
+            )
+            Box(
+                modifier = Modifier
+                    .size(400.dp)
+                    .align(Alignment.BottomEnd)
+                    .offset(x = 100.dp, y = 50.dp)
+                    .secondaryBlobMotion(blobMotion)
+                    .background(Brush.radialGradient(listOf(blob2Color, Color.Transparent)))
+            )
+        }
 
-            when (val s = state) {
-                LensUiState.Capturing -> CapturePane(
-                    isEnglish = isEnglish,
-                    viewModel = viewModel,
-                )
-                is LensUiState.Reviewing -> ReviewPane(
-                    isEnglish = isEnglish,
-                    imageBytes = s.imageBytes,
-                    onRetake = viewModel::onRetake,
-                    onConfirm = viewModel::onConfirm,
-                )
-                LensUiState.Analyzing -> AnalyzingPane(isEnglish)
-                is LensUiState.Result -> ResultPane(
-                    isEnglish = isEnglish,
-                    level = s.level,
-                    response = s.response,
-                    onRetake = viewModel::reset,
-                    onMeditation = { navController.navigate("meditation") },
-                    onCounselor = { navController.navigate("counselors") },
-                    onEmergency = { navController.navigate("emergency") },
-                    onDone = { navController.popBackStack() },
-                )
-                is LensUiState.Error -> ErrorPane(
-                    isEnglish = isEnglish,
-                    message = s.message,
-                    reasons = s.reasons,
-                    onRetake = viewModel::reset,
-                )
+        Scaffold(
+            topBar = { LensTopBar(isEnglish, hazeState, onBack = { navController.popBackStack() }) },
+            bottomBar = { BottomNav(navController = navController, hazeState = hazeState) },
+            containerColor = Color.Transparent,
+            contentWindowInsets = WindowInsets(0, 0, 0, 0),
+        ) { inner ->
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .padding(inner)
+            ) {
+                if (!cameraGranted.value) {
+                    PermissionGate(
+                        isEnglish = isEnglish,
+                        hazeState = hazeState,
+                        onRequest = { cameraPermissionRequester.request() },
+                    )
+                    return@Box
+                }
+
+                when (val s = state) {
+                    LensUiState.Capturing -> CapturePane(
+                        isEnglish = isEnglish,
+                        viewModel = viewModel,
+                    )
+                    is LensUiState.Reviewing -> ReviewPane(
+                        isEnglish = isEnglish,
+                        hazeState = hazeState,
+                        imageBytes = s.imageBytes,
+                        onRetake = viewModel::onRetake,
+                        onConfirm = viewModel::onConfirm,
+                    )
+                    LensUiState.Analyzing -> AnalyzingPane(isEnglish, hazeState)
+                    is LensUiState.Result -> ResultPane(
+                        isEnglish = isEnglish,
+                        hazeState = hazeState,
+                        level = s.level,
+                        response = s.response,
+                        onRetake = viewModel::reset,
+                        onMeditation = { navController.navigate("meditation") },
+                        onCounselor = { navController.navigate("counselors") },
+                        onEmergency = { navController.navigate("emergency") },
+                        onDone = { navController.popBackStack() },
+                    )
+                    is LensUiState.Error -> ErrorPane(
+                        isEnglish = isEnglish,
+                        hazeState = hazeState,
+                        message = s.message,
+                        reasons = s.reasons,
+                        onRetake = viewModel::reset,
+                    )
+                }
             }
         }
     }
@@ -214,21 +258,22 @@ private fun LensTopBar(isEnglish: Boolean, hazeState: HazeState, onBack: () -> U
         Modifier
             .fillMaxWidth()
             .statusBarsPadding()
-            .padding(horizontal = 12.dp, vertical = 8.dp),
+            .padding(horizontal = 20.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         HazeBackButton(onClick = onBack, hazeState = hazeState)
-        Spacer(Modifier.width(4.dp))
+        Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(
                 text = if (isEnglish) "Sahara Lens" else "Sahara Lens",
-                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.SemiBold),
+                style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
+                color = SaharaStrongGreen,
             )
             Text(
                 text = if (isEnglish) {
-                    "A private 5-second face check-in"
+                    "A quick private face check-in"
                 } else {
-                    "5 second ka private face check-in"
+                    "Chhota private face check-in"
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -238,42 +283,49 @@ private fun LensTopBar(isEnglish: Boolean, hazeState: HazeState, onBack: () -> U
 }
 
 @Composable
-private fun PermissionGate(isEnglish: Boolean, onRequest: () -> Unit) {
-    Column(
+private fun PermissionGate(
+    isEnglish: Boolean,
+    hazeState: HazeState,
+    onRequest: () -> Unit,
+) {
+    Box(
         Modifier
             .fillMaxSize()
             .padding(24.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally,
+        contentAlignment = Alignment.Center,
     ) {
-        Icon(
-            Icons.Filled.Visibility,
-            contentDescription = null,
-            modifier = Modifier.size(64.dp),
-            tint = SaharaStrongGreen,
-        )
-        Spacer(Modifier.height(12.dp))
-        Text(
-            text = if (isEnglish) "Camera permission needed" else "Camera ki ijazat chahiye",
-            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
-        )
-        Spacer(Modifier.height(8.dp))
-        Text(
-            text = if (isEnglish) {
-                "Sahara Lens uses your front camera for a brief check-in. The photo never leaves your phone — only the screening result is saved."
-            } else {
-                "Sahara Lens aapke front camera se chhota check-in karta hai. Photo phone mein hi rehti hai — sirf screening result save hota hai."
-            },
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(Modifier.height(20.dp))
-        SaharaButton(
-            text = if (isEnglish) "Allow camera" else "Camera ijazat dein",
-            onClick = onRequest,
-            variant = ButtonVariant.GRADIENT,
-            isFullWidth = true,
-        )
+        SaharaCard(variant = CardVariant.GLASS, hazeState = hazeState, modifier = Modifier.fillMaxWidth()) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Icon(
+                    Icons.Filled.Visibility,
+                    contentDescription = null,
+                    modifier = Modifier.size(64.dp),
+                    tint = SaharaStrongGreen,
+                )
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    text = if (isEnglish) "Camera permission needed" else "Camera ki ijazat chahiye",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = if (isEnglish) {
+                        "Sahara Lens uses your front camera for a brief check-in. The photo never leaves your phone — only the screening result is saved."
+                    } else {
+                        "Sahara Lens aapke front camera se chhota check-in karta hai. Photo phone mein hi rehti hai — sirf screening result save hota hai."
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(20.dp))
+                SaharaButton(
+                    text = if (isEnglish) "Allow camera" else "Camera ijazat dein",
+                    onClick = onRequest,
+                    variant = ButtonVariant.GRADIENT,
+                    isFullWidth = true,
+                )
+            }
+        }
     }
 }
 
@@ -320,7 +372,7 @@ private fun CapturePane(
     }
 
     val validation by viewModel.validation.collectAsState()
-    val holdSeconds by viewModel.holdSeconds.collectAsState()
+    val holdProgress by viewModel.holdProgress.collectAsState()
     val readyToCapture by viewModel.readyToCapture.collectAsState()
     var isShooting by remember { mutableStateOf(false) }
 
@@ -381,7 +433,7 @@ private fun CapturePane(
         
         
         val ovalAccent = when {
-            validation is LensValidation.Valid && holdSeconds >= LensViewModel.REQUIRED_HOLD_SECONDS -> SaharaStrongGreen
+            validation is LensValidation.Valid && holdProgress >= 1f -> SaharaStrongGreen
             validation is LensValidation.Valid -> SaharaPeach
             else -> SaharaCoral
         }
@@ -418,11 +470,10 @@ private fun CapturePane(
         ) {
             val state = validation
             val title = if (state is LensValidation.Valid) {
-                if (holdSeconds >= LensViewModel.REQUIRED_HOLD_SECONDS) {
+                if (holdProgress >= 1f || readyToCapture) {
                     if (isEnglish) "Capturing…" else "Capture ho raha hai…"
                 } else {
-                    val remaining = (LensViewModel.REQUIRED_HOLD_SECONDS - holdSeconds).coerceAtLeast(0)
-                    if (isEnglish) "Hold still… ${remaining}s" else "Hilna mat… ${remaining}s"
+                    if (isEnglish) "Hold still…" else "Hilna mat…"
                 }
             } else {
                 state.reason
@@ -436,12 +487,24 @@ private fun CapturePane(
                 color = color,
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Medium),
             )
+            if (state is LensValidation.Valid && holdProgress < 1f) {
+                Spacer(Modifier.height(8.dp))
+                LinearProgressIndicator(
+                    progress = { holdProgress.coerceIn(0f, 1f) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(5.dp)
+                        .clip(RoundedCornerShape(3.dp)),
+                    color = SaharaStrongGreen,
+                    trackColor = Color.White.copy(alpha = 0.25f),
+                )
+            }
             Spacer(Modifier.height(6.dp))
             Text(
                 text = if (isEnglish) {
-                    "Anti-spoof: real face + neutral expression + good light required"
+                    "Anti-spoof still checks real face, neutral expression, and light"
                 } else {
-                    "Anti-spoof: asli chehra, neutral expression, achi roshni zaroori"
+                    "Anti-spoof ab bhi asli chehra, neutral expression, aur roshni check karta hai"
                 },
                 color = Color.White.copy(alpha = 0.75f),
                 style = MaterialTheme.typography.bodySmall,
@@ -453,6 +516,7 @@ private fun CapturePane(
 @Composable
 private fun ReviewPane(
     isEnglish: Boolean,
+    hazeState: HazeState,
     imageBytes: ByteArray,
     onRetake: () -> Unit,
     onConfirm: () -> Unit,
@@ -465,28 +529,40 @@ private fun ReviewPane(
             .fillMaxSize()
             .padding(20.dp),
     ) {
-        Text(
-            text = if (isEnglish) "Send this for screening?" else "Ye screening ke liye bhejein?",
-            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
-        )
-        Spacer(Modifier.height(12.dp))
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .weight(1f)
-                .clip(RoundedCornerShape(24.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant),
-            contentAlignment = Alignment.Center,
-        ) {
-            if (bmp != null) {
-                Image(
-                    bitmap = bmp.asImageBitmap(),
-                    contentDescription = null,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        
-                        .graphicsLayer(scaleX = -1f),
-                )
+        SaharaCard(variant = CardVariant.GLASS, hazeState = hazeState, modifier = Modifier.fillMaxWidth()) {
+            Text(
+                text = if (isEnglish) "Send this for screening?" else "Ye screening ke liye bhejein?",
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = if (isEnglish) {
+                    "The photo stays private; only the screening result is saved."
+                } else {
+                    "Photo private rehti hai; sirf screening result save hota hai."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Spacer(Modifier.height(14.dp))
+        SaharaCard(variant = CardVariant.GLASS, hazeState = hazeState, modifier = Modifier.fillMaxWidth().weight(1f)) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (bmp != null) {
+                    Image(
+                        bitmap = bmp.asImageBitmap(),
+                        contentDescription = null,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .graphicsLayer(scaleX = -1f),
+                    )
+                }
             }
         }
         Spacer(Modifier.height(20.dp))
@@ -510,41 +586,48 @@ private fun ReviewPane(
 }
 
 @Composable
-private fun AnalyzingPane(isEnglish: Boolean) {
-    Column(
+private fun AnalyzingPane(
+    isEnglish: Boolean,
+    hazeState: HazeState,
+) {
+    Box(
         Modifier
             .fillMaxSize()
             .padding(32.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally,
+        contentAlignment = Alignment.Center,
     ) {
-        CircularProgressIndicator(color = SaharaStrongGreen, strokeWidth = 4.dp)
-        Spacer(Modifier.height(16.dp))
-        Text(
-            text = if (isEnglish) "Reading the moment…" else "Lamha samjha ja raha hai…",
-            style = MaterialTheme.typography.titleMedium,
-        )
-        Spacer(Modifier.height(8.dp))
-        Text(
-            text = if (isEnglish) {
-                "This is a screening signal, never a diagnosis. The photo stays on your phone — only the result is saved."
-            } else {
-                "Ye sirf screening signal hai, diagnosis nahi. Photo phone par hi rehti hai — sirf result save hota hai."
-            },
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(Modifier.height(20.dp))
-        LinearProgressIndicator(
-            modifier = Modifier.fillMaxWidth(),
-            color = SaharaStrongGreen,
-        )
+        SaharaCard(variant = CardVariant.GLASS, hazeState = hazeState, modifier = Modifier.fillMaxWidth()) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                CircularProgressIndicator(color = SaharaStrongGreen, strokeWidth = 4.dp)
+                Spacer(Modifier.height(16.dp))
+                Text(
+                    text = if (isEnglish) "Reading the moment…" else "Lamha samjha ja raha hai…",
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = if (isEnglish) {
+                        "This is a screening signal, never a diagnosis. The photo stays on your phone — only the result is saved."
+                    } else {
+                        "Ye sirf screening signal hai, diagnosis nahi. Photo phone par hi rehti hai — sirf result save hota hai."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(20.dp))
+                LinearProgressIndicator(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = SaharaStrongGreen,
+                )
+            }
+        }
     }
 }
 
 @Composable
 private fun ResultPane(
     isEnglish: Boolean,
+    hazeState: HazeState,
     level: LensLevel,
     response: LensScanResponse,
     onRetake: () -> Unit,
@@ -603,36 +686,28 @@ private fun ResultPane(
             .fillMaxSize()
             .padding(20.dp),
     ) {
-        Surface(
-            color = accent.copy(alpha = 0.10f),
-            border = BorderStroke(1.dp, accent.copy(alpha = 0.5f)),
-            shape = RoundedCornerShape(20.dp),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Column(
-                Modifier.padding(20.dp),
-                horizontalAlignment = Alignment.Start,
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(icon, contentDescription = null, tint = accent, modifier = Modifier.size(28.dp))
-                    Spacer(Modifier.width(10.dp))
-                    Text(
-                        text = title,
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
-                        color = accent,
-                    )
+        SaharaCard(variant = CardVariant.GLASS, hazeState = hazeState, modifier = Modifier.fillMaxWidth()) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Surface(shape = CircleShape, color = accent.copy(alpha = 0.15f)) {
+                    Icon(icon, contentDescription = null, tint = accent, modifier = Modifier.padding(10.dp).size(28.dp))
                 }
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.width(10.dp))
                 Text(
-                    text = subtitle,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                    color = accent,
                 )
             }
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
         }
 
         Spacer(Modifier.height(16.dp))
-        ScreeningBreakdown(response, isEnglish)
+        ScreeningBreakdown(response, isEnglish, hazeState)
 
         Spacer(Modifier.height(20.dp))
         when (level) {
@@ -695,52 +770,49 @@ private fun ResultPane(
 }
 
 @Composable
-private fun ScreeningBreakdown(response: LensScanResponse, isEnglish: Boolean) {
+private fun ScreeningBreakdown(
+    response: LensScanResponse,
+    isEnglish: Boolean,
+    hazeState: HazeState,
+) {
     val probs = response.screening?.screeningProbs ?: return
     if (probs.isEmpty()) return
     val ordered = listOf("neutral", "stress", "sadness", "fear").mapNotNull { key ->
         probs[key]?.let { key to it }
     }
-    Surface(
-        shape = RoundedCornerShape(16.dp),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-        color = MaterialTheme.colorScheme.surface,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Column(Modifier.padding(16.dp)) {
-            Text(
-                text = if (isEnglish) "Screening breakdown" else "Screening breakdown",
-                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
-            )
-            Spacer(Modifier.height(8.dp))
-            ordered.forEach { (label, value) ->
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = label.replaceFirstChar { it.uppercase() },
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.weight(1f),
-                    )
-                    LinearProgressIndicator(
-                        progress = { value.toFloat().coerceIn(0f, 1f) },
-                        modifier = Modifier
-                            .weight(2f)
-                            .height(6.dp)
-                            .clip(RoundedCornerShape(3.dp)),
-                        color = colorForScreeningLabel(label),
-                        trackColor = MaterialTheme.colorScheme.surfaceVariant,
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        text = "${(value * 100).toInt()}%",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+    SaharaCard(variant = CardVariant.GLASS, hazeState = hazeState, modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = if (isEnglish) "Screening breakdown" else "Screening breakdown",
+            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+        )
+        Spacer(Modifier.height(8.dp))
+        ordered.forEach { (label, value) ->
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = label.replaceFirstChar { it.uppercase() },
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.weight(1f),
+                )
+                LinearProgressIndicator(
+                    progress = { value.toFloat().coerceIn(0f, 1f) },
+                    modifier = Modifier
+                        .weight(2f)
+                        .height(6.dp)
+                        .clip(RoundedCornerShape(3.dp)),
+                    color = colorForScreeningLabel(label),
+                    trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = "${(value * 100).toInt()}%",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
     }
@@ -749,52 +821,56 @@ private fun ScreeningBreakdown(response: LensScanResponse, isEnglish: Boolean) {
 @Composable
 private fun ErrorPane(
     isEnglish: Boolean,
+    hazeState: HazeState,
     message: String,
     reasons: List<String>,
     onRetake: () -> Unit,
 ) {
-    Column(
+    Box(
         Modifier
             .fillMaxSize()
             .padding(24.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally,
+        contentAlignment = Alignment.Center,
     ) {
-        Icon(Icons.Filled.Warning, null, tint = SaharaCoral, modifier = Modifier.size(48.dp))
-        Spacer(Modifier.height(12.dp))
-        Text(
-            text = message,
-            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
-        )
-        if (reasons.isNotEmpty()) {
-            Spacer(Modifier.height(12.dp))
-            Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant,
-                modifier = Modifier.fillMaxWidth().wrapContentHeight(),
-            ) {
-                LazyColumn(
-                    Modifier.fillMaxWidth(),
-                    contentPadding = PaddingValues(12.dp),
+        SaharaCard(variant = CardVariant.GLASS, hazeState = hazeState, modifier = Modifier.fillMaxWidth()) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Icon(Icons.Filled.Warning, null, tint = SaharaCoral, modifier = Modifier.size(48.dp))
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    text = message,
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                )
+            }
+            if (reasons.isNotEmpty()) {
+                Spacer(Modifier.height(12.dp))
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                    modifier = Modifier.fillMaxWidth().wrapContentHeight(),
                 ) {
-                    items(reasons) { reason ->
-                        Text(
-                            text = "• $reason",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(vertical = 2.dp),
-                        )
+                    LazyColumn(
+                        Modifier.fillMaxWidth(),
+                        contentPadding = PaddingValues(12.dp),
+                    ) {
+                        items(reasons) { reason ->
+                            Text(
+                                text = "• $reason",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(vertical = 2.dp),
+                            )
+                        }
                     }
                 }
             }
+            Spacer(Modifier.height(20.dp))
+            SaharaButton(
+                text = if (isEnglish) "Retake" else "Dobara try karein",
+                onClick = onRetake,
+                variant = ButtonVariant.GRADIENT,
+                isFullWidth = true,
+            )
         }
-        Spacer(Modifier.height(20.dp))
-        SaharaButton(
-            text = if (isEnglish) "Retake" else "Dobara try karein",
-            onClick = onRetake,
-            variant = ButtonVariant.GRADIENT,
-            isFullWidth = true,
-        )
     }
 }
 

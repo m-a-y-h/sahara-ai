@@ -407,7 +407,6 @@ private fun ChatConversationScreen(
     }
 
     val listState = rememberLazyListState()
-    val isKeyboardVisible = WindowInsets.ime.asPaddingValues().calculateBottomPadding() > 0.dp
     val latestVisible by remember(displayMessages.size, isTyping) {
         derivedStateOf {
             val visibleItems = listState.layoutInfo.visibleItemsInfo
@@ -599,11 +598,11 @@ private fun ChatConversationScreen(
         }
 
         Scaffold(
-        bottomBar = { if (!isKeyboardVisible) BottomNav(navController = navController, hazeState = hazeState) },
+        bottomBar = { BottomNav(navController = navController, hazeState = hazeState) },
         containerColor = Color.Transparent,
         contentWindowInsets = WindowInsets(0, 0, 0, 0)
     ) { innerPadding ->
-        Box(modifier = Modifier.fillMaxSize()) {
+        Box(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
