@@ -61,6 +61,7 @@ import dev.chrisbanes.haze.blur.blurEffect
 import dev.chrisbanes.haze.hazeEffect
 import dev.chrisbanes.haze.hazeSource
 import kotlinx.coroutines.Dispatchers
+import pk.edu.ucp.saharaai.data.repository.AppReputationRepository
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.withContext
 import pk.edu.ucp.saharaai.ui.components.BottomNav
@@ -85,36 +86,16 @@ private const val EV_KEYGUARD_HIDDEN        = 18
 
 
 
-private val HARMFUL_PACKAGES = setOf(
-    "com.instagram.android", "com.facebook.katana", "com.facebook.orca",
-    "com.twitter.android", "com.x.android",
-    "com.zhiliaoapp.musically", "com.ss.android.ugc.trill",
-    "com.snapchat.android",
-    "com.whatsapp", "com.whatsapp.w4b",
-    "org.telegram.messenger", "org.telegram.plus",
-    "com.pinterest", "com.reddit.frontpage",
-    "com.linkedin.android", "com.tumblr",
-    "com.discord", "kik.android",
-    "com.imo.android.imoim", "com.viber.voip",
-    "com.vkontakte.android", "com.bigo.live", "tv.bigo.live",
-    "com.like.video",
-    "com.google.android.youtube",
-    "com.netflix.mediaclient",
-    "com.amazon.avod.thirdpartyclient",
-    "com.hotstar.android", "com.mxtech.videoplayer.ad",
-    "com.tencent.ig", "com.pubg.krmobile", "com.pubg.imobile", "com.rekoo.pubgm",
-    "com.dts.freefireth", "com.dts.freefiremax", "com.garena.game.freefire",
-    "com.mobile.legends",
-    "com.activision.callofduty.shooter", "com.garena.game.codm",
-    "com.supercell.clashofclans", "com.supercell.clashroyale", "com.supercell.brawlstars",
-    "com.king.candycrushsaga", "com.king.candycrushsodasaga",
-    "com.mojang.minecraftpe", "com.roblox.client",
-    "com.ea.game.easportsufc", "com.ea.game.fifamobile", "com.ea.gp.fifamobile",
-    "com.gameloft.android.ANMP.GloftA9HM",
-    "com.innersloth.spacemafia",
-    "com.YoStarEN.Arknights",
-    "com.miHoYo.GenshinImpact",
-    "com.tencent.lolm",
+// TikTok + YouTube are always surfaced (explicitly wanted). Every OTHER app
+// shows up only when the global reputation service has reverse-searched its
+// name and scored it BAD/BRAINROT — see AppReputationRepository. This is what
+// keeps the screen to a focused list instead of every app the user opened.
+private val ALWAYS_FLAGGED_PACKAGES = setOf(
+    "com.zhiliaoapp.musically",         // TikTok
+    "com.ss.android.ugc.trill",         // TikTok (older international)
+    "com.ss.android.ugc.aweme",         // TikTok / Douyin
+    "com.google.android.youtube",       // YouTube
+    "com.google.android.youtube.lite",  // YouTube Go
 )
 
 
@@ -307,7 +288,7 @@ private fun queryIntervalDailyUsage(
 
 
 
-private fun loadTodayHarmfulApps(context: Context): List<AppUsageInfo> {
+private suspend fun loadTodayHarmfulApps(context: Context): List<AppUsageInfo> {
     val usm      = context.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
     val dayStart = midnightOf(0)
     val now      = System.currentTimeMillis()
@@ -318,13 +299,22 @@ private fun loadTodayHarmfulApps(context: Context): List<AppUsageInfo> {
         if (eventsWorked) eventByDay[floorMidnight(dayStart)] ?: emptyMap()
         else              queryIntervalDailyUsage(usm, dayStart, now)
 
-    return todayUsage
-        .filter { (pkg, ms) -> ms > 0 && isHarmfulApp(context, pkg) && !isSystemApp(context, pkg) }
-        .entries
-        .sortedByDescending { it.value }
-        .map { (pkg, ms) ->
-            AppUsageInfo(pkg, getAppName(context, pkg), ms, drawableToBitmapPainter(context, pkg))
+    // Keep only TikTok / YouTube and apps the reputation service has
+    // reverse-searched + scored BAD/BRAINROT — not every app with usage.
+    // lookup() hits the local cache (the tracker service warms it as the user
+    // switches apps) before any Firestore read, and enqueues unknown packages
+    // for the backend reverse-search worker.
+    val out = mutableListOf<AppUsageInfo>()
+    for ((pkg, ms) in todayUsage) {
+        if (ms <= 0L || isSystemApp(context, pkg)) continue
+        val appName = getAppName(context, pkg)
+        val flagged = pkg in ALWAYS_FLAGGED_PACKAGES ||
+            (AppReputationRepository.lookup(pkg, appName)?.isBad() == true)
+        if (flagged) {
+            out += AppUsageInfo(pkg, appName, ms, drawableToBitmapPainter(context, pkg))
         }
+    }
+    return out.sortedByDescending { it.totalTimeMs }
 }
 
 
@@ -375,17 +365,6 @@ private fun hasUsagePermission(context: Context): Boolean {
         @Suppress("DEPRECATION")
         ops.checkOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(), context.packageName)
     return mode == AppOpsManager.MODE_ALLOWED
-}
-
-private fun isHarmfulApp(context: Context, packageName: String): Boolean {
-    if (packageName in HARMFUL_PACKAGES) return true
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-        return try {
-            val cat = context.packageManager.getApplicationInfo(packageName, 0).category
-            cat == ApplicationInfo.CATEGORY_GAME || cat == ApplicationInfo.CATEGORY_SOCIAL
-        } catch (_: Exception) { false }
-    }
-    return false
 }
 
 private fun isSystemApp(context: Context, pkg: String): Boolean =
