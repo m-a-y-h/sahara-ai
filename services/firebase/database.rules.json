@@ -32,17 +32,26 @@
         ".write": "auth != null && (!data.exists() || data.child('uid').val() === auth.uid || newData.child('uid').val() === auth.uid)"
       }
     },
-    "payment_requests":       { ".read": "auth != null && auth.token.email_verified === true && (auth.token.email === 'haiderasfandyar13@gmail.com' || auth.token.email === 'yaseenyaseen.yy0321@gmail.com')", ".write": "auth != null" },
+    "payment_requests": {
+      ".read": "auth != null && auth.token.email_verified === true && (auth.token.email === 'haiderasfandyar13@gmail.com' || auth.token.email === 'yaseenyaseen.yy0321@gmail.com')",
+      "$requestId": { ".write": "(auth != null && auth.token.email_verified === true && (auth.token.email === 'haiderasfandyar13@gmail.com' || auth.token.email === 'yaseenyaseen.yy0321@gmail.com')) || (!data.exists() && auth != null)" }
+    },
     "key_deliveries":         { ".read": "auth != null", ".write": "auth != null" },
     "registration_rejection_deliveries": { ".read": "auth != null", ".write": "auth != null" },
     "registration_requests": {
       ".read": "auth != null && auth.token.email_verified === true && (auth.token.email === 'haiderasfandyar13@gmail.com' || auth.token.email === 'yaseenyaseen.yy0321@gmail.com')",
       "$requestId": {
-        ".write": "auth != null || (!data.exists() && newData.exists() && newData.child('requestId').val() === $requestId && newData.child('status').val() === 'PENDING_REVIEW' && newData.child('ackEmailStatus').val() === 'PENDING' && !newData.child('issuedKey').exists() && !newData.child('reviewedBy').exists() && !newData.child('reviewedAt').exists() && newData.child('email').isString() && newData.child('applicantType').isString() && (newData.child('applicantType').val() === 'COUNSELOR' || newData.child('applicantType').val() === 'NGO'))"
+        ".write": "(auth != null && auth.token.email_verified === true && (auth.token.email === 'haiderasfandyar13@gmail.com' || auth.token.email === 'yaseenyaseen.yy0321@gmail.com')) || (!data.exists() && newData.exists() && newData.child('requestId').val() === $requestId && newData.child('status').val() === 'PENDING_REVIEW' && newData.child('ackEmailStatus').val() === 'PENDING' && !newData.child('issuedKey').exists() && !newData.child('reviewedBy').exists() && !newData.child('reviewedAt').exists() && newData.child('email').isString() && newData.child('applicantType').isString() && (newData.child('applicantType').val() === 'COUNSELOR' || newData.child('applicantType').val() === 'NGO'))"
       }
     },
-    "avatar_requests":        { ".read": "auth != null && auth.token.email_verified === true && (auth.token.email === 'haiderasfandyar13@gmail.com' || auth.token.email === 'yaseenyaseen.yy0321@gmail.com')", ".write": "auth != null" },
-    "bug_reports":            { ".read": "auth != null && auth.token.email_verified === true && (auth.token.email === 'haiderasfandyar13@gmail.com' || auth.token.email === 'yaseenyaseen.yy0321@gmail.com')", ".write": "auth != null" },
+    "avatar_requests": {
+      ".read": "auth != null && auth.token.email_verified === true && (auth.token.email === 'haiderasfandyar13@gmail.com' || auth.token.email === 'yaseenyaseen.yy0321@gmail.com')",
+      "$rid": { ".write": "(auth != null && auth.token.email_verified === true && (auth.token.email === 'haiderasfandyar13@gmail.com' || auth.token.email === 'yaseenyaseen.yy0321@gmail.com')) || (!data.exists() && auth != null && newData.child('userId').val() === auth.uid)" }
+    },
+    "bug_reports": {
+      ".read": "auth != null && auth.token.email_verified === true && (auth.token.email === 'haiderasfandyar13@gmail.com' || auth.token.email === 'yaseenyaseen.yy0321@gmail.com')",
+      "$reportId": { ".write": "(auth != null && auth.token.email_verified === true && (auth.token.email === 'haiderasfandyar13@gmail.com' || auth.token.email === 'yaseenyaseen.yy0321@gmail.com')) || (!data.exists() && auth != null)" }
+    },
     "bug_report_daily_counts":{ ".read": "auth != null", ".write": "auth != null" },
     "blocked_users":          { ".read": "auth != null", ".write": "auth != null" },
     "blocked_emails":         { ".read": "auth != null", ".write": "auth != null" },

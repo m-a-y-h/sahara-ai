@@ -31,7 +31,9 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import coil.compose.AsyncImage
@@ -67,6 +69,54 @@ private enum class AdminQueueKey {
     AVATARS,
     BUGS,
     PAYMENTS,
+}
+
+/** Shown to anyone who reaches the admin dashboard signed in as a non-admin. */
+@Composable
+private fun UnauthorizedAdminScreen(isEnglish: Boolean, onLeave: () -> Unit) {
+    val isDark = isSystemInDarkTheme()
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(
+                Brush.verticalGradient(
+                    if (isDark) listOf(Color(0xFF2A0E0E), Color(0xFF160A0A), MaterialTheme.colorScheme.background)
+                    else listOf(SaharaCoral.copy(.28f), SaharaPeach.copy(.12f), MaterialTheme.colorScheme.background.copy(.7f))
+                )
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            Modifier.statusBarsPadding().padding(36.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text("🖕", fontSize = 92.sp)
+            Spacer(Modifier.height(18.dp))
+            Text(
+                "Access Denied",
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.ExtraBold,
+                color = SaharaCoral,
+            )
+            Spacer(Modifier.height(10.dp))
+            Text(
+                if (isEnglish)
+                    "Nice try. This dashboard is for authorized administrators only — and you're not one of them. This attempt has been logged."
+                else
+                    "Achi koshish. Yeh dashboard sirf authorized admins ke liye hai — aur aap un mein se nahi. Yeh koshish log ho chuki hai.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
+            Spacer(Modifier.height(28.dp))
+            Button(
+                onClick = onLeave,
+                colors = ButtonDefaults.buttonColors(containerColor = SaharaCoral),
+            ) {
+                Text(if (isEnglish) "Get me out" else "Bahar niklein", color = Color.White)
+            }
+        }
+    }
 }
 
 @Composable
@@ -137,6 +187,22 @@ fun AdminDashboardScreen(
     }
     fun toggleQueue(key: AdminQueueKey) {
         expandedQueues = if (key in expandedQueues) expandedQueues - key else expandedQueues + key
+    }
+
+    // The RTDB rules already deny non-admins the data, so a non-admin who slips
+    // past the key gate just sees a broken/empty dashboard. Catch them here and
+    // show an explicit wall instead — matched against the same admin emails the
+    // rules use. Rules remain the real boundary; this is the polite (ahem) UX.
+    val adminEmails = remember {
+        pk.edu.ucp.saharaai.BuildConfig.ADMIN_EMAILS
+            .split(",").map { it.trim().lowercase() }.filter { it.isNotBlank() }
+    }
+    val signedInEmail = remember {
+        com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.email?.trim()?.lowercase().orEmpty()
+    }
+    if (adminEmails.isNotEmpty() && signedInEmail !in adminEmails) {
+        UnauthorizedAdminScreen(isEnglish = isEnglish, onLeave = onSignOut)
+        return
     }
 
     Box(Modifier.fillMaxSize()) {

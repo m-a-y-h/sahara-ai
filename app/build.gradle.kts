@@ -33,6 +33,12 @@ android {
         val adminKey = localProperties.getProperty("sahara.admin.key") ?: ""
         buildConfigField("String", "ADMIN_KEY", "\"$adminKey\"")
 
+        // Comma-separated admin emails — mirrors the verified-email check in the
+        // RTDB rules. Used by the dashboard to wall off anyone who reaches it
+        // signed in as a non-admin (e.g. a phished key). Rules are the real gate.
+        val adminEmails = localProperties.getProperty("sahara.admin.emails") ?: ""
+        buildConfigField("String", "ADMIN_EMAILS", "\"$adminEmails\"")
+
         val counselorKey = localProperties.getProperty("sahara.counselor.key") ?: ""
         buildConfigField("String", "COUNSELOR_KEY", "\"$counselorKey\"")
 
