@@ -1,4 +1,0 @@
-{
-  "_comment": "Counselor key seed — leave empty. Real counselor keys are issued by the admin dashboard's RegistrationReviewCard via approveRegistrationRequest(), which writes to counselor_keys/{key} with profileComplete=false. Test/seed keys (e.g. 'abc123', 'SAHARA999 Master admin bypass') were removed because they were standing master-access bypasses that any leaked client could use to enter the counselor-only flow.",
-  "counselor_keys": {}
-}

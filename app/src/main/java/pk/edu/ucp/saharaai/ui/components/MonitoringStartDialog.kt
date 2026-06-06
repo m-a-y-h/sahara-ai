@@ -19,6 +19,7 @@ import dev.chrisbanes.haze.HazeState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import pk.edu.ucp.saharaai.R
 import pk.edu.ucp.saharaai.data.model.MonitoringStartNotice
 import pk.edu.ucp.saharaai.ui.theme.SaharaStrongGreen
 
@@ -102,26 +103,27 @@ fun MonitoringStartDialog(
                 Text(if (isEnglish) "Got it" else "Theek hai")
             }
         },
+        panelBackdropResId = R.drawable.sahara_bg5,
     )
 }
 
 /**
- * The risk service deliberately serialises monitoring timestamps without
- * seconds; on the off chance the ISO string contains them (e.g. a manual
- * back-fill), trim them so the popup still reads cleanly.
+ * The risk service serialises monitoring timestamps as a UTC instant ("...Z").
+ * Render it in the device's local timezone (minute precision) so the time
+ * matches the user's clock — and there's no stray "Z" on screen.
  */
 private fun formatNoSeconds(iso: String): String {
     if (iso.isBlank()) return "—"
-    // ISO-8601 minute precision is "YYYY-MM-DDTHH:MM(+ZZ:ZZ)?". If the input
-    // has seconds we slice them out without parsing — easier than involving
-    // a date-time formatter for an already-formatted server string.
-    val tIndex = iso.indexOf('T')
-    if (tIndex < 0) return iso
-    val datePart = iso.substring(0, tIndex)
-    val rest = iso.substring(tIndex + 1)
-    val tzIndex = rest.indexOfAny(charArrayOf('+', 'Z', '-'), startIndex = 0)
-    val time = if (tzIndex > 0) rest.substring(0, tzIndex) else rest
-    val tz = if (tzIndex > 0) rest.substring(tzIndex) else ""
-    val timeNoSeconds = time.split(":").take(2).joinToString(":")
-    return "$datePart  $timeNoSeconds${if (tz.isNotEmpty()) " $tz" else ""}"
+    val out = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd  HH:mm")
+    runCatching {
+        // Handles "Z" and explicit offsets like "+05:00", with or without seconds.
+        return java.time.OffsetDateTime.parse(iso)
+            .atZoneSameInstant(java.time.ZoneId.systemDefault())
+            .format(out)
+    }
+    runCatching {
+        // No timezone in the string — treat as a local date-time, trim to minutes.
+        return java.time.LocalDateTime.parse(iso).format(out)
+    }
+    return iso
 }

@@ -8,8 +8,6 @@ application source:
 - `firestore.sahara-sleep.rules.snippet`: owner-only rule fragment for daily
   manual, Health Connect, estimated and fallback sleep records consumed by
   weekly risk analysis.
-- `realtime-db/counselor_keys.seed.json`: local/prototype seed data for
-  Realtime Database counselor keys.
 
 Do not bundle administrative seed data into the APK or rely on it as
 production authorization.

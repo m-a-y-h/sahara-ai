@@ -216,7 +216,6 @@ fun SaharaApp() {
     fun routeAfterAuth(
         emailHint: String = "",
         nameHint: String = "",
-        skipBackupPasswordCheck: Boolean = false,
     ) {
         val currentUser = Firebase.auth.currentUser
         if (currentUser == null) {
@@ -478,20 +477,6 @@ fun SaharaApp() {
                 )
             }
 
-            composable("backup-password-setup/{onboardingCompleted}") { backStackEntry ->
-                val onboardingCompleted = backStackEntry.arguments
-                    ?.getString("onboardingCompleted")?.toBoolean() ?: false
-                BackupPasswordSetupScreen(
-                    email = userEmail.ifBlank { Firebase.auth.currentUser?.email.orEmpty() },
-                    onboardingCompleted = onboardingCompleted,
-                    isEnglish = isEnglish,
-                    onContinue = { onbDone ->
-                        navController.navigate(if (onbDone) "dashboard" else "onboarding") {
-                            popUpTo("welcome") { inclusive = true }
-                        }
-                    },
-                )
-            }
 
             composable("dashboard") {
                 // Wrap DashboardScreen in a Box so we can layer the weekly
