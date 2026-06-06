@@ -170,7 +170,10 @@ fun SaharaApp() {
             .apply()
         AssessmentCache.clearActiveSession(context)
         counselorKey = ""
-        hasAdminAccess = false
+        // NB: do NOT flip hasAdminAccess here. The admin-dashboard composable is
+        // gated on it; flipping it while that screen is still current swaps in
+        // the empty `else` branch (white) and races its popBackStack with the
+        // navigate below. It's reset on the welcome screen instead.
         navController.navigate("welcome") { popUpTo(0) { inclusive = true } }
     }
 
@@ -327,6 +330,9 @@ fun SaharaApp() {
             }
 
             composable("welcome") {
+                // Safe place to clear admin access — admin-dashboard is already
+                // off the stack, so there's no gate to flip mid-screen.
+                LaunchedEffect(Unit) { hasAdminAccess = false }
                 WelcomeScreen(
                     onNavigateToLogin    = { navController.navigate("login") },
                     onNavigateToRegister = { navController.navigate("register") },
