@@ -344,6 +344,7 @@ private fun BiometricEnrollmentDialog(
     if (state is SettingsViewModel.BiometricEnrollmentState.Idle) return
 
     var password by remember(state) { mutableStateOf("") }
+    var confirmPassword by remember(state) { mutableStateOf("") }
     var passwordVisible by remember(state) { mutableStateOf(false) }
     val submitting = state is SettingsViewModel.BiometricEnrollmentState.Submitting
     val errorState = state as? SettingsViewModel.BiometricEnrollmentState.Error
@@ -427,6 +428,36 @@ private fun BiometricEnrollmentDialog(
                     },
                     modifier = Modifier.fillMaxWidth(),
                 )
+                if (needsLink) {
+                    Spacer(Modifier.height(10.dp))
+                    OutlinedTextField(
+                        value = confirmPassword,
+                        onValueChange = { confirmPassword = it },
+                        singleLine = true,
+                        enabled = !submitting,
+                        label = { Text(if (isEnglish) "Confirm password" else "Password dobara") },
+                        visualTransformation = if (passwordVisible) {
+                            androidx.compose.ui.text.input.VisualTransformation.None
+                        } else {
+                            androidx.compose.ui.text.input.PasswordVisualTransformation()
+                        },
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                            keyboardType = androidx.compose.ui.text.input.KeyboardType.Password,
+                            imeAction = androidx.compose.ui.text.input.ImeAction.Done,
+                        ),
+                        isError = confirmPassword.isNotEmpty() && password != confirmPassword,
+                        supportingText = {
+                            if (confirmPassword.isNotEmpty() && password != confirmPassword) {
+                                Text(
+                                    if (isEnglish) "Passwords do not match" else "Password aik jaisa nahi hai",
+                                    color = SaharaCoral,
+                                    style = MaterialTheme.typography.labelSmall,
+                                )
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
                 if (errorState != null) {
                     Spacer(Modifier.height(8.dp))
                     Text(
@@ -438,8 +469,10 @@ private fun BiometricEnrollmentDialog(
             }
         },
         confirmButton = {
+            val canSubmit = !submitting && password.isNotBlank() &&
+                (!needsLink || (confirmPassword.isNotBlank() && password == confirmPassword))
             TextButton(
-                enabled = !submitting && password.isNotBlank(),
+                enabled = canSubmit,
                 onClick = { onSubmit(password) },
             ) {
                 Text(
