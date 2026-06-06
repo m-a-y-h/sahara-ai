@@ -309,7 +309,10 @@ private suspend fun loadTodayHarmfulApps(context: Context): List<AppUsageInfo> {
         if (ms <= 0L || isSystemApp(context, pkg)) continue
         val appName = getAppName(context, pkg)
         val flagged = pkg in ALWAYS_FLAGGED_PACKAGES ||
-            (AppReputationRepository.lookup(pkg, appName)?.isBad() == true)
+            // Defensive: a Firestore error (denied read / offline) must not crash
+            // the screen — just treat the app as not-flagged for this load.
+            runCatching { AppReputationRepository.lookup(pkg, appName)?.isBad() == true }
+                .getOrDefault(false)
         if (flagged) {
             out += AppUsageInfo(pkg, appName, ms, drawableToBitmapPainter(context, pkg))
         }

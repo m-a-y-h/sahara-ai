@@ -24,7 +24,11 @@ object MeditationAudioCache {
     private val http: OkHttpClient by lazy {
         OkHttpClient.Builder()
             .connectTimeout(15, TimeUnit.SECONDS)
-            .readTimeout(60, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
+            // Total cap on the whole download. Without it a large track on a slow
+            // connection spins the loader for minutes; on timeout the service
+            // falls back to the generated tone instead of appearing stuck.
+            .callTimeout(90, TimeUnit.SECONDS)
             .build()
     }
 
