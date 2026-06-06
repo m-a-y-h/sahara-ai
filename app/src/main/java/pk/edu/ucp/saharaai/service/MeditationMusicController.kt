@@ -76,7 +76,10 @@ class MeditationMusicController(private val appContext: Context) {
             pause(); return
         }
         if (currentIndex == idx && !isPlaying && !isLoading) {
-            service?.resume() ?: startPlay(file, title)
+            // Only resume a genuinely paused track; if the player was released
+            // (a prior error, or a host that never loaded) start it fresh so the
+            // button always responds instead of dead-ending on a no-op resume().
+            if (service?.canResume == true) service?.resume() else startPlay(file, title)
             return
         }
         startPlay(file, title)

@@ -223,6 +223,11 @@ class MeditationMusicService : Service() {
     val durationMs: Int get() = try { mediaPlayer?.duration ?: 0 } catch (_: Exception) { 0 }
     val positionMs: Int get() = try { mediaPlayer?.currentPosition ?: 0 } catch (_: Exception) { 0 }
 
+    // True only when a track is loaded and paused (resumable). After an error or
+    // stop the player is released, so a tap on that track must start fresh
+    // rather than call resume() (which would silently no-op).
+    val canResume: Boolean get() = mediaPlayer != null && !isPlaying && !isLoading
+
     private fun releasePlayer() {
         runCatching { mediaPlayer?.stop() }
         runCatching { mediaPlayer?.release() }

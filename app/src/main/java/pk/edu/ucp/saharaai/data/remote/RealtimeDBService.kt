@@ -140,8 +140,15 @@ object RealtimeDBService {
             "uid" to uid,
             "updatedAt" to now,
         )
-        val cleanName = name.trim().ifBlank { existing?.get("name")?.toString().orEmpty() }.ifBlank { "Sahara User" }
-        val cleanEmail = email.trim().lowercase().ifBlank { existing?.get("email")?.toString().orEmpty() }
+        // Prefer the value already on record. A later Google sign-in passes the
+        // Google display name / email, which previously clobbered what the user
+        // registered with. Once a field is set we keep it; the incoming values
+        // only fill blanks (i.e. brand-new records). Name edits go through
+        // updateUserName, not here.
+        val existingName = existing?.get("name")?.toString().orEmpty()
+        val existingEmail = existing?.get("email")?.toString().orEmpty()
+        val cleanName = existingName.ifBlank { name.trim() }.ifBlank { "Sahara User" }
+        val cleanEmail = existingEmail.ifBlank { email.trim().lowercase() }
         updates["name"] = cleanName
         if (cleanEmail.isNotBlank()) {
             updates["email"] = cleanEmail
@@ -156,6 +163,14 @@ object RealtimeDBService {
         ref.updateChildren(updates).await()
         @Suppress("UNCHECKED_CAST")
         (ref.get().await().value as? Map<String, Any>) ?: updates
+    }
+
+    /** One-time flag so a Google-only user is emailed a "set your password"
+     *  link just once (see SaharaApp.routeAfterAuth), not on every login. */
+    suspend fun markPasswordInviteSent(uid: String): Result<Unit> = runCatching {
+        require(uid.isNotBlank()) { "Missing user id." }
+        db.getReference("users").child(uid)
+            .updateChildren(mapOf("passwordInviteSentAt" to System.currentTimeMillis())).await()
     }
 
     suspend fun postAuthUserState(uid: String, name: String, email: String): Result<PostAuthUserState> = runCatching {

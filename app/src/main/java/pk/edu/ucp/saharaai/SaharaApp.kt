@@ -26,6 +26,8 @@ import com.google.firebase.messaging.messaging
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import pk.edu.ucp.saharaai.data.remote.RealtimeDBService
+import pk.edu.ucp.saharaai.data.repository.GoogleCredentialAuth
+import pk.edu.ucp.saharaai.data.repository.GoogleSignInOutcome
 import pk.edu.ucp.saharaai.ui.screens.*
 import pk.edu.ucp.saharaai.utils.AssessmentCache
 import pk.edu.ucp.saharaai.utils.NotificationRouteStore
@@ -256,62 +258,36 @@ fun SaharaApp() {
                             }
                         }
 
-                    // Google-only accounts have no password attached, so the
-                    // keystore vault has nothing to seal and the biometric
-                    // chip on LoginScreen never appears. Detour them once to
-                    // a "set a backup password" screen — linkWithCredential
-                    // adds the password to the SAME Firebase user, so Google
-                    // sign-in keeps working AND email/password + biometric
-                    // become available. Skippable.
+                    // Google-only accounts have no password attached, so email
+                    // sign-in and the keystore-backed biometric vault can't work
+                    // for them yet. Rather than forcing a "set a backup password"
+                    // screen, email a Firebase "set your password" link ONCE:
+                    // completing it adds an email/password credential to this
+                    // same account, so Google login keeps working AND email +
+                    // fingerprint become available. A flag on the user record
+                    // stops repeat Google logins from re-sending.
                     val hasPasswordProvider = currentUser.providerData.any {
                         it.providerId == com.google.firebase.auth.EmailAuthProvider.PROVIDER_ID
                     }
-                    // If the Firebase project is in "Multiple accounts per
-                    // email" mode (the post-2023 default), signing in with
-                    // Google for an email that already has a password
-                    // account creates a NEW UID, so providerData on this
-                    // user won't include "password" — we'd then prompt for a
-                    // backup password the user already chose for the other
-                    // account. fetchSignInMethodsForEmail tells us whether
-                    // ANY existing Firebase user has password sign-in for
-                    // this email; if yes, skip the prompt.
-                    //
-                    // NB: on projects with Email Enumeration Protection on,
-                    // fetchSignInMethodsForEmail returns an empty list. We
-                    // can't fix multi-account-per-email purely in code; the
-                    // long-term fix is enabling "One account per email" in
-                    // Firebase Console -> Auth -> Settings -> User account
-                    // linking. With that on, Firebase auto-links Google to
-                    // the existing password account and this branch sees
-                    // hasPasswordProvider=true anyway.
-                    val emailAlreadyHasPassword = if (!hasPasswordProvider && dbEmail.isNotBlank()) {
-                        runCatching {
-                            Firebase.auth.fetchSignInMethodsForEmail(dbEmail).await()
-                                .signInMethods.orEmpty()
-                                .contains(com.google.firebase.auth.EmailAuthProvider.EMAIL_PASSWORD_SIGN_IN_METHOD)
-                        }.getOrDefault(false)
-                    } else false
-                    val needsBackupPassword =
-                        !skipBackupPasswordCheck &&
-                        !hasPasswordProvider &&
-                        !emailAlreadyHasPassword &&
-                        dbEmail.isNotBlank()
-                    if (needsBackupPassword) {
-                        if (navController.currentDestination?.route != "backup-password-setup/{onboardingCompleted}") {
-                            navController.navigate(
-                                "backup-password-setup/${state.onboardingCompleted}"
-                            ) {
-                                launchSingleTop = true
-                                popUpTo("welcome") { inclusive = true }
+                    if (!skipBackupPasswordCheck && !hasPasswordProvider && dbEmail.isNotBlank() &&
+                        state.userData["passwordInviteSentAt"] == null
+                    ) {
+                        runCatching { Firebase.auth.sendPasswordResetEmail(dbEmail).await() }
+                            .onSuccess {
+                                RealtimeDBService.markPasswordInviteSent(currentUser.uid)
+                                context.showLocalizedToast(
+                                    isEnglish,
+                                    "We emailed you a link to set a password — then you can also sign in with email + fingerprint.",
+                                    "Humne password set karne ka link email kiya hai — phir aap email + fingerprint se bhi sign in kar sakte hain.",
+                                    android.widget.Toast.LENGTH_LONG,
+                                )
                             }
-                        }
-                    } else {
-                        val targetRoute = if (state.onboardingCompleted) "dashboard" else "onboarding"
-                        if (navController.currentDestination?.route != targetRoute) {
-                            navController.navigate(targetRoute) {
-                                launchSingleTop = true
-                                popUpTo("welcome") { inclusive = true }
-                            }
+                    }
+                    val targetRoute = if (state.onboardingCompleted) "dashboard" else "onboarding"
+                    if (navController.currentDestination?.route != targetRoute) {
+                        navController.navigate(targetRoute) {
+                            launchSingleTop = true
+                            popUpTo("welcome") { inclusive = true }
                         }
                     }
                 }
@@ -368,20 +344,30 @@ fun SaharaApp() {
                         navController.navigate("ngo-dashboard")
                     },
                     onNavigateToAdmin    = {
+                        // The admin key was already validated upstream. Sign in
+                        // with a real Google account (not anonymous) so RTDB
+                        // security rules can grant THIS uid admin writes — add it
+                        // once under /admins/<uid> in the Firebase console.
                         scope.launch {
-                            if (Firebase.auth.currentUser == null) {
-                                val signedIn = runCatching {
-                                    Firebase.auth.signInAnonymously().await()
-                                }.onFailure {
-                                    context.showLocalizedToast(
-                                        isEnglish,
-                                        "Could not open the admin dashboard. Enable Anonymous sign-in in Firebase Auth, or sign in first.",
-                                        "Admin dashboard nahi khul saka. Firebase Auth mein Anonymous sign-in enable karein, ya pehle sign in karein.",
-                                        android.widget.Toast.LENGTH_LONG,
-                                    )
-                                }.isSuccess
-                                if (!signedIn) return@launch
+                            val adminUid = GoogleCredentialAuth.signIn(context).getOrNull()?.let { outcome ->
+                                when (outcome) {
+                                    is GoogleSignInOutcome.Signed -> Firebase.auth.currentUser?.uid
+                                    is GoogleSignInOutcome.NeedsPasswordLink ->
+                                        runCatching {
+                                            Firebase.auth.signInWithCredential(outcome.pendingGoogleCredential).await()
+                                        }.getOrNull()?.user?.uid
+                                }
                             }
+                            if (adminUid.isNullOrBlank()) {
+                                context.showLocalizedToast(
+                                    isEnglish,
+                                    "Admin Google sign-in failed or was cancelled.",
+                                    "Admin Google sign-in nakaam ya cancel ho gaya.",
+                                    android.widget.Toast.LENGTH_LONG,
+                                )
+                                return@launch
+                            }
+                            android.util.Log.i("SaharaAdmin", "Admin signed in. uid=$adminUid (add /admins/$adminUid: true in RTDB)")
                             hasAdminAccess = true
                             navController.navigate("admin-dashboard")
                         }
