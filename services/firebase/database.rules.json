@@ -3,9 +3,7 @@
     ".read": false,
     ".write": false,
 
-    "admins":             { "$uid": { ".read": "auth != null && auth.uid === $uid",  ".write": false } },
-
-    "users":              { "$uid": { ".read": "auth != null",                       ".write": "auth != null && (auth.uid === $uid || root.child('admins').child(auth.uid).val() === true)" } },
+    "users":              { "$uid": { ".read": "auth != null",                       ".write": "auth != null && (auth.uid === $uid || (auth.token.email_verified === true && (auth.token.email === 'haiderasfandyar13@gmail.com' || auth.token.email === 'yaseenyaseen.yy0321@gmail.com')))" } },
     "device_tokens":      { "$uid": { ".read": "auth != null && auth.uid === $uid",  ".write": "auth != null && auth.uid === $uid" } },
     "user_notifications": { "$uid": { ".read": "auth != null && auth.uid === $uid",  ".write": "auth != null" } },
     "journals":           { "$uid": { ".read": "auth != null && auth.uid === $uid",  ".write": "auth != null && auth.uid === $uid" } },
