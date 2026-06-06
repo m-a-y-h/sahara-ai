@@ -2,7 +2,10 @@ package pk.edu.ucp.saharaai.viewmodels
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.google.firebase.Firebase
+import com.google.firebase.auth.auth
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 import pk.edu.ucp.saharaai.BuildConfig
 import pk.edu.ucp.saharaai.data.remote.RealtimeDBService
 
@@ -22,6 +25,17 @@ class WelcomeSettingsViewModel : ViewModel() {
             return
         }
         viewModelScope.launch {
+            // ngo_keys / counselor_keys require an authenticated read, but the
+            // Welcome screen is pre-login — so an admin-issued key (stored in
+            // RTDB, unlike the built-in BuildConfig keys above) gets a permission
+            // denied that surfaces as "Connection error". Sign in anonymously
+            // first so the lookup AND the dashboard the user then enters work.
+            if (Firebase.auth.currentUser == null &&
+                !runCatching { Firebase.auth.signInAnonymously().await() }.isSuccess
+            ) {
+                onFailure(if (isEnglish) "Connection error. Try again." else "Connection error. Dobara koshish karein.")
+                return@launch
+            }
             val data = if (type == "ORGANIZATION") {
                 RealtimeDBService.getNgoKey(key)
             } else {
