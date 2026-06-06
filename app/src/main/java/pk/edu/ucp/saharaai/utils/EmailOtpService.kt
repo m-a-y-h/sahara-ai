@@ -92,6 +92,54 @@ object EmailOtpService {
         return sendOtpWithEmailJs(toEmail, toName, otp, serviceId, templateId, publicKey)
     }
 
+    /** Emails the user the email/password they just set while enabling the
+     *  fingerprint scanner, so they have it for email sign-in. Goes only to the
+     *  signed-in user's own, token-verified inbox (the mailer enforces that).
+     *  Best-effort; EmailJS isn't used here as its template is OTP-only. */
+    suspend fun sendPasswordEmail(
+        toEmail  : String,
+        toName   : String,
+        password : String,
+        mailerUrl: String,
+    ): SendResult {
+        if (mailerUrl.isBlank()) return SendResult.NotConfigured
+        val idToken = try {
+            Firebase.auth.currentUser?.getIdToken(false)?.await()?.token.orEmpty()
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not get Firebase ID token for password email", e)
+            ""
+        }
+        if (idToken.isBlank()) return SendResult.NotConfigured
+
+        return withContext(Dispatchers.IO) {
+            try {
+                val payload = JSONObject().apply {
+                    put("id_token", idToken)
+                    put("to_email", toEmail)
+                    put("to_name", toName)
+                    put("kind", "password")
+                    put("password", password)
+                }.toString()
+
+                val request = Request.Builder()
+                    .url(mailerUrl.trim().trimEnd('/'))
+                    .addHeader("Content-Type", "application/json")
+                    .post(payload.toRequestBody("application/json".toMediaType()))
+                    .build()
+
+                val response = httpClient.newCall(request).execute()
+                val body = response.body?.string().orEmpty()
+                Log.d(TAG, "Password email response ${response.code}: $body")
+
+                if (response.isSuccessful) SendResult.Success
+                else SendResult.Failure("mailer ${response.code}: $body")
+            } catch (e: Exception) {
+                Log.e(TAG, "sendPasswordEmail failed", e)
+                SendResult.Failure(e.message ?: "Network error")
+            }
+        }
+    }
+
     private suspend fun sendOtpWithSaharaMailer(
         toEmail: String,
         toName: String,

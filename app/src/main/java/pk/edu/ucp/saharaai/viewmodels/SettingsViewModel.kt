@@ -164,6 +164,19 @@ class SettingsViewModel : ViewModel() {
             }
             BiometricCredentialVault.save(context, request.email, password)
             persistBiometricEnabled(context, user.uid, true)
+            // First time a (Google) user sets a password — email it to them so
+            // they have it for email sign-in later. Best-effort; the mailer only
+            // delivers to the signed-in user's own, token-verified inbox.
+            if (request.needsLink) {
+                runCatching {
+                    pk.edu.ucp.saharaai.utils.EmailOtpService.sendPasswordEmail(
+                        toEmail = request.email,
+                        toName = Firebase.auth.currentUser?.displayName.orEmpty(),
+                        password = password,
+                        mailerUrl = pk.edu.ucp.saharaai.BuildConfig.SAHARA_MAILER_URL,
+                    )
+                }
+            }
             biometricEnrollmentState = BiometricEnrollmentState.Idle
         }
     }

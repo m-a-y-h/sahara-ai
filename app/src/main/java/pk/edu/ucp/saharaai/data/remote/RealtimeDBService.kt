@@ -165,14 +165,6 @@ object RealtimeDBService {
         (ref.get().await().value as? Map<String, Any>) ?: updates
     }
 
-    /** One-time flag so a Google-only user is emailed a "set your password"
-     *  link just once (see SaharaApp.routeAfterAuth), not on every login. */
-    suspend fun markPasswordInviteSent(uid: String): Result<Unit> = runCatching {
-        require(uid.isNotBlank()) { "Missing user id." }
-        db.getReference("users").child(uid)
-            .updateChildren(mapOf("passwordInviteSentAt" to System.currentTimeMillis())).await()
-    }
-
     suspend fun postAuthUserState(uid: String, name: String, email: String): Result<PostAuthUserState> = runCatching {
         val cleanEmail = email.trim().lowercase()
         val uidBlock = if (uid.isNotBlank()) {

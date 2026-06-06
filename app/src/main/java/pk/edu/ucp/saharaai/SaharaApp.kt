@@ -262,31 +262,10 @@ fun SaharaApp() {
                             }
                         }
 
-                    // Google-only accounts have no password attached, so email
-                    // sign-in and the keystore-backed biometric vault can't work
-                    // for them yet. Rather than forcing a "set a backup password"
-                    // screen, email a Firebase "set your password" link ONCE:
-                    // completing it adds an email/password credential to this
-                    // same account, so Google login keeps working AND email +
-                    // fingerprint become available. A flag on the user record
-                    // stops repeat Google logins from re-sending.
-                    val hasPasswordProvider = currentUser.providerData.any {
-                        it.providerId == com.google.firebase.auth.EmailAuthProvider.PROVIDER_ID
-                    }
-                    if (!skipBackupPasswordCheck && !hasPasswordProvider && dbEmail.isNotBlank() &&
-                        state.userData["passwordInviteSentAt"] == null
-                    ) {
-                        runCatching { Firebase.auth.sendPasswordResetEmail(dbEmail).await() }
-                            .onSuccess {
-                                RealtimeDBService.markPasswordInviteSent(currentUser.uid)
-                                context.showLocalizedToast(
-                                    isEnglish,
-                                    "We emailed you a link to set a password — then you can also sign in with email + fingerprint.",
-                                    "Humne password set karne ka link email kiya hai — phir aap email + fingerprint se bhi sign in kar sakte hain.",
-                                    android.widget.Toast.LENGTH_LONG,
-                                )
-                            }
-                    }
+                    // Google-only users have no password yet, but we DON'T nag
+                    // them here — no link email, no toast. They set a password
+                    // (and we email it) when they enable the fingerprint scanner
+                    // in Settings, which is the natural place for it.
                     val targetRoute = if (state.onboardingCompleted) "dashboard" else "onboarding"
                     if (navController.currentDestination?.route != targetRoute) {
                         navController.navigate(targetRoute) {

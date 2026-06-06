@@ -291,21 +291,50 @@ def send_otp_email(data: dict) -> dict:
     id_token = (data.get("id_token") or "").strip()
     to_email = (data.get("to_email") or "").strip().lower()
     to_name = (data.get("to_name") or "").strip() or to_email.split("@")[0] or "there"
-    otp_code = (data.get("otp_code") or "").strip()
-    expiry_minutes = str(data.get("expiry_minutes") or "10").strip()
+    kind = (data.get("kind") or "otp").strip().lower()
 
-    if not id_token or not to_email or not otp_code:
+    if not id_token or not to_email:
         raise HTTPException(status_code=400, detail="Missing required email payload.")
     try:
         decoded = fb_auth.verify_id_token(id_token)
     except Exception as e:
-        print(f"[sahara-push] OTP token verification failed: {e}")
+        print(f"[sahara-push] token verification failed: {e}")
         raise HTTPException(status_code=401, detail="Invalid Firebase token.")
 
     token_email = (decoded.get("email") or "").strip().lower()
     if token_email != to_email:
         raise HTTPException(status_code=403, detail="Email does not match signed-in user.")
 
+    # Password-setup confirmation (sent when a Google user sets an email/password
+    # while enabling the fingerprint scanner). Only ever goes to the user's own,
+    # token-verified inbox.
+    if kind == "password":
+        password = (data.get("password") or "").strip()
+        if not password:
+            raise HTTPException(status_code=400, detail="Missing password.")
+        body = "\n".join([
+            f"Hello {to_name},",
+            "",
+            "You just enabled email + fingerprint sign-in for your Sahara AI account.",
+            "Use these to sign in with your email next time:",
+            "",
+            f"  Email:    {to_email}",
+            f"  Password: {password}",
+            "",
+            "Keep this somewhere safe. You can change it any time from Settings,",
+            "or via 'Forgot password' on the login screen.",
+            "",
+            "— Sahara AI",
+        ])
+        ok = _send_email(to_addr=to_email, subject="Your Sahara AI sign-in password", body=body)
+        if not ok:
+            raise HTTPException(status_code=503, detail="Email sender is not configured or failed.")
+        return {"ok": True}
+
+    otp_code = (data.get("otp_code") or "").strip()
+    expiry_minutes = str(data.get("expiry_minutes") or "10").strip()
+    if not otp_code:
+        raise HTTPException(status_code=400, detail="Missing required email payload.")
     body = "\n".join([
         f"Hello {to_name},",
         "",
