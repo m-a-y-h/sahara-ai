@@ -17,6 +17,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -72,6 +73,7 @@ private enum class AdminQueueKey {
 fun AdminDashboardScreen(
     navController: NavController,
     isEnglish: Boolean,
+    onSignOut: () -> Unit = {},
     dashboardViewModel: AdminDashboardViewModel = viewModel()
 ) {
     val isDark = isSystemInDarkTheme()
@@ -153,8 +155,11 @@ fun AdminDashboardScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             Spacer(Modifier.height(18.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(Modifier.weight(1f)) {
                     Text(
                         if (isEnglish) "Admin Dashboard" else "Admin Dashboard",
                         style = MaterialTheme.typography.headlineSmall,
@@ -165,6 +170,14 @@ fun AdminDashboardScreen(
                         if (isEnglish) "Manual review and assignments" else "Manual review aur assignments",
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                IconButton(onClick = onSignOut) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.Logout,
+                        contentDescription = if (isEnglish) "Sign Out" else "Log Out",
+                        tint = SaharaCoral,
+                        modifier = Modifier.size(22.dp)
                     )
                 }
             }

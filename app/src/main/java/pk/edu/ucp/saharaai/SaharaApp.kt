@@ -170,6 +170,7 @@ fun SaharaApp() {
             .apply()
         AssessmentCache.clearActiveSession(context)
         counselorKey = ""
+        hasAdminAccess = false
         navController.navigate("welcome") { popUpTo(0) { inclusive = true } }
     }
 
@@ -843,7 +844,8 @@ fun SaharaApp() {
                 NgoDashboardScreen(
                     navController = navController,
                     isEnglish     = isEnglish,
-                    ngoKey        = ngoKey
+                    ngoKey        = ngoKey,
+                    onSignOut     = signOut
                 )
             }
 
@@ -851,7 +853,8 @@ fun SaharaApp() {
                 if (hasAdminAccess) {
                     AdminDashboardScreen(
                         navController = navController,
-                        isEnglish = isEnglish
+                        isEnglish = isEnglish,
+                        onSignOut = signOut
                     )
                 } else {
                     LaunchedEffect(Unit) { navController.popBackStack() }

@@ -15,6 +15,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
+import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
@@ -50,6 +51,7 @@ fun NgoDashboardScreen(
     navController: NavController,
     isEnglish: Boolean = false,
     ngoKey: String = "",
+    onSignOut: () -> Unit = {},
     ngoViewModel: NgoDashboardViewModel = viewModel()
 ) {
     val isDark        = isSystemInDarkTheme()
@@ -194,6 +196,14 @@ fun NgoDashboardScreen(
                             },
                             style = MaterialTheme.typography.labelSmall,
                             color = softTextColor.copy(.65f),
+                        )
+                    }
+                    IconButton(onClick = onSignOut) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.Logout,
+                            contentDescription = if (isEnglish) "Sign Out" else "Log Out",
+                            tint = SaharaCoral,
+                            modifier = Modifier.size(22.dp)
                         )
                     }
                 }

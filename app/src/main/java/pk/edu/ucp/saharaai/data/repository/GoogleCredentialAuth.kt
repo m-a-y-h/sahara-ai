@@ -82,7 +82,15 @@ object GoogleCredentialAuth {
         // attach Google to the current account directly. No collision path.
         val current = auth.currentUser
         if (current != null) {
-            current.linkWithCredential(firebaseCred).await()
+            // Could be a deliberate "enable Google from Settings", or just a
+            // stale session (e.g. an admin who never logged out). Try to attach
+            // Google to the current account, but if it's already linked — or the
+            // chosen Google account belongs to a different user — don't fail:
+            // fall through and sign in AS the chosen account, replacing the
+            // session. This is what fixed the "User has already been linked to
+            // the given provider" error on the login screen.
+            runCatching { current.linkWithCredential(firebaseCred).await() }
+                .onFailure { Log.i(TAG, "link skipped (${it.message}); signing in with Google directly") }
             return@runCatching GoogleSignInOutcome.Signed(auth.signInWithCredential(firebaseCred).await())
         }
 
