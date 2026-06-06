@@ -334,6 +334,7 @@ fun GameRecoveryScreen(
     var loadingTaskId by remember { mutableStateOf<String?>(null) }
     var selectedTaskId by remember { mutableStateOf<String?>(null) }
     var isStartingRecovery by remember { mutableStateOf(false) }
+    var reloadKey by remember { mutableStateOf(0) }
     var pendingRecoveryStart by remember { mutableStateOf(false) }
     var locationGranted by remember { mutableStateOf(false) }
 
@@ -345,6 +346,21 @@ fun GameRecoveryScreen(
         rank          = rank,
         isCurrentUser = this["uid"]?.toString() == uid
     )
+
+    // The server board can lag a beat (or omit a brand-new player). Always show
+    // the current user — inject them with their local XP if they're not already
+    // in the loaded rows, then re-rank so a first/only player still sees a board.
+    fun List<LeaderboardUser>.withMe(myXp: Int): List<LeaderboardUser> {
+        if (uid.isBlank() || any { it.isCurrentUser }) return this
+        val me = LeaderboardUser(
+            username = GlobalAppState.anonymousUsername.ifBlank { gameViewModel.tempAlias },
+            location = GlobalAppState.userLocation.ifBlank { "—" },
+            xp = myXp,
+            rank = 0,
+            isCurrentUser = true,
+        )
+        return (this + me).sortedByDescending { it.xp }.mapIndexed { i, u -> u.copy(rank = i + 1) }
+    }
 
     fun applyGameProfile(profile: Map<String, Any>) {
         totalXp = profile["totalXp"].asRecoveryInt()
@@ -363,7 +379,7 @@ fun GameRecoveryScreen(
     }
 
     
-    LaunchedEffect(uid) {
+    LaunchedEffect(uid, reloadKey) {
         if (uid.isBlank()) {
             isLoadingProfile     = false
             isLoadingLeaderboard = false
@@ -380,9 +396,9 @@ fun GameRecoveryScreen(
                 isLoadingProfile = false
             },
             onLeaderboardsLoaded = { daily, weekly, allTime ->
-                dailyBoard = daily.mapIndexed { i, entry -> entry.toUser(i + 1, "dailyXp") }
-                weeklyBoard = weekly.mapIndexed { i, entry -> entry.toUser(i + 1, "weeklyXp") }
-                allTimeBoard = allTime.mapIndexed { i, entry -> entry.toUser(i + 1, "totalXp") }
+                dailyBoard = daily.mapIndexed { i, entry -> entry.toUser(i + 1, "dailyXp") }.withMe(dailyXp)
+                weeklyBoard = weekly.mapIndexed { i, entry -> entry.toUser(i + 1, "weeklyXp") }.withMe(weeklyXp)
+                allTimeBoard = allTime.mapIndexed { i, entry -> entry.toUser(i + 1, "totalXp") }.withMe(totalXp)
                 myRank = allTimeBoard.indexOfFirst { it.isCurrentUser }.let { if (it >= 0) it + 1 else 0 }
                 isLoadingLeaderboard = false
             }
@@ -1056,6 +1072,9 @@ fun GameRecoveryScreen(
                                         @Suppress("UNCHECKED_CAST")
                                         completedToday = updated["completedToday"] as? Set<String> ?: completedToday
                                         selectedTaskId = null
+                                        // Refresh the boards so the just-earned XP (and the
+                                        // player themselves, if first) show up immediately.
+                                        reloadKey++
                                     } else {
                                         context.showLocalizedToast(
                                             isEnglish,

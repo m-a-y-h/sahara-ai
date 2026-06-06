@@ -689,9 +689,9 @@ private fun HarmfulAppsListView(
                         )
                         Text(
                             if (isEnglish) {
-                                "Grant Accessibility Service permission so Sahara AI can log every app session to Firebase in real-time."
+                                "Grant Accessibility Service permission so Sahara AI can securely log every app session in real-time."
                             } else {
-                                "Accessibility Service permission dein taake Sahara AI har app session ko real-time mein Firebase mein save kare."
+                                "Accessibility Service permission dein taake Sahara AI har app session ko real-time mein mehfooz tareeqe se save kare."
                             },
                             style = MaterialTheme.typography.bodySmall,
                             color = softText.copy(.7f),
@@ -756,7 +756,7 @@ private fun HarmfulAppsListView(
                                 color = SaharaStrongGreen
                             )
                             Text(
-                                if (isEnglish) "Firebase synced ✓" else "Firebase sync ✓",
+                                if (isEnglish) "Securely synced ✓" else "Mehfooz sync ✓",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = SaharaStrongGreen.copy(.7f)
                             )
