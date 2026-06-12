@@ -55,9 +55,11 @@ android {
         val saharaAiChatUrl        = localProperties.getProperty("sahara.ai.chat.url")        ?: ""
         val saharaLensScanUrl      = localProperties.getProperty("sahara.lens.scan.url")      ?: ""
         val saharaVoiceAnalyzeUrl  = localProperties.getProperty("sahara.voice.analyze.url")  ?: ""
+        val saharaGeminiModel      = localProperties.getProperty("sahara.gemini.model")       ?: "gemini-3.1-flash-lite"
         buildConfigField("String", "SAHARA_AI_CHAT_URL",        "\"$saharaAiChatUrl\"")
         buildConfigField("String", "SAHARA_LENS_SCAN_URL",      "\"$saharaLensScanUrl\"")
         buildConfigField("String", "SAHARA_VOICE_ANALYZE_URL",  "\"$saharaVoiceAnalyzeUrl\"")
+        buildConfigField("String", "SAHARA_GEMINI_MODEL",       "\"$saharaGeminiModel\"")
 
         // Base URL the guided-meditation tracks are downloaded + cached from
         // (they no longer ship in the APK). Host the 4 mp3s anywhere static and

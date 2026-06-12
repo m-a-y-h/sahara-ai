@@ -90,7 +90,7 @@ private fun UnauthorizedAdminScreen(isEnglish: Boolean, onLeave: () -> Unit) {
             Modifier.statusBarsPadding().padding(36.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Text("🖕", fontSize = 92.sp)
+            Text("🤠", fontSize = 92.sp)
             Spacer(Modifier.height(18.dp))
             Text(
                 "Access Denied",

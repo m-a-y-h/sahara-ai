@@ -49,7 +49,7 @@ import pk.edu.ucp.saharaai.ui.theme.*
 import pk.edu.ucp.saharaai.utils.ObservePermissionState
 import pk.edu.ucp.saharaai.utils.PermissionCopy
 import pk.edu.ucp.saharaai.utils.avatarPresenceLine
-import pk.edu.ucp.saharaai.utils.rememberAppPermissionRequester
+import pk.edu.ucp.saharaai.utils.rememberAnyAppPermissionRequester
 import pk.edu.ucp.saharaai.utils.showLocalizedToast
 import pk.edu.ucp.saharaai.viewmodels.ProfileViewModel
 
@@ -90,8 +90,11 @@ fun ProfileScreen(
     var editNameError    by remember { mutableStateOf("") }
     val regionLoading = profileViewModel.isUpdatingRegion
     var showAvatarPickerDialog by remember { mutableStateOf(false) }
-    val regionPermissionRequester = rememberAppPermissionRequester(
-        permission = Manifest.permission.ACCESS_COARSE_LOCATION,
+    val regionPermissionRequester = rememberAnyAppPermissionRequester(
+        permissions = arrayOf(
+            Manifest.permission.ACCESS_FINE_LOCATION,
+            Manifest.permission.ACCESS_COARSE_LOCATION,
+        ),
         isEnglish = isEnglish,
         copy = PermissionCopy(
             deniedEn = "Location permission was denied.",
@@ -133,7 +136,7 @@ fun ProfileScreen(
         val hasPermission =
             ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
                 ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
-        if (hasPermission || GlobalAppState.userLocation.isNotBlank()) {
+        if (hasPermission) {
             profileViewModel.refreshRegionFromDevice(context) { updated ->
                 if (!updated) {
                     context.showLocalizedToast(

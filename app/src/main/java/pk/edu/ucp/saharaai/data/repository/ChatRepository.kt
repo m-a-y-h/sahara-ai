@@ -1,9 +1,9 @@
 package pk.edu.ucp.saharaai.data.repository
 
+import android.util.Log
 import com.google.firebase.Timestamp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
-import pk.edu.ucp.saharaai.BuildConfig
 import pk.edu.ucp.saharaai.data.model.AiChatSession
 import pk.edu.ucp.saharaai.data.model.FirestoreMessage
 import pk.edu.ucp.saharaai.data.model.SaharaChatTurnMetadata
@@ -16,6 +16,7 @@ import java.time.ZoneId
 
 
 object ChatRepository {
+    private const val TAG = "ChatRepository"
 
     
     fun legacyAiSessionId(userId: String) = "ai_$userId"
@@ -264,18 +265,25 @@ object ChatRepository {
         priorSummaries: List<String>,
         isEnglish: Boolean,
     ): String {
+        var lastError: Throwable? = null
         repeat(2) { attempt ->
-            val reply = runCatching {
+            val result = runCatching {
                 GeminiChatService.reply(
                     userText = userText,
                     history = history,
                     priorSummaries = priorSummaries,
                     isEnglish = isEnglish,
                 )
-            }.getOrDefault("").trim()
+            }
+            val reply = result.getOrElse { error ->
+                lastError = error
+                Log.w(TAG, "Gemini SDK reply failed on attempt ${attempt + 1}", error)
+                ""
+            }.trim()
             if (reply.isNotBlank()) return reply
             if (attempt == 0) delay(450)
         }
+        lastError?.let { throw SaharaUnavailableException() }
         return ""
     }
 

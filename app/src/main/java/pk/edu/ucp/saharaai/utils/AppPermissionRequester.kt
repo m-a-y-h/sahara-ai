@@ -274,6 +274,105 @@ fun rememberAppPermissionsRequester(
     )
 }
 
+@Composable
+fun rememberAnyAppPermissionRequester(
+    permissions: Array<String>,
+    isEnglish: Boolean,
+    copy: PermissionCopy,
+    onGranted: () -> Unit,
+    onDenied: () -> Unit = {},
+): AppPermissionRequester {
+    val context = LocalContext.current
+    val activity = remember(context) { context.findActivity() }
+    val prefs = remember(context) {
+        context.getSharedPreferences(PERMISSION_PREFS, Context.MODE_PRIVATE)
+    }
+    val latestOnGranted = rememberUpdatedState(onGranted)
+    val latestOnDenied = rememberUpdatedState(onDenied)
+    val latestCopy = rememberUpdatedState(copy)
+    val runtimePermissions = remember(permissions.toList()) {
+        permissions.filter { isRuntimePermissionRequired(it) }.distinct().toTypedArray()
+    }
+
+    fun anyGranted(): Boolean =
+        runtimePermissions.isEmpty() || runtimePermissions.any { hasRuntimePermission(context, it) }
+
+    fun resetDenials() {
+        prefs.edit().apply {
+            runtimePermissions.forEach { remove(denialKey(it)) }
+        }.apply()
+    }
+
+    fun permissionShouldOpenSettings(permission: String): Boolean {
+        val denials = prefs.getInt(denialKey(permission), 0)
+        if (denials < 2) return false
+        return activity == null || !ActivityCompat.shouldShowRequestPermissionRationale(activity, permission)
+    }
+
+    fun openSettingsWithToast() {
+        context.showLocalizedToast(
+            isEnglish,
+            latestCopy.value.settingsEn,
+            latestCopy.value.settingsUr,
+            Toast.LENGTH_LONG,
+        )
+        context.openAppSettings()
+    }
+
+    val launcher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { grants ->
+        if (grants.any { it.value } || anyGranted()) {
+            resetDenials()
+            if (latestCopy.value.grantedEn.isNotBlank() || latestCopy.value.grantedUr.isNotBlank()) {
+                context.showLocalizedToast(
+                    isEnglish,
+                    latestCopy.value.grantedEn,
+                    latestCopy.value.grantedUr,
+                )
+            }
+            latestOnGranted.value()
+        } else {
+            val edit = prefs.edit()
+            val blocked = runtimePermissions.any { permission ->
+                val systemWillNotAskAgain = activity == null ||
+                    !ActivityCompat.shouldShowRequestPermissionRationale(activity, permission)
+                val previous = prefs.getInt(denialKey(permission), 0)
+                val updated = if (systemWillNotAskAgain) maxOf(previous + 1, 2) else previous + 1
+                edit.putInt(denialKey(permission), updated)
+                systemWillNotAskAgain && updated >= 2
+            }
+            edit.apply()
+            latestOnDenied.value()
+            if (blocked) {
+                openSettingsWithToast()
+            } else {
+                context.showLocalizedToast(
+                    isEnglish,
+                    latestCopy.value.deniedEn,
+                    latestCopy.value.deniedUr,
+                    Toast.LENGTH_LONG,
+                )
+            }
+        }
+    }
+
+    return AppPermissionRequester(
+        hasPermission = ::anyGranted,
+        request = {
+            when {
+                anyGranted() -> {
+                    resetDenials()
+                    latestOnGranted.value()
+                }
+                runtimePermissions.any(::permissionShouldOpenSettings) -> openSettingsWithToast()
+                else -> launcher.launch(runtimePermissions)
+            }
+        },
+        openSettings = ::openSettingsWithToast,
+    )
+}
+
 private fun hasRuntimePermission(context: Context, permission: String): Boolean {
     if (!isRuntimePermissionRequired(permission)) return true
     return ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED

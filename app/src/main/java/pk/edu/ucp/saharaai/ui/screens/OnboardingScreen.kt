@@ -154,8 +154,13 @@ fun OnboardingScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            HazeBackButton(onClick = { if (step > 1) onboardingViewModel.previousStep() else onNavigateBack() }, hazeState = bgHazeState)
-                            Spacer(Modifier.width(12.dp))
+                            if (step > 1) {
+                                HazeBackButton(
+                                    onClick = { onboardingViewModel.previousStep() },
+                                    hazeState = bgHazeState,
+                                )
+                                Spacer(Modifier.width(12.dp))
+                            }
                             Text(
                                 text = if (isEnglish) "Create Account" else "Naya Account",
                                 style = MaterialTheme.typography.headlineMedium,

@@ -95,9 +95,9 @@ fun SaharaUnreachableBanner(
             Spacer(Modifier.width(8.dp))
             Text(
                 text = if (isEnglish) {
-                    "Sahara AI is offline — replies are local fallbacks. Use Emergency / Counselor for any crisis."
+                    "Sahara AI is unavailable right now. Your message was not sent; try again in a moment."
                 } else {
-                    "Sahara AI offline hai — replies local hain. Crisis ho to Emergency / Counselor dabayein."
+                    "Sahara AI abhi available nahi. Aapka message send nahi hua; thori der baad dobara koshish karein."
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurface,

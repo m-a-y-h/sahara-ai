@@ -435,7 +435,7 @@ class ChatViewModel : ViewModel() {
                 )
             }.getOrElse { error ->
                 _isTyping.value = false
-                _saharaUnreachable.value = false
+                _saharaUnreachable.value = true
                 _uiState.value = ChatUiState.Error(
                     error.message ?: "Please check your internet connection and try again."
                 )

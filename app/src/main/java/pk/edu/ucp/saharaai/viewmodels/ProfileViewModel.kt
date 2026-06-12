@@ -98,7 +98,7 @@ class ProfileViewModel : ViewModel() {
                 }
                 resolvedRegion = RealtimeDBService.getUserRegion(currentUid)
                 if (resolvedRegion.isBlank()) {
-                    detectDeviceRegion(context)?.let { detected ->
+                    detectDeviceRegion(context, allowCached = true)?.let { detected ->
                         RealtimeDBService.updateUserRegion(currentUid, detected).onSuccess {
                             resolvedRegion = detected
                         }
@@ -168,7 +168,7 @@ class ProfileViewModel : ViewModel() {
         }
         viewModelScope.launch {
             isUpdatingRegion = true
-            val detected = detectDeviceRegion(context)
+            val detected = detectDeviceRegion(context, allowCached = false)
             if (detected.isNullOrBlank()) {
                 isUpdatingRegion = false
                 onComplete(false)
@@ -241,8 +241,10 @@ class ProfileViewModel : ViewModel() {
         }
     }
 
-    private suspend fun detectDeviceRegion(context: Context): String? {
-        normalizedLocation(GlobalAppState.userLocation)?.let { return it }
+    private suspend fun detectDeviceRegion(context: Context, allowCached: Boolean): String? {
+        if (allowCached) {
+            normalizedLocation(GlobalAppState.userLocation)?.let { return it }
+        }
         if (!hasLocationPermission(context)) return null
         return runCatching {
             val appContext = context.applicationContext

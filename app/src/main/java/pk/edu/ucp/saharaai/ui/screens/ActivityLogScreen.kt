@@ -180,7 +180,9 @@ fun ActivityLogScreen(
                         report.journalCount.toString(),
                         if (isEnglish) "Journals" else "Journal",
                         hazeState, Modifier.weight(1f))
-                    MiniStatCard(Icons.Default.Chat, SaharaLavender,
+                    MiniStatCard(Icons.Default.
+
+                    Chat, SaharaLavender,
                         report.chatMsgCount.toString(),
                         if (isEnglish) "Messages" else "Msgs",
                         hazeState, Modifier.weight(1f))

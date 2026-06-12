@@ -47,22 +47,22 @@ class MeditationViewModel : ViewModel() {
         
         meditationJob = viewModelScope.launch {
             while (playingMeditation != null) {
-                breathTextEn = "Breathe In..."; breathTextUr = "Saans Andar..."
+                breathTextEn = "Breathe In..."; breathTextUr = "Saans andar lein..."
                 delay(inhale)
 
                 if (playingMeditation == null) break
                 if (hold > 0L) {
-                    breathTextEn = "Hold..."; breathTextUr = "Rokiye..."
+                    breathTextEn = "Hold..."; breathTextUr = "Rokein..."
                     delay(hold)
                 }
 
                 if (playingMeditation == null) break
-                breathTextEn = "Breathe Out..."; breathTextUr = "Saans Bahar..."
+                breathTextEn = "Breathe Out..."; breathTextUr = "Saans bahar chhorein..."
                 delay(exhale)
 
                 if (secondHold > 0L) {
                     if (playingMeditation == null) break
-                    breathTextEn = "Hold..."; breathTextUr = "Rokiye..."
+                    breathTextEn = "Hold..."; breathTextUr = "Rokein..."
                     delay(secondHold)
                 }
             }

@@ -41,6 +41,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
@@ -132,8 +133,8 @@ fun MeditationScreen(
                 accentColor = SaharaSky
             ),
             BreathingExercise(
-                "Box Breathing", "Box Breathing",
-                "For focus & stress relief", "Tawajo aur stress ke liye",
+                "Box Breathing", "Chokor Saans",
+                "For focus and stress relief", "Tawajjo aur zehni dabao ke liye",
                 "3 min", Icons.Default.Air, 4_000L, 4_000L, 4_000L, 4_000L,
                 accentColor = SaharaLavender
             ),
@@ -144,8 +145,8 @@ fun MeditationScreen(
                 accentColor = SaharaStrongGreen
             ),
             BreathingExercise(
-                "Diaphragmatic Breathing", "Diaphragm Saans",
-                "Reduces stress & anxiety", "Stress aur anxiety kam kare",
+                "Diaphragmatic Breathing", "Pait se Saans",
+                "Reduces stress and anxiety", "Zehni dabao aur bechaini kam kare",
                 "6 min", Icons.Default.SelfImprovement, 5_000L, 0L, 5_000L,
                 accentColor = SaharaPeach
             )
@@ -156,30 +157,30 @@ fun MeditationScreen(
     val sessions = remember {
         listOf(
             GuidedSession(
-                "Relaxing Timer", "Sukoon Bakhsh Timer",
-                "Anxiety release · sleep · soft ambient",
-                "Sukoon, neend aur soft ambient",
+                "Calm Session", "Sukoon Nashist",
+                "Anxiety release, sleep, soft ambient sound",
+                "Bechaini kam, neend aur halki awaaz",
                 "10 min", Icons.Default.MusicNote, SaharaSky,
                 "meditation_relaxing.mp3"
             ),
             GuidedSession(
-                "Pure Waves", "Saf Lahrein",
-                "Pure meditation sound waves",
-                "Saf meditation ki awazein",
+                "Pure Waves", "Saaf Lahrein",
+                "Clean wave sounds for meditation",
+                "Muraqbay ke liye saaf lehron ki awaaz",
                 "10 min", Icons.Default.MusicNote, SaharaLavender,
                 "meditation_pure_waves.mp3"
             ),
             GuidedSession(
-                "Positive Energy", "مثبت توانائی",
+                "Positive Energy", "Musbat Tawanai",
                 "Find inner peace within 10 minutes",
                 "10 minute mein sukoon paayein",
                 "10 min", Icons.Default.MusicNote, SaharaPeach,
                 "meditation_positive_energy.mp3"
             ),
             GuidedSession(
-                "Deep Focus", "Gehri Tawajo",
-                "Brain power · focus · concentration",
-                "Concentration aur dimagh ki taqat",
+                "Deep Focus", "Gehri Tawajjo",
+                "Focus and steady concentration",
+                "Tawajjo aur yaksooi mazboot kare",
                 "10 min", Icons.Default.MusicNote, SaharaStrongGreen,
                 "meditation_deep_focus.mp3"
             )
@@ -197,9 +198,12 @@ fun MeditationScreen(
     val breathTextEn = meditationViewModel.breathTextEn
     val breathTextUr = meditationViewModel.breathTextUr
 
-    val selectedColor = remember(selectedTitle) {
-        exercises.find { it.titleEn == selectedTitle }?.accentColor ?: SaharaSky
-    }
+    val selectedExercise = exercises.find { it.titleEn == selectedTitle }
+    val selectedColor = selectedExercise?.accentColor ?: SaharaSky
+    val selectedDisplayTitle = selectedExercise?.let { if (isEnglish) it.titleEn else it.titleUr } ?: selectedTitle
+    val playingDisplayTitle = exercises.find { it.titleEn == playingTitle }?.let {
+        if (isEnglish) it.titleEn else it.titleUr
+    } ?: playingTitle.orEmpty()
 
     
     val bgGradient = if (isDark)
@@ -246,7 +250,7 @@ fun MeditationScreen(
                             color = selectedColor
                         )
                         Text(
-                            if (isEnglish) "Find your inner peace" else "Apna sukoon paayen",
+                            if (isEnglish) "Find your inner peace" else "Apna sukoon paayein",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -286,9 +290,12 @@ fun MeditationScreen(
                                 )
                                 if (playingTitle == null) {
                                     Text(
-                                        selectedTitle, color = Color.White.copy(.65f),
+                                        selectedDisplayTitle,
+                                        color = Color.White.copy(.65f),
                                         style = MaterialTheme.typography.labelSmall,
                                         textAlign = TextAlign.Center,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
                                         modifier = Modifier.padding(horizontal = 12.dp)
                                     )
                                 }
@@ -303,7 +310,7 @@ fun MeditationScreen(
                         ) {
                             Box(Modifier.size(8.dp).background(selectedColor, CircleShape))
                             Text(
-                                playingTitle ?: "",
+                                playingDisplayTitle,
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -322,7 +329,7 @@ fun MeditationScreen(
                 )
                 Text(
                     if (isEnglish) "Tap ▶ to start guided breathing with animation"
-                    else           "Animation ke sath guided breathing ke liye ▶ dabayein",
+                    else           "Saans ki mashq ke liye shuru ka nishan dabayein",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 24.dp, vertical = 2.dp)
@@ -362,12 +369,16 @@ fun MeditationScreen(
                                 Text(
                                     if (isEnglish) ex.titleEn else ex.titleUr,
                                     fontWeight = FontWeight.Bold,
-                                    style = MaterialTheme.typography.bodyMedium
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                                 Text(
                                     if (isEnglish) ex.descEn else ex.descUr,
                                     style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                                 Spacer(Modifier.weight(1f))
                                 Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
@@ -419,14 +430,14 @@ fun MeditationScreen(
                     Icon(Icons.Default.MusicNote, null, tint = SaharaLavender, modifier = Modifier.size(20.dp))
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        if (isEnglish) "Guided Sessions" else "Guided Sessions",
+                        if (isEnglish) "Guided Sessions" else "Rahnuma Nashistein",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold
                     )
                 }
                 Text(
                     if (isEnglish) "Continues playing after you close the app"
-                    else           "App band karne ke baad bhi bajta rahega",
+                    else           "Band karne ke baad bhi awaaz chalti rahegi",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 24.dp, vertical = 2.dp)
@@ -440,9 +451,11 @@ fun MeditationScreen(
                         val file         = session.audioFile!!
                         val isThisPlaying  = musicCtrl.isPlaying && musicCtrl.currentTitle == session.titleEn
                         val isThisSelected = musicCtrl.currentTitle == session.titleEn
+                        val isThisLoading = musicCtrl.isLoading && isThisSelected
 
                         Row(
                             modifier = Modifier.fillMaxWidth()
+                                .height(104.dp)
                                 .clip(RoundedCornerShape(16.dp))
                                 .hazeEffect(hazeState) {
                                     blurEffect { blurRadius = 25.dp; colorEffects = listOf(HazeColorEffect.tint(Color.White.copy(.07f))) }
@@ -453,7 +466,9 @@ fun MeditationScreen(
                                     else MaterialTheme.colorScheme.outlineVariant.copy(.3f),
                                     RoundedCornerShape(16.dp)
                                 )
-                                .clickable { musicCtrl.play(file, session.titleEn, songPlaylist) }
+                                .clickable(enabled = !isThisLoading) {
+                                    musicCtrl.play(file, session.titleEn, songPlaylist)
+                                }
                                 .padding(16.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
@@ -470,7 +485,10 @@ fun MeditationScreen(
                                     Text(
                                         if (isEnglish) session.titleEn else session.titleUr,
                                         fontWeight = FontWeight.Bold,
-                                        style = MaterialTheme.typography.bodyMedium
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f)
                                     )
                                     if (isThisPlaying) {
                                         Spacer(Modifier.width(6.dp))
@@ -480,7 +498,9 @@ fun MeditationScreen(
                                 Text(
                                     if (isEnglish) session.descEn else session.descUr,
                                     style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                                 Text(
                                     session.duration,
@@ -490,12 +510,21 @@ fun MeditationScreen(
                             }
                             IconButton(
                                 onClick = { musicCtrl.play(file, session.titleEn, songPlaylist) },
+                                enabled = !isThisLoading,
                                 modifier = Modifier.size(36.dp)
                             ) {
-                                Icon(
-                                    if (isThisPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                                    null, tint = session.accentColor
-                                )
+                                if (isThisLoading) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(22.dp),
+                                        strokeWidth = 2.dp,
+                                        color = session.accentColor
+                                    )
+                                } else {
+                                    Icon(
+                                        if (isThisPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                        null, tint = session.accentColor
+                                    )
+                                }
                             }
                         }
                     }
@@ -515,8 +544,11 @@ fun MeditationScreen(
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Text(
-                                if (isEnglish) "Now Playing: ${musicCtrl.currentTitle}"
-                                else           "Ab Chal Raha Hai: ${musicCtrl.currentTitle}",
+                                if (isEnglish) {
+                                    "Now playing: ${activeSession?.titleEn ?: musicCtrl.currentTitle}"
+                                } else {
+                                    "Ab chal raha hai: ${activeSession?.titleUr ?: musicCtrl.currentTitle}"
+                                },
                                 style = MaterialTheme.typography.labelMedium,
                                 color = barColor,
                                 fontWeight = FontWeight.SemiBold,

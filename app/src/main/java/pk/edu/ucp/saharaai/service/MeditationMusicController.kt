@@ -119,6 +119,11 @@ class MeditationMusicController(private val appContext: Context) {
 
 
     private fun startPlay(file: String, title: String) {
+        currentIndex = playlistFiles.indexOf(file)
+        currentTitle = title
+        isLoading = true
+        isPlaying = false
+
         val intent = MeditationMusicService.playIntent(
             appContext, file, title, playlistFiles, playlistTitles
         )

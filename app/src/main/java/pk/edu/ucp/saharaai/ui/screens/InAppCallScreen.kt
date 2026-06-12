@@ -35,12 +35,14 @@ import pk.edu.ucp.saharaai.BuildConfig
 import pk.edu.ucp.saharaai.data.remote.LiveKitTokenClient
 import pk.edu.ucp.saharaai.data.remote.LiveKitTokenResponse
 import pk.edu.ucp.saharaai.data.remote.RealtimeDBService
+import pk.edu.ucp.saharaai.ui.components.GlassAlertDialog
 import pk.edu.ucp.saharaai.ui.theme.SaharaCoral
 import pk.edu.ucp.saharaai.ui.theme.SaharaSky
 import pk.edu.ucp.saharaai.ui.theme.SaharaStrongGreen
 import pk.edu.ucp.saharaai.utils.ObservePermissionState
 import pk.edu.ucp.saharaai.utils.PermissionCopy
 import pk.edu.ucp.saharaai.utils.rememberAppPermissionsRequester
+import dev.chrisbanes.haze.HazeState
 
 @Composable
 fun InAppCallScreen(
@@ -51,6 +53,7 @@ fun InAppCallScreen(
     mode: String,
     forUserId: String,
 ) {
+    val hazeState = remember { HazeState() }
     val isVideo = mode.equals("video", ignoreCase = true)
     val currentUid = remember { Firebase.auth.currentUser?.uid.orEmpty() }
     val isCounselorSide = forUserId != "self"
@@ -164,7 +167,8 @@ fun InAppCallScreen(
     }
 
     if (showEndPrompt) {
-        AlertDialog(
+        GlassAlertDialog(
+            hazeState = hazeState,
             onDismissRequest = { showEndPrompt = false },
             title = { Text(if (isEnglish) "Turn calls off?" else "Calls band karein?") },
             text = {

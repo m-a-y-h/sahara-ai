@@ -12,6 +12,7 @@ import com.google.firebase.ai.type.TextPart
 import com.google.firebase.ai.type.content
 import com.google.firebase.ai.type.generationConfig
 import com.google.firebase.ai.type.thinkingConfig
+import pk.edu.ucp.saharaai.BuildConfig
 import pk.edu.ucp.saharaai.data.remote.SaharaAiClient
 
 /**
@@ -34,7 +35,8 @@ import pk.edu.ucp.saharaai.data.remote.SaharaAiClient
  */
 object GeminiChatService {
 
-    private const val MODEL_NAME = "gemini-3.5-flash"
+    private val MODEL_NAME: String
+        get() = BuildConfig.SAHARA_GEMINI_MODEL.ifBlank { "gemini-3.1-flash-lite" }
 
     // Safety filters are explicitly loosened for all four categories. A
     // mental-health/substance-use chat legitimately surfaces words like
@@ -104,9 +106,10 @@ object GeminiChatService {
                 temperature = 0.45f
                 topP = 0.95f
                 topK = 40
-                // Gemini 3.5 Flash is a reasoning model — by default it
+                // Current Flash / Flash-Lite models can spend part of the
+                // token budget on internal thinking before visible text.
                 // burns a chunk of the output-token budget on internal
-                // thinking before producing the visible reply. With the
+                // reasoning before producing the visible reply. With the
                 // old 512-token cap, every call was finishing with
                 // finish_reason=max_tokens AND the SDK was returning an
                 // empty `.text` because the model never got to the

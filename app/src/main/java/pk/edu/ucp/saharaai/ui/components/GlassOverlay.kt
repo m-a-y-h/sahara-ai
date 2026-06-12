@@ -1,11 +1,13 @@
 package pk.edu.ucp.saharaai.ui.components
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
@@ -23,13 +25,19 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import dev.chrisbanes.haze.HazeInputScale
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeEffect
+import dev.chrisbanes.haze.hazeSource
+import dev.chrisbanes.haze.blur.HazeColorEffect
 import dev.chrisbanes.haze.blur.blurEffect
+import pk.edu.ucp.saharaai.R
 import pk.edu.ucp.saharaai.ui.theme.SaharaBorderGray
 import pk.edu.ucp.saharaai.ui.theme.SaharaHazeMaterials
 
@@ -38,12 +46,10 @@ import pk.edu.ucp.saharaai.ui.theme.SaharaHazeMaterials
  * window), so it can sit above the app chrome, dim the full screen, AND blur
  * the content behind it as real glass.
  *
- * The blur is the same recipe the Welcome privacy popup uses via
- * SaharaCard(GLASS): the blurred + tinted backdrop *is* the panel fill, so the
- * screen shows through. For that to render, the host screen must mark its
- * content with `Modifier.hazeSource(hazeState)` and pass the **same**
- * `hazeState` here — otherwise the blur has no source to read and the panel
- * looks empty.
+ * By default the panel uses the same `sahara_bg5` cropped, blurred, and tinted
+ * treatment as the NGO / counselor verification popups. Passing
+ * `panelBackdropResId = null` restores the older screen-glass behavior, which
+ * needs the host screen to mark its content with `Modifier.hazeSource(hazeState)`.
  *
  * Host it at the top level of a screen's root Box, e.g.:
  *
@@ -57,6 +63,7 @@ fun GlassOverlay(
     onDismiss: () -> Unit,
     isDark: Boolean = isSystemInDarkTheme(),
     dismissOnScrimTap: Boolean = true,
+    panelBackdropResId: Int? = R.drawable.sahara_bg5,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val shape = RoundedCornerShape(24.dp)
@@ -64,34 +71,82 @@ fun GlassOverlay(
     // is not composable. Mirrors SaharaCard's GLASS variant exactly.
     val glassStyle = SaharaHazeMaterials.defaultGlass(isDark)
     val borderColor = if (isDark) Color.White.copy(alpha = 0.16f) else SaharaBorderGray.copy(alpha = 0.40f)
-    Box(
+    val glassTint = if (isDark) Color.Black.copy(alpha = 0.4f) else Color.White.copy(alpha = 0.6f)
+    val panelBackdropHazeState = androidx.compose.runtime.remember { HazeState() }
+    val panelHazeState = if (panelBackdropResId != null) panelBackdropHazeState else hazeState
+
+    BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black.copy(alpha = if (isDark) 0.62f else 0.48f))
+            .background(Color.Black.copy(alpha = if (isDark) 0.6f else 0.3f))
             .pointerInput(dismissOnScrimTap) {
                 detectTapGestures(onTap = { if (dismissOnScrimTap) onDismiss() })
             },
         contentAlignment = Alignment.Center,
     ) {
-        Column(
+        Box(
             modifier = Modifier
-                .fillMaxWidth(0.88f)
+                .fillMaxWidth(0.9f)
                 // Cap the card height and scroll its content so a tall popup
                 // (long forms, avatar grids, time pickers) never overflows
                 // the screen.
                 .heightIn(max = 560.dp)
                 .clip(shape)
-                // The blurred glass backdrop — replaces the old opaque panel fill.
-                .hazeEffect(state = hazeState) {
-                    inputScale = HazeInputScale.Auto
-                    blurEffect { style = glassStyle }
-                }
-                .border(1.dp, borderColor, shape)
                 .pointerInput(Unit) { detectTapGestures(onTap = {}) }
-                .padding(22.dp)
-                .verticalScroll(rememberScrollState()),
-            content = content,
-        )
+        ) {
+            if (panelBackdropResId != null) {
+                Image(
+                    painter = painterResource(id = panelBackdropResId),
+                    contentDescription = null,
+                    modifier = Modifier
+                        .matchParentSize()
+                        .clip(shape)
+                        .hazeSource(state = panelBackdropHazeState),
+                    contentScale = ContentScale.Crop,
+                )
+            }
+
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    // The blurred glass backdrop — either reads the host screen,
+                    // or the popup-only image source above when one is provided.
+                    .hazeEffect(state = panelHazeState) {
+                        inputScale = HazeInputScale.Auto
+                        blurEffect {
+                            if (panelBackdropResId != null) {
+                                blurRadius = 12.dp
+                                colorEffects = listOf(HazeColorEffect.tint(glassTint))
+                            } else {
+                                style = glassStyle
+                            }
+                        }
+                    }
+                    .then(
+                        if (panelBackdropResId != null) {
+                            Modifier.border(
+                                width = 1.dp,
+                                brush = Brush.verticalGradient(
+                                    listOf(
+                                        if (isDark) Color.White.copy(alpha = 0.3f) else Color.White.copy(alpha = 0.8f),
+                                        if (isDark) Color.White.copy(alpha = 0.05f) else Color.White.copy(alpha = 0.3f),
+                                    )
+                                ),
+                                shape = shape,
+                            )
+                        } else {
+                            Modifier.border(1.dp, borderColor, shape)
+                        }
+                    ),
+            )
+
+            Column(
+                modifier = Modifier
+                    .padding(20.dp)
+                    .verticalScroll(rememberScrollState()),
+                content = content,
+            )
+        }
     }
 }
 
@@ -115,12 +170,14 @@ fun GlassAlertDialog(
     text: (@Composable () -> Unit)? = null,
     isDark: Boolean = isSystemInDarkTheme(),
     dismissOnScrimTap: Boolean = true,
+    panelBackdropResId: Int? = R.drawable.sahara_bg5,
 ) {
     GlassOverlay(
         hazeState = hazeState,
         onDismiss = onDismissRequest,
         isDark = isDark,
         dismissOnScrimTap = dismissOnScrimTap,
+        panelBackdropResId = panelBackdropResId,
     ) {
         icon?.let {
             Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { it() }

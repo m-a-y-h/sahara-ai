@@ -25,6 +25,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import pk.edu.ucp.saharaai.R
 import pk.edu.ucp.saharaai.data.model.ListeningSeverity
 import pk.edu.ucp.saharaai.data.model.WeeklyListeningReport
 import pk.edu.ucp.saharaai.ui.theme.SaharaCoral
@@ -149,5 +150,6 @@ fun WeeklyReportPopupDialog(
                 }
             }
         },
+        panelBackdropResId = R.drawable.sahara_bg5,
     )
 }

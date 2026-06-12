@@ -22,6 +22,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import pk.edu.ucp.saharaai.R
 import pk.edu.ucp.saharaai.data.model.CumulativeRiskReport
 import pk.edu.ucp.saharaai.ui.theme.SaharaStrongGreen
 
@@ -91,6 +92,7 @@ fun CumulativeReportDialog(
                 Text(if (isEnglish) "Got it" else "Theek hai")
             }
         },
+        panelBackdropResId = R.drawable.sahara_bg5,
     )
 }
 

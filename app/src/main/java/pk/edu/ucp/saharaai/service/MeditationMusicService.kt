@@ -27,6 +27,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import pk.edu.ucp.saharaai.activities.MainActivity
 import pk.edu.ucp.saharaai.utils.MeditationAudioCache
+import pk.edu.ucp.saharaai.utils.MeditationAudioEngine
 
 
 class MeditationMusicService : Service() {
@@ -86,6 +87,9 @@ class MeditationMusicService : Service() {
     private var playlistFiles:  Array<String> = emptyArray()
     private var playlistTitles: Array<String> = emptyArray()
     private var mediaPlayer: MediaPlayer?     = null
+    private var generatedEngine: MeditationAudioEngine? = null
+    private var generatedFrequency: Double? = null
+    private var usingGeneratedAudio = false
 
     // Each play() downloads off the main thread; keep the job so a fast
     // skip/stop cancels the in-flight fetch instead of racing it.
@@ -152,8 +156,8 @@ class MeditationMusicService : Service() {
         prepareJob = scope.launch {
             val file = try {
                 withContext(Dispatchers.IO) { MeditationAudioCache.resolve(this@MeditationMusicService, fileName) }
-            } catch (e: Exception) {
-                onTrackError(e.message ?: "couldn't load track")
+            } catch (_: Exception) {
+                startGeneratedFallback(fileName)
                 return@launch
             }
             try {
@@ -167,8 +171,10 @@ class MeditationMusicService : Service() {
                     setDataSource(file.absolutePath)
                     isLooping = false
                     setOnCompletionListener { skipNext() }
-                    setOnErrorListener { _, what, extra ->
-                        onTrackError("playback error ($what/$extra)"); true
+                    setOnErrorListener { _, _, _ ->
+                        runCatching { file.delete() }
+                        startGeneratedFallback(fileName)
+                        true
                     }
                     setOnPreparedListener { mp ->
                         // A fast skip can release this player while it was still
@@ -183,29 +189,50 @@ class MeditationMusicService : Service() {
                     }
                     prepareAsync()
                 }
-            } catch (e: Exception) {
-                onTrackError(e.message ?: "couldn't open track")
+            } catch (_: Exception) {
+                startGeneratedFallback(fileName)
             }
         }
     }
 
-    private fun onTrackError(message: String) {
-        isLoading = false; isPlaying = false
-        releasePlayer()
-        mainHandler.post { Toast.makeText(this, "Meditation: $message", Toast.LENGTH_SHORT).show() }
-        updateNotif(); notify2()
+    private fun startGeneratedFallback(fileName: String) {
+        val title = currentTitle.ifBlank { fileName }
+        val frequency = MeditationAudioEngine.frequencyFor(title)
+        releasePlayback(clearGeneratedState = false)
+        generatedFrequency = frequency
+        usingGeneratedAudio = true
+        generatedEngine = MeditationAudioEngine().also { it.play(frequency, volumeFraction = 0.28f) }
+        isLoading = false
+        isPlaying = true
+        mainHandler.post {
+            Toast.makeText(this, "Meditation audio offline mode", Toast.LENGTH_SHORT).show()
+        }
+        updateNotif()
+        notify2()
     }
 
     fun pause() {
-        runCatching { mediaPlayer?.pause() }
+        if (usingGeneratedAudio) {
+            generatedEngine?.stop()
+            generatedEngine = null
+        } else {
+            runCatching { mediaPlayer?.pause() }
+        }
         isPlaying = false
         updateNotif()
         notify2()
     }
 
     fun resume() {
-        runCatching { mediaPlayer?.start() }
-        isPlaying = mediaPlayer != null
+        if (usingGeneratedAudio) {
+            generatedFrequency?.let { frequency ->
+                generatedEngine = MeditationAudioEngine().also { it.play(frequency, volumeFraction = 0.28f) }
+                isPlaying = true
+            }
+        } else {
+            runCatching { mediaPlayer?.start() }
+            isPlaying = mediaPlayer != null
+        }
         updateNotif()
         notify2()
     }
@@ -226,13 +253,24 @@ class MeditationMusicService : Service() {
     // True only when a track is loaded and paused (resumable). After an error or
     // stop the player is released, so a tap on that track must start fresh
     // rather than call resume() (which would silently no-op).
-    val canResume: Boolean get() = mediaPlayer != null && !isPlaying && !isLoading
+    val canResume: Boolean get() =
+        (mediaPlayer != null || (usingGeneratedAudio && generatedFrequency != null)) && !isPlaying && !isLoading
 
     private fun releasePlayer() {
+        releasePlayback()
+    }
+
+    private fun releasePlayback(clearGeneratedState: Boolean = true) {
         runCatching { mediaPlayer?.stop() }
         runCatching { mediaPlayer?.release() }
+        runCatching { generatedEngine?.stop() }
         mediaPlayer = null
-        isPlaying   = false
+        generatedEngine = null
+        if (clearGeneratedState) {
+            generatedFrequency = null
+            usingGeneratedAudio = false
+        }
+        isPlaying = false
     }
 
 
