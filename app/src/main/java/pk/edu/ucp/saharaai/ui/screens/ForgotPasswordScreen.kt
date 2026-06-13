@@ -29,6 +29,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeSource
+import kotlinx.coroutines.delay
 import pk.edu.ucp.saharaai.ui.components.*
 import pk.edu.ucp.saharaai.ui.theme.*
 import pk.edu.ucp.saharaai.viewmodels.ForgotPasswordViewModel
@@ -58,9 +59,18 @@ fun ForgotPasswordScreen(
     var currentStep by remember { mutableStateOf(ResetStep.ENTER_EMAIL) }
     var email by remember { mutableStateOf("") }
     val errorMsg = passwordViewModel.errorMessage
+    val statusMsg = passwordViewModel.statusMessage
     val isLoading = passwordViewModel.isLoading
+    var resendCooldown by remember { mutableIntStateOf(0) }
 
     val isEmailValid = isValidEmail(email) || email.isEmpty()
+
+    LaunchedEffect(currentStep, resendCooldown) {
+        if (currentStep == ResetStep.SUCCESS && resendCooldown > 0) {
+            delay(1000L)
+            resendCooldown--
+        }
+    }
 
     Box(modifier = Modifier.fillMaxSize()) {
 
@@ -176,6 +186,7 @@ fun ForgotPasswordScreen(
                                             onClick = {
                                                 passwordViewModel.requestResetLink(email, isEnglish, onSuccess = {
                                                     currentStep = ResetStep.SUCCESS
+                                                    resendCooldown = 60
                                                 })
                                             },
                                             enabled = isEmailStepValid,
@@ -234,6 +245,31 @@ fun ForgotPasswordScreen(
                                             style = MaterialTheme.typography.bodySmall
                                         )
 
+                                        if (errorMsg.isNotBlank() || statusMsg.isNotBlank()) {
+                                            Spacer(modifier = Modifier.height(12.dp))
+                                            Card(
+                                                colors = CardDefaults.cardColors(
+                                                    containerColor = if (errorMsg.isNotBlank()) {
+                                                        SaharaCoral.copy(alpha = 0.12f)
+                                                    } else {
+                                                        primaryGreen.copy(alpha = 0.12f)
+                                                    }
+                                                ),
+                                                shape = RoundedCornerShape(10.dp),
+                                                modifier = Modifier.fillMaxWidth()
+                                            ) {
+                                                Text(
+                                                    text = errorMsg.ifBlank { statusMsg },
+                                                    color = if (errorMsg.isNotBlank()) SaharaCoral else primaryGreen,
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    textAlign = TextAlign.Center,
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .padding(12.dp)
+                                                )
+                                            }
+                                        }
+
                                         Spacer(modifier = Modifier.height(32.dp))
 
                                         SaharaButton(
@@ -247,22 +283,51 @@ fun ForgotPasswordScreen(
 
                                         Spacer(modifier = Modifier.height(12.dp))
 
-                                        
-                                        TextButton(
-                                            onClick = {
-                                                passwordViewModel.requestResetLink(
-                                                    email,
-                                                    isEnglish,
-                                                    onSuccess = {},
-                                                    onFailure = { currentStep = ResetStep.ENTER_EMAIL }
+                                        when {
+                                            isLoading -> Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.Center,
+                                                modifier = Modifier.fillMaxWidth(),
+                                            ) {
+                                                CircularProgressIndicator(
+                                                    color = primaryGreen,
+                                                    strokeWidth = 2.dp,
+                                                    modifier = Modifier.size(18.dp),
+                                                )
+                                                Spacer(Modifier.width(8.dp))
+                                                Text(
+                                                    if (isEnglish) "Sending reset link..." else "Reset link bheja ja raha hai...",
+                                                    color = primaryGreen,
+                                                    style = MaterialTheme.typography.labelMedium,
                                                 )
                                             }
-                                        ) {
-                                            Text(
-                                                text = if (isEnglish) "Didn't receive it? Resend" else "Email nahi aayi? Dobara Bhejein",
-                                                color = primaryGreen,
-                                                style = MaterialTheme.typography.labelMedium
+                                            resendCooldown > 0 -> Text(
+                                                text = if (isEnglish) {
+                                                    "Resend available in ${resendCooldown}s"
+                                                } else {
+                                                    "Dobara bhejne ke liye ${resendCooldown}s intzaar karein"
+                                                },
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                textAlign = TextAlign.Center,
+                                                modifier = Modifier.fillMaxWidth(),
                                             )
+                                            else -> TextButton(
+                                                onClick = {
+                                                    passwordViewModel.requestResetLink(
+                                                        email,
+                                                        isEnglish,
+                                                        onSuccess = { resendCooldown = 60 },
+                                                        isResend = true,
+                                                    )
+                                                }
+                                            ) {
+                                                Text(
+                                                    text = if (isEnglish) "Didn't receive it? Resend" else "Email nahi aayi? Dobara Bhejein",
+                                                    color = primaryGreen,
+                                                    style = MaterialTheme.typography.labelMedium
+                                                )
+                                            }
                                         }
                                     }
                                 }

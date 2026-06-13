@@ -63,6 +63,13 @@ class AuthRepository(
             }
     }
 
+    suspend fun sendPasswordResetLink(email: String): FirebaseAuthFailure? = try {
+        auth.sendPasswordResetEmail(email).await()
+        null
+    } catch (e: Exception) {
+        mapFailure(e)
+    }
+
     fun currentUserEmail(): String? = auth.currentUser?.email
 
     fun hasAuthenticatedSession(): Boolean = auth.currentUser != null

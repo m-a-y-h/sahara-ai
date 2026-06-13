@@ -183,12 +183,15 @@ object RealtimeDBService {
     /** @return the UID associated with the email's password account, or null
      *  if no record exists. Readable without auth (the rule sets `.read=true`),
      *  so the Google sign-in path can call this BEFORE a user is signed in. */
-    suspend fun lookupEmailHasPassword(email: String): String? = runCatching {
+    suspend fun lookupEmailHasPasswordResult(email: String): Result<String?> = runCatching {
         val key = emailKey(email)
         if (key.isBlank()) return@runCatching null
         val snap = db.getReference("email_password_index").child(key).get().await()
         snap.getValue(String::class.java)?.takeIf { it.isNotBlank() }
     }.onFailure { Log.w(TAG, "lookupEmailHasPassword($email) failed", it) }
+
+    suspend fun lookupEmailHasPassword(email: String): String? =
+        lookupEmailHasPasswordResult(email)
         .getOrNull()
 
     suspend fun ensureUserRecord(uid: String, name: String, email: String): Result<Map<String, Any>> = runCatching {
