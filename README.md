@@ -13,23 +13,29 @@
 
 - **What this is:** Android harm-reduction support prototype for non-prescribed drug use, built with Kotlin, Jetpack Compose, Firebase, Gemini via Firebase AI Logic, Modal services, Render, and LiveKit.
 - **Canonical repo:** [Codeberg](https://codeberg.org/solarmane/project-sahara).
-- **GitHub mirror:** exists only for tooling and the wiki.
-- **Main docs:** use the [GitHub Wiki](https://github.com/m-a-y-h/sahara-ai/wiki) because Codeberg wiki is not enabled for this mirror workflow.
-- **Deployment docs:** [Deployment Guide](https://github.com/m-a-y-h/sahara-ai/wiki/Deployment-Guide) and [Secrets And Local Setup](https://github.com/m-a-y-h/sahara-ai/wiki/Secrets-And-Local-Setup).
+- **GitHub mirror:** exists only for tooling and external integrations.
+- **Main docs:** use the [Codeberg Wiki](https://codeberg.org/solarmane/project-sahara/wiki).
+- **Deployment docs:** [Deployment Guide](https://codeberg.org/solarmane/project-sahara/wiki/Deployment-Guide) and [Secrets And Local Setup](https://codeberg.org/solarmane/project-sahara/wiki/Secrets-And-Local-Setup).
 - **Patreon:** [https://patreon.com/project_sahara](https://patreon.com/project_sahara)
 
 ## Clone Or Fork
 
 - Fork the repo on Codeberg if you are deploying your own copy.
 - Clone your fork:
-  - `git clone https://codeberg.org/<your-user>/<your-fork>.git`
-  - `cd <your-fork>`
+~~~sh
+git clone https://codeberg.org/<your-user>/<your-fork>.git
+cd <your-fork>
+~~~
 - Add upstream if needed:
-  - `git remote add upstream https://codeberg.org/solarmane/project-sahara.git`
-  - `git fetch upstream`
+~~~sh
+git remote add upstream https://codeberg.org/solarmane/project-sahara.git
+git fetch upstream
+~~~
 - Keep your branch current:
-  - `git switch main`
-  - `git pull --ff-only upstream main`
+~~~sh
+git switch main
+git pull --ff-only upstream main
+~~~
 
 ## Apps To Install
 
@@ -48,7 +54,9 @@
 ## Local Setup
 
 - Create the local secret folder:
-  - `mkdir -p secrets`
+~~~sh
+mkdir -p secrets
+~~~
 - Put real secret files only in `secrets/`:
   - `secrets/local.properties`
   - `secrets/google-services.json`
@@ -56,17 +64,23 @@
   - `secrets/<firebase-admin-service-account>.json`
 - Create symlinks from the repo root; do not copy secrets into place.
 - Linux/macOS:
-  - `ln -sf secrets/local.properties local.properties`
-  - `ln -sf ../secrets/google-services.json app/google-services.json`
-  - `ln -sf ../secrets/client_secret.json app/client_secret.json`
+~~~sh
+ln -sf secrets/local.properties local.properties
+ln -sf ../secrets/google-services.json app/google-services.json
+ln -sf ../secrets/client_secret.json app/client_secret.json
+~~~
 - Windows `cmd.exe` as Administrator or with Developer Mode:
-  - `mklink local.properties secrets\local.properties`
-  - `mklink app\google-services.json ..\secrets\google-services.json`
-  - `mklink app\client_secret.json ..\secrets\client_secret.json`
+~~~bat
+mklink local.properties secrets\local.properties
+mklink app\google-services.json ..\secrets\google-services.json
+mklink app\client_secret.json ..\secrets\client_secret.json
+~~~
 - Windows PowerShell as Administrator or with Developer Mode:
-  - `New-Item -ItemType SymbolicLink -Force -Path local.properties -Target (Resolve-Path secrets\local.properties)`
-  - `New-Item -ItemType SymbolicLink -Force -Path app\google-services.json -Target (Resolve-Path secrets\google-services.json)`
-  - `New-Item -ItemType SymbolicLink -Force -Path app\client_secret.json -Target (Resolve-Path secrets\client_secret.json)`
+~~~powershell
+New-Item -ItemType SymbolicLink -Force -Path local.properties -Target (Resolve-Path secrets\local.properties)
+New-Item -ItemType SymbolicLink -Force -Path app\google-services.json -Target (Resolve-Path secrets\google-services.json)
+New-Item -ItemType SymbolicLink -Force -Path app\client_secret.json -Target (Resolve-Path secrets\client_secret.json)
+~~~
 - If symlinks fail on Windows:
   - enable Developer Mode or run the shell as Administrator
   - keep the repo on NTFS, not exFAT or a network drive
@@ -74,32 +88,43 @@
 
 ## Required Secrets
 
-- **Firebase Android config:** create the Android app in Firebase Console, download `google-services.json`, and place it at `secrets/google-services.json`.
-- **Firebase Admin service account:** Firebase Console -> Project settings -> Service accounts -> Generate new private key; use the JSON only for Modal `firebase-admin`.
-- **Firebase Auth:** Firebase Console -> Authentication -> Sign-in method; enable Email/Password and Google.
-- **Firebase database keys:** Firebase Console -> Firestore Database and Realtime Database; copy the RTDB URL into Modal/Firebase config where needed.
-- **Firebase AI Logic / Gemini:** Firebase Console -> AI Logic; enable the Gemini backend used by the Android app.
-- **Google OAuth client:** Google Cloud Console -> APIs & Services -> Credentials; download OAuth JSON as `secrets/client_secret.json` when a local flow needs it.
-- **YouTube Data API:** Google Cloud Console -> API Library -> YouTube Data API v3; enable it for the same signing key/package.
-- **Modal secrets:** Modal dashboard/CLI; create `firebase-admin`, `sahara-mail`, and `livekit`.
-- **LiveKit:** LiveKit Cloud -> project settings; copy server URL, API key, and API secret.
-- **Gmail SMTP:** Google Account -> App passwords; use the app password for Modal `sahara-mail`, or use another SMTP provider.
-- **Render env vars:** Render service settings; set `BASE_URL`, `SPOTIFY_CLIENT_ID`, `STEAM_WEB_API_KEY`, and `BLUESKY_CLIENT_PRIVATE_JWK` as needed.
-- **Bank/payment display keys:** set `sahara.bank.*` values in `secrets/local.properties` only if payment review is enabled.
-- **Full steps and links:** [Secrets And Local Setup](https://github.com/m-a-y-h/sahara-ai/wiki/Secrets-And-Local-Setup).
+- **Firebase Android config:** [Firebase project settings](https://console.firebase.google.com/u/0/project/_/settings/general) -> Android app -> download `google-services.json`; see [Firebase Keys](https://codeberg.org/solarmane/project-sahara/wiki/Secrets-And-Local-Setup#firebase-keys).
+- **Firebase Admin service account:** [Firebase service accounts](https://console.firebase.google.com/u/0/project/_/settings/serviceaccounts/adminsdk) -> Generate new private key; see [Firebase Keys](https://codeberg.org/solarmane/project-sahara/wiki/Secrets-And-Local-Setup#firebase-keys).
+- **Firebase Auth:** [Firebase Authentication providers](https://console.firebase.google.com/u/0/project/_/authentication/providers) -> enable Email/Password and Google; see [Firebase Keys](https://codeberg.org/solarmane/project-sahara/wiki/Secrets-And-Local-Setup#firebase-keys).
+- **Firebase databases:** [Firestore](https://console.firebase.google.com/u/0/project/_/firestore) and [Realtime Database](https://console.firebase.google.com/u/0/project/_/database) -> create databases and copy the RTDB URL; see [Firebase Keys](https://codeberg.org/solarmane/project-sahara/wiki/Secrets-And-Local-Setup#firebase-keys).
+- **Firebase AI Logic / Gemini:** [Firebase AI Logic](https://firebase.google.com/docs/ai-logic/get-started?platform=android) -> enable Gemini for the Firebase project; see [Firebase Keys](https://codeberg.org/solarmane/project-sahara/wiki/Secrets-And-Local-Setup#firebase-keys).
+- **Google OAuth client:** [Google Cloud Credentials](https://console.cloud.google.com/apis/credentials) -> create OAuth clients and download `client_secret.json`; see [Google OAuth And YouTube](https://codeberg.org/solarmane/project-sahara/wiki/Secrets-And-Local-Setup#google-oauth-and-youtube).
+- **YouTube Data API:** [YouTube Data API v3](https://console.cloud.google.com/apis/library/youtube.googleapis.com) -> enable it for the project; see [Google OAuth And YouTube](https://codeberg.org/solarmane/project-sahara/wiki/Secrets-And-Local-Setup#google-oauth-and-youtube).
+- **Modal secrets:** [Modal secrets](https://modal.com/docs/guide/secrets) -> create `firebase-admin`, `sahara-mail`, and `livekit`; see [Modal Secrets](https://codeberg.org/solarmane/project-sahara/wiki/Secrets-And-Local-Setup#modal-secrets).
+- **LiveKit:** [LiveKit Cloud](https://cloud.livekit.io/) -> create project, API key, API secret, and server URL; see [Modal Secrets](https://codeberg.org/solarmane/project-sahara/wiki/Secrets-And-Local-Setup#modal-secrets).
+- **Gmail SMTP:** [Google app passwords](https://support.google.com/accounts/answer/185833) -> create an app password for Modal `sahara-mail`; see [Modal Secrets](https://codeberg.org/solarmane/project-sahara/wiki/Secrets-And-Local-Setup#modal-secrets).
+- **Render env vars:** [Render web service env vars](https://render.com/docs/configure-environment-variables) -> set OAuth helper environment variables; see [Render Environment Variables](https://codeberg.org/solarmane/project-sahara/wiki/Secrets-And-Local-Setup#render-environment-variables).
+- **Spotify key:** [Spotify Developer Dashboard](https://developer.spotify.com/dashboard) -> create app and copy client ID; see [Render Environment Variables](https://codeberg.org/solarmane/project-sahara/wiki/Secrets-And-Local-Setup#render-environment-variables).
+- **Steam key:** [Steam Web API Key](https://steamcommunity.com/dev/apikey) -> create key; see [Render Environment Variables](https://codeberg.org/solarmane/project-sahara/wiki/Secrets-And-Local-Setup#render-environment-variables).
+- **Bank/payment display keys:** set `sahara.bank.*` values in `secrets/local.properties` only if payment review is enabled; see [Local Properties Template](https://codeberg.org/solarmane/project-sahara/wiki/Secrets-And-Local-Setup#local-properties-template).
+- **Full steps and links:** [Secrets And Local Setup](https://codeberg.org/solarmane/project-sahara/wiki/Secrets-And-Local-Setup).
 
 ## Python And Modal
 
 - Create or activate a virtualenv:
-  - `python -m venv .venv`
-  - `source .venv/bin/activate`
-  - or Fish: `source .venv/bin/activate.fish`
+~~~sh
+python -m venv .venv
+source .venv/bin/activate
+~~~
+- Fish:
+~~~fish
+source .venv/bin/activate.fish
+~~~
 - Install Modal:
-  - `pip install modal`
+~~~sh
+pip install modal
+~~~
 - Login to Modal:
-  - `modal setup`
+~~~sh
+modal setup
+~~~
 - Deploy services from the repo/service paths documented in the wiki:
-  - [Deployment Guide](https://github.com/m-a-y-h/sahara-ai/wiki/Deployment-Guide)
+  - [Deployment Guide](https://codeberg.org/solarmane/project-sahara/wiki/Deployment-Guide)
 
 ## Android Run
 
@@ -110,23 +135,25 @@
   - `app/client_secret.json`
 - Sync Gradle.
 - Build:
-  - `./gradlew :app:assembleDebug`
+~~~sh
+./gradlew :app:assembleDebug
+~~~
 - Run the `app` configuration on a device/emulator with Google Play services.
 
 ## Wiki Map
 
-- [Current Architecture](https://github.com/m-a-y-h/sahara-ai/wiki/Current-Architecture)
-- [Deployment Guide](https://github.com/m-a-y-h/sahara-ai/wiki/Deployment-Guide)
-- [Secrets And Local Setup](https://github.com/m-a-y-h/sahara-ai/wiki/Secrets-And-Local-Setup)
-- [Services](https://github.com/m-a-y-h/sahara-ai/wiki/Services)
-- [Sahara AI Protocol](https://github.com/m-a-y-h/sahara-ai/wiki/Sahara-AI-Protocol)
-- [Sahara Lens](https://github.com/m-a-y-h/sahara-ai/wiki/Sahara-Lens)
-- [Sahara Voice](https://github.com/m-a-y-h/sahara-ai/wiki/Sahara-Voice)
-- [Sahara Push Mailer And Biometric Auth](https://github.com/m-a-y-h/sahara-ai/wiki/Sahara-Push-Mailer-And-Biometric-Auth)
-- [Sahara Risk](https://github.com/m-a-y-h/sahara-ai/wiki/Sahara-Risk)
-- [Sahara Listening](https://github.com/m-a-y-h/sahara-ai/wiki/Sahara-Listening)
-- [Connections OAuth Helper](https://github.com/m-a-y-h/sahara-ai/wiki/Connections-OAuth-Helper)
-- [Firebase Support Files](https://github.com/m-a-y-h/sahara-ai/wiki/Firebase-Support-Files)
+- [Current Architecture](https://codeberg.org/solarmane/project-sahara/wiki/Current-Architecture)
+- [Deployment Guide](https://codeberg.org/solarmane/project-sahara/wiki/Deployment-Guide)
+- [Secrets And Local Setup](https://codeberg.org/solarmane/project-sahara/wiki/Secrets-And-Local-Setup)
+- [Services](https://codeberg.org/solarmane/project-sahara/wiki/Services)
+- [Sahara AI Protocol](https://codeberg.org/solarmane/project-sahara/wiki/Sahara-AI-Protocol)
+- [Sahara Lens](https://codeberg.org/solarmane/project-sahara/wiki/Sahara-Lens)
+- [Sahara Voice](https://codeberg.org/solarmane/project-sahara/wiki/Sahara-Voice)
+- [Sahara Push Mailer And Biometric Auth](https://codeberg.org/solarmane/project-sahara/wiki/Sahara-Push-Mailer-And-Biometric-Auth)
+- [Sahara Risk](https://codeberg.org/solarmane/project-sahara/wiki/Sahara-Risk)
+- [Sahara Listening](https://codeberg.org/solarmane/project-sahara/wiki/Sahara-Listening)
+- [Connections OAuth Helper](https://codeberg.org/solarmane/project-sahara/wiki/Connections-OAuth-Helper)
+- [Firebase Support Files](https://codeberg.org/solarmane/project-sahara/wiki/Firebase-Support-Files)
 
 ## License
 
