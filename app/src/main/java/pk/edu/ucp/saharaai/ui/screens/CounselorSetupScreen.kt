@@ -57,8 +57,6 @@ fun CounselorSetupScreen(
     val isLoading = setupViewModel.isLoading
     val errorMsg = setupViewModel.errorMsg
 
-    val blobMotion = rememberBackdropBlobMotion()
-
     fun saveProfile() {
         if (fullName.isBlank()) { setupViewModel.reportError(if (isEnglish) "Please enter your name." else "Apna naam darj karein."); return }
         if (ngoName.isBlank()) { setupViewModel.reportError(if (isEnglish) "NGO name is required." else "NGO ka naam zaroori hai."); return }
@@ -97,8 +95,23 @@ fun CounselorSetupScreen(
             } else {
                 Box(modifier = Modifier.fillMaxSize().background(Color.White.copy(alpha = 0.1f)))
             }
-            Box(modifier = Modifier.size(350.dp).offset(x = (-80).dp, y = (-50).dp).primaryBlobMotion(blobMotion).background(if (isDark) SaharaGreen.copy(0.15f) else SaharaGreen.copy(0.18f), CircleShape).blur(80.dp))
-            Box(modifier = Modifier.size(400.dp).align(Alignment.BottomEnd).offset(x = 100.dp, y = 50.dp).secondaryBlobMotion(blobMotion).background(if (isDark) SaharaSky.copy(0.15f) else SaharaSky.copy(0.22f), CircleShape).blur(96.dp))
+            BackdropBlobs(
+                primaryBlob = BackdropBlobSpec(
+                    size = 350.dp,
+                    offsetX = (-80).dp,
+                    offsetY = (-50).dp,
+                    color = if (isDark) SaharaGreen.copy(0.15f) else SaharaGreen.copy(0.18f),
+                    blurRadius = 80.dp,
+                ),
+                secondaryBlob = BackdropBlobSpec(
+                    size = 400.dp,
+                    offsetX = 100.dp,
+                    offsetY = 50.dp,
+                    color = if (isDark) SaharaSky.copy(0.15f) else SaharaSky.copy(0.22f),
+                    alignment = Alignment.BottomEnd,
+                    blurRadius = 96.dp,
+                ),
+            )
         }
 
         Column(modifier = Modifier.fillMaxSize()) {

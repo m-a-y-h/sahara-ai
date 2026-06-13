@@ -93,14 +93,6 @@ class ChatViewModel : ViewModel() {
     private val _aiReplyEvents = MutableSharedFlow<AiReplyEvent>(extraBufferCapacity = 8)
     val aiReplyEvents: SharedFlow<AiReplyEvent> = _aiReplyEvents.asSharedFlow()
 
-    data class VoiceNoteEvent(
-        val bubbleId: String,
-        val analyzedBubbleText: String? = null,
-        val replyText: String,
-    )
-    private val _voiceNoteEvents = MutableSharedFlow<VoiceNoteEvent>(extraBufferCapacity = 4)
-    val voiceNoteEvents: SharedFlow<VoiceNoteEvent> = _voiceNoteEvents.asSharedFlow()
-
     private var currentSessionId: String = ""
     private var currentCounselorId: String = ""
     private var currentUserId: String = ""
@@ -711,8 +703,8 @@ class ChatViewModel : ViewModel() {
      *  Returns immediately; updates flow through the existing messages
      *  listener.
      *
-     *  Replaces the old `analyzeVoiceNote(bubbleId, ...)` flow that kept voice
-     *  notes in Compose `transientMessages` only and lost them on navigation.
+     *  Voice notes are persisted before analysis so they survive navigation
+     *  and app restarts.
      */
     fun sendVoiceNoteToAI(
         secondsRecorded: Int,
@@ -805,68 +797,6 @@ class ChatViewModel : ViewModel() {
         }
     }
 
-    @Deprecated("Use sendVoiceNoteToAI which persists voice notes to Firestore.")
-    fun analyzeVoiceNote(
-        bubbleId: String,
-        secondsRecorded: Int,
-        audioBytes: ByteArray,
-        mimeType: String,
-        isEnglish: Boolean,
-    ) {
-        viewModelScope.launch {
-            SaharaVoiceRepository.analyze(audioBytes, mimeType).fold(
-                onSuccess = { response ->
-                    val level = VoiceLevel.fromWire(response.screening?.level)
-                    val topClass = response.screening?.topScreeningClass ?: "neutral"
-                    val labelSuffix = when (level) {
-                        VoiceLevel.HIGH -> if (isEnglish) "tone: $topClass (high distress)" else "tone: $topClass (zyada distress)"
-                        VoiceLevel.ELEVATED -> if (isEnglish) "tone: $topClass (elevated)" else "tone: $topClass (barhi hui)"
-                        VoiceLevel.NEUTRAL -> if (isEnglish) "tone: steady" else "tone: theek"
-                        VoiceLevel.UNCERTAIN -> if (isEnglish) "tone: couldn't read" else "tone: saaf nahi pata laga"
-                        VoiceLevel.UNKNOWN -> if (isEnglish) "tone: unknown" else "tone: pata nahi"
-                    }
-                    val reply = when (level) {
-                        VoiceLevel.HIGH -> if (isEnglish)
-                            "Your voice sounds heavy right now. Sahara counselors are available, or call 1122/115 if it's urgent. Want me to open the counselor list?"
-                        else
-                            "Awaz mein boj sun raha hoon. Sahara counselor available hain, ya urgent ho to 1122/115 call karein. Counselor list kholoon?"
-                        VoiceLevel.ELEVATED -> if (isEnglish)
-                            "I can hear some tension. Want to try a 60-second breathing exercise, or tell me what's on your mind?"
-                        else
-                            "Thori tension sun raha hoon. 60-second saans ki mashq try karein ya batayein kya chal raha hai?"
-                        VoiceLevel.NEUTRAL -> if (isEnglish)
-                            "Your voice sounds steady. Tell me more about today - anything I should know?"
-                        else
-                            "Awaz steady lag rahi hai. Aaj ke baray mein batayein - kuch important?"
-                        VoiceLevel.UNCERTAIN, VoiceLevel.UNKNOWN -> if (isEnglish)
-                            "I couldn't read the clip cleanly. Try a quieter spot, or just type what's going on."
-                        else
-                            "Clip saaf nahi samjhi. Khamosh jagah mein dobara try karein, ya type kar dein."
-                    }
-                    _voiceNoteEvents.emit(
-                        VoiceNoteEvent(
-                            bubbleId = bubbleId,
-                            analyzedBubbleText = "Voice note ($secondsRecorded sec) - $labelSuffix",
-                            replyText = reply,
-                        )
-                    )
-                },
-                onFailure = {
-                    _voiceNoteEvents.emit(
-                        VoiceNoteEvent(
-                            bubbleId = bubbleId,
-                            replyText = if (isEnglish)
-                                "Couldn't reach the voice analyser right now. Please type how you're feeling."
-                            else
-                                "Voice analyser tak abhi raabta nahi ho saka. Type kar ke batayein."
-                        )
-                    )
-                },
-            )
-        }
-    }
-
-    
     fun metadataFor(messageId: String): SaharaChatTurnMetadata? = _aiMetadata.value[messageId]
 
     private fun FirestoreMessage.toSaharaMetadataOrNull(): SaharaChatTurnMetadata? {

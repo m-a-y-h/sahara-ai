@@ -122,24 +122,8 @@ fun JournalScreen(
     }
 
     
-    val bgGradient = if (isDark)
-        listOf(SaharaStrongGreen.copy(0.2f), MaterialTheme.colorScheme.background.copy(0.6f), MaterialTheme.colorScheme.background)
-    else
-        listOf(SaharaStrongGreen.copy(0.25f), SaharaPeach.copy(0.1f), MaterialTheme.colorScheme.background.copy(0.2f))
-
-    val blobMotion = rememberBackdropBlobMotion()
-
-    
     Box(modifier = Modifier.fillMaxSize()) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .hazeSource(state = hazeState)
-                .background(Brush.verticalGradient(bgGradient))
-        ) {
-            Box(modifier = Modifier.size(350.dp).offset(x = (-80).dp, y = (-50).dp).primaryBlobMotion(blobMotion).background(Brush.radialGradient(listOf(SaharaStrongGreen.copy(if (isDark) 0.25f else 0.15f), Color.Transparent))))
-            Box(modifier = Modifier.size(400.dp).align(Alignment.BottomEnd).offset(x = 100.dp, y = 50.dp).secondaryBlobMotion(blobMotion).background(Brush.radialGradient(listOf(SaharaSky.copy(if (isDark) 0.2f else 0.18f), Color.Transparent))))
-        }
+        ScreenBackdrop(hazeState)
 
         Scaffold(
             bottomBar = { BottomNav(navController = navController, hazeState = hazeState) },

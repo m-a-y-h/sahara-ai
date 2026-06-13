@@ -11,6 +11,7 @@ import com.google.firebase.database.DatabaseError
 import com.google.firebase.database.DatabaseReference
 import com.google.firebase.database.FirebaseDatabase
 import com.google.firebase.database.MutableData
+import com.google.firebase.database.Query
 import com.google.firebase.database.ServerValue
 import com.google.firebase.database.Transaction
 import com.google.firebase.database.ValueEventListener
@@ -21,6 +22,7 @@ import java.io.IOException
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.tasks.await
 import pk.edu.ucp.saharaai.ASSESSMENT_VALIDITY_MS
@@ -39,7 +41,6 @@ import java.util.UUID
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
-
 object RealtimeDBService {
 
     private val db get() = FirebaseDatabase.getInstance()
@@ -52,12 +53,6 @@ object RealtimeDBService {
     // crash the assessment save was hitting.
     private val CHARS_INVALID_IN_RTDB_KEY = setOf('.', '#', '$', '[', ']', '/')
 
-    private fun hashForPath(value: String): String {
-        val digest = MessageDigest.getInstance("SHA-256")
-            .digest(value.toByteArray(Charsets.UTF_8))
-        return digest.joinToString("") { "%02x".format(it) }
-    }
-
     private fun hasInvalidRtdbKeyChars(value: String): Boolean =
         value.any { it in CHARS_INVALID_IN_RTDB_KEY }
 
@@ -65,7 +60,7 @@ object RealtimeDBService {
         val cleanKey = key.trim()
         require(cleanKey.isNotBlank()) { "Missing access key." }
         return if (hasInvalidRtdbKeyChars(cleanKey)) {
-            "encoded_${hashForPath(cleanKey)}"
+            "encoded_${sha256Hex(cleanKey)}"
         } else {
             cleanKey
         }
@@ -84,6 +79,79 @@ object RealtimeDBService {
         )
     }
 
+    private const val TAG = "RealtimeDBService"
+
+    private fun sha256Hex(value: String): String =
+        MessageDigest.getInstance("SHA-256")
+            .digest(value.toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }
+
+    // One body for the hand-rolled callbackFlow+ValueEventListener blocks this
+    // file used to repeat. `ref` is a lambda so path building still runs at
+    // collect time (inside the flow), exactly like the inlined originals.
+    private fun <T> rtdbFlow(
+        logLabel: String = "RTDB listener",
+        closeWithError: Boolean = false,
+        ref: () -> Query,
+        map: (DataSnapshot) -> T,
+    ): Flow<T> = callbackFlow {
+        val query = ref()
+        val listener = query.addValueEventListener(object : ValueEventListener {
+            override fun onDataChange(snap: DataSnapshot) { trySend(map(snap)) }
+            override fun onCancelled(error: DatabaseError) {
+                val exception = error.toException()
+                Log.w(TAG, "$logLabel cancelled", exception)
+                if (closeWithError) close(exception) else close()
+            }
+        })
+        awaitClose { query.removeEventListener(listener) }
+    }
+
+    private enum class FT { STR, LNG, INT, BOOL, FLT }
+
+    // Copies the listed fields into `entry` when present, preserving the
+    // original per-field order and coercions (INT = Long→Int, FLT = Double→Float).
+    private fun DataSnapshot.fieldsInto(entry: MutableMap<String, Any>, vararg fields: Pair<String, FT>) {
+        for ((name, type) in fields) when (type) {
+            FT.STR  -> child(name).getValue(String::class.java)?.let  { entry[name] = it }
+            FT.LNG  -> child(name).getValue(Long::class.java)?.let    { entry[name] = it }
+            FT.INT  -> child(name).getValue(Long::class.java)?.let    { entry[name] = it.toInt() }
+            FT.BOOL -> child(name).getValue(Boolean::class.java)?.let { entry[name] = it }
+            FT.FLT  -> child(name).getValue(Double::class.java)?.let  { entry[name] = it.toFloat() }
+        }
+    }
+
+    private fun DataSnapshot.strOrNull(name: String): String? = child(name).getValue(String::class.java)
+    private fun DataSnapshot.str(name: String): String = strOrNull(name).orEmpty()
+    private fun DataSnapshot.lng(name: String, default: Long = 0L): Long = child(name).getValue(Long::class.java) ?: default
+    private fun DataSnapshot.bool(name: String): Boolean = child(name).getValue(Boolean::class.java) ?: false
+    private fun DataSnapshot.childMaps(): List<Map<String, Any>> = children.mapNotNull { it.value as? Map<String, Any> }
+
+    private fun userRef(id: String) = db.getReference("users").child(id)
+    private fun counselorKeyRef(k: String) = db.getReference("counselor_keys").child(accessKeyPathSegment(k))
+    private fun chatSessionRef(userId: String, ck: String) =
+        db.getReference("user_chats").child(chatSessionPath(userId, ck))
+
+    // Shared shape of the three hand-rolled RTDB transactions. A null
+    // `abortError` treats an uncommitted transaction as success (release path).
+    private suspend fun DatabaseReference.awaitTransaction(
+        abortError: (() -> Throwable)? = null,
+        transform: (MutableData) -> Transaction.Result,
+    ) {
+        suspendCancellableCoroutine<Unit> { continuation ->
+            runTransaction(object : Transaction.Handler {
+                override fun doTransaction(currentData: MutableData): Transaction.Result = transform(currentData)
+                override fun onComplete(error: DatabaseError?, committed: Boolean, currentData: DataSnapshot?) {
+                    when {
+                        error != null -> continuation.resumeWithException(error.toException())
+                        !committed && abortError != null -> continuation.resumeWithException(abortError())
+                        else -> continuation.resume(Unit)
+                    }
+                }
+            })
+        }
+    }
+
     data class PostAuthUserState(
         val isBlocked: Boolean,
         val blockReason: String = "",
@@ -91,11 +159,6 @@ object RealtimeDBService {
         val userData: Map<String, Any> = emptyMap(),
     )
 
-    
-    
-    
-
-    
     suspend fun saveUser(uid: String, name: String, email: String): Result<Unit> =
         ensureUserRecord(uid, name, email).map { }
 
@@ -117,7 +180,7 @@ object RealtimeDBService {
         val key = emailKey(email)
         if (key.isBlank()) return@runCatching
         db.getReference("email_password_index").child(key).setValue(uid).await()
-    }.onFailure { Log.w("RealtimeDBService", "recordEmailHasPassword($email) failed", it) }
+    }.onFailure { Log.w(TAG, "recordEmailHasPassword($email) failed", it) }
 
     /** @return the UID associated with the email's password account, or null
      *  if no record exists. Readable without auth (the rule sets `.read=true`),
@@ -127,12 +190,12 @@ object RealtimeDBService {
         if (key.isBlank()) return@runCatching null
         val snap = db.getReference("email_password_index").child(key).get().await()
         snap.getValue(String::class.java)?.takeIf { it.isNotBlank() }
-    }.onFailure { Log.w("RealtimeDBService", "lookupEmailHasPassword($email) failed", it) }
+    }.onFailure { Log.w(TAG, "lookupEmailHasPassword($email) failed", it) }
         .getOrNull()
 
     suspend fun ensureUserRecord(uid: String, name: String, email: String): Result<Map<String, Any>> = runCatching {
         require(uid.isNotBlank()) { "Missing user id." }
-        val ref = db.getReference("users").child(uid)
+        val ref = userRef(uid)
         val snap = ref.get().await()
         val now = System.currentTimeMillis()
         val existing = snap.value as? Map<String, Any>
@@ -200,7 +263,7 @@ object RealtimeDBService {
         actigraphyAllowed: Boolean,
     ): Result<Unit> = runCatching {
         require(uid.isNotBlank()) { "Missing user id." }
-        db.getReference("users").child(uid).updateChildren(
+        userRef(uid).updateChildren(
             mapOf(
                 "ageGroup" to ageGroup,
                 "currentSituation" to currentSituation,
@@ -216,31 +279,27 @@ object RealtimeDBService {
         ).await()
     }
 
-    
     suspend fun getUser(uid: String): Result<Map<String, Any>?> = runCatching {
-        db.getReference("users").child(uid).get().await().value as? Map<String, Any>
+        userRef(uid).get().await().value as? Map<String, Any>
     }
 
-    
     suspend fun getUserDisplayName(uid: String): String = runCatching {
-        db.getReference("users").child(uid).child("name")
+        userRef(uid).child("name")
             .get().await().getValue(String::class.java) ?: ""
     }.getOrDefault("")
 
-    
     suspend fun updateUserName(uid: String, newName: String): Result<Unit> = runCatching {
-        db.getReference("users").child(uid)
+        userRef(uid)
             .updateChildren(mapOf("name" to newName)).await()
     }
 
-    
     suspend fun updateUserRegion(uid: String, region: String): Result<Unit> = runCatching {
-        db.getReference("users").child(uid)
+        userRef(uid)
             .updateChildren(mapOf("region" to region.trim())).await()
     }
 
     suspend fun updateUserAvatarId(uid: String, avatarId: String): Result<Unit> = runCatching {
-        db.getReference("users").child(uid).updateChildren(
+        userRef(uid).updateChildren(
             mapOf(
                 "avatarId" to avatarId,
                 "customAvatarStatus" to "",
@@ -250,31 +309,27 @@ object RealtimeDBService {
     }
 
     suspend fun getUserRegion(uid: String): String = runCatching {
-        db.getReference("users").child(uid).child("region")
+        userRef(uid).child("region")
             .get().await().getValue(String::class.java) ?: ""
     }.getOrDefault("")
 
-    
     suspend fun getUserCreatedAt(uid: String): Long = runCatching {
-        db.getReference("users").child(uid).child("createdAt")
+        userRef(uid).child("createdAt")
             .get().await().getValue(Long::class.java) ?: 0L
     }.getOrDefault(0L)
 
-    
     suspend fun logFaceLogin(uid: String): Result<Unit> = runCatching {
         db.getReference("user_activity").child(uid).child("faceLogins")
             .push().setValue(System.currentTimeMillis()).await()
     }
 
-    
     suspend fun setBiometricEnabled(uid: String, enabled: Boolean): Result<Unit> = runCatching {
-        db.getReference("users").child(uid)
+        userRef(uid)
             .updateChildren(mapOf("biometricEnabled" to enabled)).await()
     }
 
-    
     suspend fun getBiometricEnabled(uid: String): Boolean = runCatching {
-        db.getReference("users").child(uid).child("biometricEnabled")
+        userRef(uid).child("biometricEnabled")
             .get().await().getValue(Boolean::class.java) ?: false
     }.getOrDefault(false)
 
@@ -300,20 +355,14 @@ object RealtimeDBService {
         ).await()
     }
 
-    
-    
-    
-
-    
     suspend fun getCounselorKey(key: String): Result<Map<String, Any>?> = runCatching {
         val cleanKey = key.trim()
-        val ref = db.getReference("counselor_keys").child(accessKeyPathSegment(cleanKey))
+        val ref = counselorKeyRef(cleanKey)
         val snap = ref.get().await()
         val data = snap.value as? Map<String, Any> ?: return@runCatching null
         keyedAccessData(snap, data)
     }
 
-    
     suspend fun getCounselorKeyByUid(uid: String): Result<Pair<String, Map<String, Any>>?> = runCatching {
         val snap = db.getReference("counselor_keys").get().await()
         for (child in snap.children) {
@@ -324,14 +373,13 @@ object RealtimeDBService {
         null
     }
 
-    
     suspend fun saveCounselorSetup(
         key: String, uid: String, name: String,
         feePkr: Int,
         ngoName: String, region: String, bio: String
     ): Result<Unit> = runCatching {
         require(feePkr in 0..5000) { "Counselor fee must be between PKR 0 and PKR 5000." }
-        db.getReference("counselor_keys").child(accessKeyPathSegment(key)).updateChildren(mapOf(
+        counselorKeyRef(key).updateChildren(mapOf(
             "issuedKey"       to key.trim(),
             "uid"             to uid,
             "assignedName"    to name,
@@ -347,16 +395,11 @@ object RealtimeDBService {
         )).await()
     }
 
-    
-    suspend fun setOnlineStatus(key: String, isOnline: Boolean): Result<Unit> = runCatching {
-        db.getReference("counselor_keys").child(accessKeyPathSegment(key)).child("isOnline").setValue(isOnline).await()
-    }
-
     /** Manual "appear offline" override. Counselors are auto-online via the
      *  Firebase presence helper below; flipping this on makes them appear
      *  offline to users even though their app is connected. */
     suspend fun setCounselorInvisible(key: String, invisible: Boolean): Result<Unit> = runCatching {
-        db.getReference("counselor_keys").child(accessKeyPathSegment(key)).child("isInvisible").setValue(invisible).await()
+        counselorKeyRef(key).child("isInvisible").setValue(invisible).await()
     }
 
     /** Firebase presence wiring for a counselor's dashboard session.
@@ -370,7 +413,7 @@ object RealtimeDBService {
      *  [listenToAllActiveCounselors] below. */
     fun setupCounselorPresence(key: String): () -> Unit {
         if (key.isBlank()) return {}
-        val onlineRef    = db.getReference("counselor_keys").child(accessKeyPathSegment(key)).child("isOnline")
+        val onlineRef    = counselorKeyRef(key).child("isOnline")
         val connectedRef = db.getReference(".info/connected")
         val listener = object : ValueEventListener {
             override fun onDataChange(snap: DataSnapshot) {
@@ -381,7 +424,7 @@ object RealtimeDBService {
                 }
             }
             override fun onCancelled(error: DatabaseError) {
-                Log.w("RealtimeDBService", "counselor presence listener cancelled", error.toException())
+                Log.w(TAG, "counselor presence listener cancelled", error.toException())
             }
         }
         connectedRef.addValueEventListener(listener)
@@ -396,36 +439,28 @@ object RealtimeDBService {
      *  online state. Each entry carries `key`, `isOnline`, `isInvisible`, and
      *  the derived `effectiveOnline = isOnline && !isInvisible` so callers
      *  can sort and badge without duplicating the rule. */
-    fun listenToAllActiveCounselors(): Flow<List<Map<String, Any>>> = callbackFlow {
-        val ref = db.getReference("counselor_keys")
-        val listener = ref.addValueEventListener(object : ValueEventListener {
-            override fun onDataChange(snap: DataSnapshot) {
-                val list = mutableListOf<Map<String, Any>>()
-                for (child in snap.children) {
-                    val data = child.value as? Map<String, Any> ?: continue
-                    val isActive   = data["isActive"] as? Boolean ?: false
-                    val hasProfile = data["profileComplete"] as? Boolean ?: false
-                    if (!(isActive && hasProfile)) continue
-                    val isOnline    = data["isOnline"]    as? Boolean ?: false
-                    val isInvisible = data["isInvisible"] as? Boolean ?: false
-                    list.add(
-                        keyedAccessData(child, data) + mapOf(
-                            "effectiveOnline" to (isOnline && !isInvisible),
-                        )
+    fun listenToAllActiveCounselors(): Flow<List<Map<String, Any>>> =
+        rtdbFlow(ref = { db.getReference("counselor_keys") }) { snap ->
+            val list = mutableListOf<Map<String, Any>>()
+            for (child in snap.children) {
+                val data = child.value as? Map<String, Any> ?: continue
+                val isActive   = data["isActive"] as? Boolean ?: false
+                val hasProfile = data["profileComplete"] as? Boolean ?: false
+                if (!(isActive && hasProfile)) continue
+                val isOnline    = data["isOnline"]    as? Boolean ?: false
+                val isInvisible = data["isInvisible"] as? Boolean ?: false
+                list.add(
+                    keyedAccessData(child, data) + mapOf(
+                        "effectiveOnline" to (isOnline && !isInvisible),
                     )
-                }
-                trySend(list)
+                )
             }
-            override fun onCancelled(error: DatabaseError) {
-                Log.w("RealtimeDBService", "RTDB listener cancelled", error.toException()); close()
-            }
-        })
-        awaitClose { ref.removeEventListener(listener) }
-    }
+            list
+        }
 
     suspend fun setCounselorCallAvailability(key: String, enabled: Boolean): Result<Unit> = runCatching {
         require(key.isNotBlank()) { "Missing counselor key." }
-        db.getReference("counselor_keys").child(accessKeyPathSegment(key)).updateChildren(
+        counselorKeyRef(key).updateChildren(
             mapOf(
                 "callEnabled" to enabled,
                 "callAvailabilityUpdatedAt" to System.currentTimeMillis(),
@@ -433,52 +468,34 @@ object RealtimeDBService {
         ).await()
     }
 
-    
-    fun listenToOnlineCounselors(): Flow<List<Map<String, Any>>> = callbackFlow {
-        val ref = db.getReference("counselor_keys")
-        val listener = ref.addValueEventListener(object : ValueEventListener {
-            override fun onDataChange(snap: DataSnapshot) {
-                val list = mutableListOf<Map<String, Any>>()
-                for (child in snap.children) {
-                    val data = child.value as? Map<String, Any> ?: continue
-                    val isOnline  = data["isOnline"]  as? Boolean ?: false
-                    val isActive  = data["isActive"]  as? Boolean ?: false
-                    val hasProfile = data["profileComplete"] as? Boolean ?: false
-                    if (isOnline && isActive && hasProfile) {
-                        list.add(keyedAccessData(child, data))
-                    }
+    fun listenToOnlineCounselors(): Flow<List<Map<String, Any>>> =
+        rtdbFlow(
+            logLabel = "online counselors listener",
+            closeWithError = true,
+            ref = { db.getReference("counselor_keys") },
+        ) { snap ->
+            val list = mutableListOf<Map<String, Any>>()
+            for (child in snap.children) {
+                val data = child.value as? Map<String, Any> ?: continue
+                val isOnline  = data["isOnline"]  as? Boolean ?: false
+                val isActive  = data["isActive"]  as? Boolean ?: false
+                val hasProfile = data["profileComplete"] as? Boolean ?: false
+                if (isOnline && isActive && hasProfile) {
+                    list.add(keyedAccessData(child, data))
                 }
-                trySend(list)
             }
-            override fun onCancelled(error: DatabaseError) {
-                val exception = error.toException()
-                Log.w("RealtimeDBService", "online counselors listener cancelled", exception)
-                close(exception)
-            }
-        })
-        awaitClose { ref.removeEventListener(listener) }
-    }
+            list
+        }
 
-    
-    fun listenToCounselorData(key: String): Flow<Map<String, Any>?> = callbackFlow {
-        val ref = db.getReference("counselor_keys").child(accessKeyPathSegment(key))
-        val listener = ref.addValueEventListener(object : ValueEventListener {
-            override fun onDataChange(snap: DataSnapshot) {
-                val data = snap.value as? Map<String, Any>
-                trySend(data?.let { keyedAccessData(snap, it) })
-            }
-            override fun onCancelled(error: DatabaseError) {
-                val exception = error.toException()
-                Log.w("RealtimeDBService", "counselor data listener cancelled", exception)
-                close(exception)
-            }
-        })
-        awaitClose { ref.removeEventListener(listener) }
-    }
+    fun listenToCounselorData(key: String): Flow<Map<String, Any>?> =
+        rtdbFlow(
+            logLabel = "counselor data listener",
+            closeWithError = true,
+            ref = { counselorKeyRef(key) },
+        ) { snap -> (snap.value as? Map<String, Any>)?.let { keyedAccessData(snap, it) } }
 
-    
     suspend fun updateRating(key: String, newRating: Float): Result<Unit> = runCatching {
-        val ref  = db.getReference("counselor_keys").child(accessKeyPathSegment(key))
+        val ref  = counselorKeyRef(key)
         val snap = ref.get().await()
         val data = snap.value as? Map<String, Any> ?: return@runCatching
         val total = (data["totalRatings"] as? Long)?.toInt() ?: 0
@@ -487,75 +504,45 @@ object RealtimeDBService {
         ref.updateChildren(mapOf("rating" to avg, "totalRatings" to total + 1)).await()
     }
 
-    
-    
-    
-
-    
     fun chatSessionPath(uid: String, counselorKey: String) = "${uid}_${accessKeyPathSegment(counselorKey)}"
 
-    
-    suspend fun sendChatMessage(
-        uid: String, counselorKey: String,
-        text: String, senderType: String
-    ): Result<Unit> = runCatching {
+    private suspend fun writeChatMessage(
+        sessionUid: String, counselorKey: String,
+        senderId: String, senderType: String, text: String,
+    ) {
         val msgId = UUID.randomUUID().toString()
-        db.getReference("user_chats")
-            .child(chatSessionPath(uid, counselorKey))
+        chatSessionRef(sessionUid, counselorKey)
             .child("messages")
             .child(msgId)
             .setValue(mapOf(
                 "messageId"    to msgId,
                 "text"         to text,
-                "senderId"     to uid,
+                "senderId"     to senderId,
                 "senderType"   to senderType,
                 "counselorKey" to counselorKey,
                 "timestamp"    to System.currentTimeMillis()
             )).await()
     }
 
-    
+    suspend fun sendChatMessage(
+        uid: String, counselorKey: String,
+        text: String, senderType: String
+    ): Result<Unit> = runCatching {
+        writeChatMessage(uid, counselorKey, senderId = uid, senderType = senderType, text = text)
+    }
+
     suspend fun sendChatMessageFromCounselor(
         userUid: String, counselorKey: String,
         counselorUid: String, text: String
     ): Result<Unit> = runCatching {
-        val msgId = UUID.randomUUID().toString()
-        db.getReference("user_chats")
-            .child(chatSessionPath(userUid, counselorKey))   
-            .child("messages")
-            .child(msgId)
-            .setValue(mapOf(
-                "messageId"    to msgId,
-                "text"         to text,
-                "senderId"     to counselorUid,
-                "senderType"   to "counselor",
-                "counselorKey" to counselorKey,
-                "timestamp"    to System.currentTimeMillis()
-            )).await()
+        writeChatMessage(userUid, counselorKey, senderId = counselorUid, senderType = "counselor", text = text)
     }
 
-    
-    fun listenToChatMessages(uid: String, counselorKey: String): Flow<List<Map<String, Any>>> = callbackFlow {
-        val ref = db.getReference("user_chats")
-            .child(chatSessionPath(uid, counselorKey))
-            .child("messages")
-        val listener = ref.addValueEventListener(object : ValueEventListener {
-            override fun onDataChange(snap: DataSnapshot) {
-                val msgs = snap.children
-                    .mapNotNull { it.value as? Map<String, Any> }
-                    .sortedBy { (it["timestamp"] as? Long) ?: 0L }
-                trySend(msgs)
-            }
-            override fun onCancelled(error: DatabaseError) { Log.w("RealtimeDBService", "RTDB listener cancelled", error.toException()); close() }
-        })
-        awaitClose { ref.removeEventListener(listener) }
-    }
+    fun listenToChatMessages(uid: String, counselorKey: String): Flow<List<Map<String, Any>>> =
+        rtdbFlow(ref = { chatSessionRef(uid, counselorKey).child("messages") }) { snap ->
+            snap.childMaps().sortedBy { (it["timestamp"] as? Long) ?: 0L }
+        }
 
-    
-    
-    
-
-    
     suspend fun saveJournalEntry(
         uid: String, mood: String, prompt: String, notes: String
     ): Result<Unit> = runCatching {
@@ -570,7 +557,6 @@ object RealtimeDBService {
             )).await()
     }
 
-    
     suspend fun getJournalEntries(uid: String): Result<List<Map<String, Any>>> = runCatching {
         val snap = db.getReference("journals").child(uid).get().await()
         snap.children
@@ -578,32 +564,23 @@ object RealtimeDBService {
             .sortedByDescending { (it["timestamp"] as? Long) ?: 0L }
     }
 
-    
     suspend fun deleteJournalEntry(uid: String, entryId: String): Result<Unit> = runCatching {
         db.getReference("journals").child(uid).child(entryId).removeValue().await()
     }
 
-    
-    
-    
-
-    
     suspend fun setPostLike(uid: String, postId: String): Result<Unit> = runCatching {
         db.getReference("community_likes").child(uid).child(postId).setValue(true).await()
     }
 
-    
     suspend fun removePostLike(uid: String, postId: String): Result<Unit> = runCatching {
         db.getReference("community_likes").child(uid).child(postId).removeValue().await()
     }
 
-    
     suspend fun getLikedPostIds(uid: String): Result<Set<String>> = runCatching {
         val snap = db.getReference("community_likes").child(uid).get().await()
         snap.children.mapNotNull { it.key }.toSet()
     }
 
-    
     fun listenToCounselorChats(counselorKey: String): Flow<List<Map<String, Any>>> = callbackFlow {
         val ref = db.getReference("user_chats")
         val counselorPathKey = accessKeyPathSegment(counselorKey)
@@ -631,55 +608,41 @@ object RealtimeDBService {
                 }
                 trySend(sessions)
             }
-            override fun onCancelled(error: DatabaseError) { Log.w("RealtimeDBService", "RTDB listener cancelled", error.toException()); close() }
+            override fun onCancelled(error: DatabaseError) { Log.w(TAG, "RTDB listener cancelled", error.toException()); close() }
         })
         awaitClose { ref.removeEventListener(listener) }
     }
 
-    fun listenToUserCounselorChats(uid: String): Flow<List<Map<String, Any>>> = callbackFlow {
-        val ref = db.getReference("user_chats")
-        val listener = ref.addValueEventListener(object : ValueEventListener {
-            override fun onDataChange(snap: DataSnapshot) {
-                val sessions = mutableListOf<Map<String, Any>>()
-                for (child in snap.children) {
-                    val sessionId = child.key ?: continue
-                    if (!sessionId.startsWith("${uid}_")) continue
-                    val counselorPathKey = sessionId.removePrefix("${uid}_")
-                    val counselorKey = child.child("counselorKey").getValue(String::class.java)
-                        ?: counselorPathKey
-                    val messages = child.child("messages").children
-                        .mapNotNull { it.value as? Map<String, Any> }
-                        .sortedBy { (it["timestamp"] as? Long) ?: 0L }
-                    val last = messages.lastOrNull()
-                    val counselorName = child.child("counselorName").getValue(String::class.java)
-                        ?: child.child("assignedName").getValue(String::class.java)
-                        ?: counselorKey
-                    sessions.add(
-                        mapOf(
-                            "sessionId" to sessionId,
-                            "uid" to uid,
-                            "lastMessage" to (last?.get("text")?.toString() ?: ""),
-                            "lastTimestamp" to ((last?.get("timestamp") as? Long) ?: 0L),
-                            "counselorKey" to counselorKey,
-                            "counselorName" to counselorName,
-                            "expiresAt" to (child.child("expiresAt").getValue(Long::class.java) ?: 0L),
-                            "blocked" to child.child("blocked").exists(),
-                        )
+    fun listenToUserCounselorChats(uid: String): Flow<List<Map<String, Any>>> =
+        rtdbFlow(ref = { db.getReference("user_chats") }) { snap ->
+            val sessions = mutableListOf<Map<String, Any>>()
+            for (child in snap.children) {
+                val sessionId = child.key ?: continue
+                if (!sessionId.startsWith("${uid}_")) continue
+                val counselorPathKey = sessionId.removePrefix("${uid}_")
+                val counselorKey = child.strOrNull("counselorKey") ?: counselorPathKey
+                val messages = child.child("messages").childMaps()
+                    .sortedBy { (it["timestamp"] as? Long) ?: 0L }
+                val last = messages.lastOrNull()
+                val counselorName = child.strOrNull("counselorName")
+                    ?: child.strOrNull("assignedName")
+                    ?: counselorKey
+                sessions.add(
+                    mapOf(
+                        "sessionId" to sessionId,
+                        "uid" to uid,
+                        "lastMessage" to (last?.get("text")?.toString() ?: ""),
+                        "lastTimestamp" to ((last?.get("timestamp") as? Long) ?: 0L),
+                        "counselorKey" to counselorKey,
+                        "counselorName" to counselorName,
+                        "expiresAt" to child.lng("expiresAt"),
+                        "blocked" to child.child("blocked").exists(),
                     )
-                }
-                trySend(sessions.sortedByDescending { it["lastTimestamp"] as? Long ?: 0L })
+                )
             }
+            sessions.sortedByDescending { it["lastTimestamp"] as? Long ?: 0L }
+        }
 
-            override fun onCancelled(error: DatabaseError) { Log.w("RealtimeDBService", "RTDB listener cancelled", error.toException()); close() }
-        })
-        awaitClose { ref.removeEventListener(listener) }
-    }
-
-    
-    
-    
-
-    
     suspend fun saveCommunityPost(
         authorId: String,
         authorName: String,
@@ -704,39 +667,26 @@ object RealtimeDBService {
         postId
     }
 
-    
-    fun listenToCommunityPosts(): Flow<List<Map<String, Any>>> = callbackFlow {
-        val ref = db.getReference("community_posts")
-        val listener = ref.addValueEventListener(object : ValueEventListener {
-            override fun onDataChange(snap: DataSnapshot) {
-                val posts = snap.children
-                    .mapNotNull { it.value as? Map<String, Any> }
-                    .filter { it["isFlagged"] as? Boolean != true }
-                    .sortedByDescending { (it["timestamp"] as? Long) ?: 0L }
-                trySend(posts)
-            }
-            override fun onCancelled(error: DatabaseError) { Log.w("RealtimeDBService", "RTDB listener cancelled", error.toException()); close() }
-        })
-        awaitClose { ref.removeEventListener(listener) }
-    }
+    fun listenToCommunityPosts(): Flow<List<Map<String, Any>>> =
+        rtdbFlow(ref = { db.getReference("community_posts") }) { snap ->
+            snap.childMaps()
+                .filter { it["isFlagged"] as? Boolean != true }
+                .sortedByDescending { (it["timestamp"] as? Long) ?: 0L }
+        }
 
-    
     suspend fun deleteCommunityPost(postId: String): Result<Unit> = runCatching {
         db.getReference("community_posts").child(postId).removeValue().await()
     }
 
-    
     suspend fun flagCommunityPost(postId: String): Result<Unit> = runCatching {
         db.getReference("community_posts").child(postId).child("isFlagged").setValue(true).await()
     }
 
-    
     suspend fun incrementPostLike(postId: String): Result<Unit> = runCatching {
         db.getReference("community_posts").child(postId)
             .updateChildren(mapOf("likesCount" to ServerValue.increment(1))).await()
     }
 
-    
     suspend fun decrementPostLike(postId: String): Result<Unit> = runCatching {
         
         val ref = db.getReference("community_posts").child(postId).child("likesCount")
@@ -744,11 +694,6 @@ object RealtimeDBService {
         if (current > 0) ref.setValue(current - 1).await()
     }
 
-    
-    
-    
-
-    
     suspend fun saveCommunityReply(
         postId: String,
         authorId: String,
@@ -773,31 +718,11 @@ object RealtimeDBService {
         replyId
     }
 
-    
-    fun listenToReplies(postId: String): Flow<List<Map<String, Any>>> = callbackFlow {
-        val ref = db.getReference("community_replies").child(postId)
-        val listener = ref.addValueEventListener(object : ValueEventListener {
-            override fun onDataChange(snap: DataSnapshot) {
-                val replies = snap.children
-                    .mapNotNull { it.value as? Map<String, Any> }
-                    .sortedBy { (it["timestamp"] as? Long) ?: 0L }
-                trySend(replies)
-            }
-            override fun onCancelled(error: DatabaseError) { Log.w("RealtimeDBService", "RTDB listener cancelled", error.toException()); close() }
-        })
-        awaitClose { ref.removeEventListener(listener) }
-    }
+    fun listenToReplies(postId: String): Flow<List<Map<String, Any>>> =
+        rtdbFlow(ref = { db.getReference("community_replies").child(postId) }) { snap ->
+            snap.childMaps().sortedBy { (it["timestamp"] as? Long) ?: 0L }
+        }
 
-    
-    
-    
-    
-    
-    
-    
-    
-
-    
     suspend fun saveUserNotification(
         uid: String,
         titleEn: String, titleUr: String,
@@ -821,28 +746,16 @@ object RealtimeDBService {
         notifId
     }
 
-    
-    fun listenToUserNotifications(uid: String): Flow<List<Map<String, Any>>> = callbackFlow {
-        val ref = db.getReference("user_notifications").child(uid)
-        val listener = ref.addValueEventListener(object : ValueEventListener {
-            override fun onDataChange(snap: DataSnapshot) {
-                val notifs = snap.children
-                    .mapNotNull { it.value as? Map<String, Any> }
-                    .sortedByDescending { (it["timestamp"] as? Long) ?: 0L }
-                trySend(notifs)
-            }
-            override fun onCancelled(error: DatabaseError) { Log.w("RealtimeDBService", "RTDB listener cancelled", error.toException()); close() }
-        })
-        awaitClose { ref.removeEventListener(listener) }
-    }
+    fun listenToUserNotifications(uid: String): Flow<List<Map<String, Any>>> =
+        rtdbFlow(ref = { db.getReference("user_notifications").child(uid) }) { snap ->
+            snap.childMaps().sortedByDescending { (it["timestamp"] as? Long) ?: 0L }
+        }
 
-    
     suspend fun markNotificationRead(uid: String, notifId: String): Result<Unit> = runCatching {
         db.getReference("user_notifications").child(uid).child(notifId)
             .child("isRead").setValue(true).await()
     }
 
-    
     suspend fun markAllNotificationsRead(uid: String): Result<Unit> = runCatching {
         val ref  = db.getReference("user_notifications").child(uid)
         val snap = ref.get().await()
@@ -869,24 +782,11 @@ object RealtimeDBService {
 
     suspend fun getCounselorProfileByKey(key: String): Result<Map<String, Any>?> = getCounselorKey(key)
 
-    fun listenChatIdentityVisible(userUid: String, counselorKey: String): Flow<Boolean> = callbackFlow {
-        if (userUid.isBlank() || counselorKey.isBlank()) {
-            trySend(false)
-            close()
-            return@callbackFlow
-        }
-        val ref = db.getReference("user_chats")
-            .child(chatSessionPath(userUid, counselorKey))
-            .child("privacy")
-            .child("identityVisible")
-        val listener = ref.addValueEventListener(object : ValueEventListener {
-            override fun onDataChange(snapshot: DataSnapshot) {
-                trySend(snapshot.getValue(Boolean::class.java) ?: false)
-            }
-
-            override fun onCancelled(error: DatabaseError) { Log.w("RealtimeDBService", "RTDB listener cancelled", error.toException()); close() }
-        })
-        awaitClose { ref.removeEventListener(listener) }
+    fun listenChatIdentityVisible(userUid: String, counselorKey: String): Flow<Boolean> {
+        if (userUid.isBlank() || counselorKey.isBlank()) return flowOf(false)
+        return rtdbFlow(ref = {
+            chatSessionRef(userUid, counselorKey).child("privacy").child("identityVisible")
+        }) { it.getValue(Boolean::class.java) ?: false }
     }
 
     suspend fun setChatIdentityVisible(userUid: String, counselorKey: String, visible: Boolean): Result<Unit> = runCatching {
@@ -899,30 +799,19 @@ object RealtimeDBService {
             .child(chatSessionPath(userUid, counselorKey))
             .child("privacy")
             .updateChildren(updates).await()
-        db.getReference("users").child(userUid)
+        userRef(userUid)
             .child("isIdentityVisibleToCounselors")
             .setValue(visible).await()
     }
 
-    fun listenChatSessionMeta(userUid: String, counselorKey: String): Flow<Map<String, Any>> = callbackFlow {
-        if (userUid.isBlank() || counselorKey.isBlank()) {
-            trySend(emptyMap())
-            close()
-            return@callbackFlow
+    fun listenChatSessionMeta(userUid: String, counselorKey: String): Flow<Map<String, Any>> {
+        if (userUid.isBlank() || counselorKey.isBlank()) return flowOf(emptyMap())
+        return rtdbFlow(ref = { chatSessionRef(userUid, counselorKey) }) { snapshot ->
+            val meta = mutableMapOf<String, Any>()
+            snapshot.fieldsInto(meta, "sessionStartedAt" to FT.LNG, "expiresAt" to FT.LNG)
+            snapshot.child("blocked").value?.let { meta["blocked"] = it }
+            meta
         }
-        val ref = db.getReference("user_chats").child(chatSessionPath(userUid, counselorKey))
-        val listener = ref.addValueEventListener(object : ValueEventListener {
-            override fun onDataChange(snapshot: DataSnapshot) {
-                val meta = mutableMapOf<String, Any>()
-                snapshot.child("sessionStartedAt").getValue(Long::class.java)?.let { meta["sessionStartedAt"] = it }
-                snapshot.child("expiresAt").getValue(Long::class.java)?.let { meta["expiresAt"] = it }
-                snapshot.child("blocked").value?.let { meta["blocked"] = it }
-                trySend(meta)
-            }
-
-            override fun onCancelled(error: DatabaseError) { Log.w("RealtimeDBService", "RTDB listener cancelled", error.toException()); close() }
-        })
-        awaitClose { ref.removeEventListener(listener) }
     }
 
     suspend fun extendChatSession(
@@ -1000,71 +889,64 @@ object RealtimeDBService {
         requestId
     }
 
-    fun listenToAvatarRequests(): Flow<List<AvatarRequest>> = callbackFlow {
-        val ref = db.getReference("avatar_requests")
-        val listener = ref.addValueEventListener(object : ValueEventListener {
-            override fun onDataChange(snapshot: DataSnapshot) {
-                trySend(snapshot.children.mapNotNull(::avatarRequestFrom).sortedByDescending { it.createdAt })
-            }
+    fun listenToAvatarRequests(): Flow<List<AvatarRequest>> =
+        rtdbFlow(ref = { db.getReference("avatar_requests") }) { snapshot ->
+            snapshot.children.mapNotNull(::avatarRequestFrom).sortedByDescending { it.createdAt }
+        }
 
-            override fun onCancelled(error: DatabaseError) { Log.w("RealtimeDBService", "RTDB listener cancelled", error.toException()); close() }
-        })
-        awaitClose { ref.removeEventListener(listener) }
+    private suspend fun reviewAvatarRequest(
+        request: AvatarRequest, reviewedBy: String, comment: String,
+        status: String, extraUserUpdates: Map<String, Any>,
+        titleEn: String, titleUr: String, defaultBodyEn: String, defaultBodyUr: String,
+    ) {
+        val now = System.currentTimeMillis()
+        db.getReference("avatar_requests").child(request.requestId).updateChildren(
+            mapOf(
+                "status" to status,
+                "adminComment" to comment.trim(),
+                "reviewedBy" to reviewedBy,
+                "reviewedAt" to now,
+            )
+        ).await()
+        userRef(request.userId).updateChildren(
+            extraUserUpdates + mapOf(
+                "customAvatarStatus" to status,
+                "customAvatarReviewedAt" to now,
+            )
+        ).await()
+        saveUserNotification(
+            uid = request.userId,
+            titleEn = titleEn,
+            titleUr = titleUr,
+            bodyEn = comment.ifBlank { defaultBodyEn },
+            bodyUr = comment.ifBlank { defaultBodyUr },
+            type = "SYSTEM",
+            actionRoute = "profile",
+        ).getOrThrow()
     }
 
     suspend fun approveAvatarRequest(request: AvatarRequest, reviewedBy: String, comment: String): Result<Unit> = runCatching {
-        val now = System.currentTimeMillis()
-        db.getReference("avatar_requests").child(request.requestId).updateChildren(
-            mapOf(
-                "status" to "APPROVED",
-                "adminComment" to comment.trim(),
-                "reviewedBy" to reviewedBy,
-                "reviewedAt" to now,
-            )
-        ).await()
-        db.getReference("users").child(request.userId).updateChildren(
-            mapOf(
-                "customAvatarUrl" to request.fileUrl,
-                "customAvatarStatus" to "APPROVED",
-                "customAvatarReviewedAt" to now,
-            )
-        ).await()
-        saveUserNotification(
-            uid = request.userId,
+        reviewAvatarRequest(
+            request, reviewedBy, comment,
+            status = "APPROVED",
+            extraUserUpdates = mapOf("customAvatarUrl" to request.fileUrl),
             titleEn = "Avatar approved",
             titleUr = "Avatar approve ho gaya",
-            bodyEn = comment.ifBlank { "Your custom avatar is now visible on your profile." },
-            bodyUr = comment.ifBlank { "Aapka custom avatar ab profile par nazar aayega." },
-            type = "SYSTEM",
-            actionRoute = "profile",
-        ).getOrThrow()
+            defaultBodyEn = "Your custom avatar is now visible on your profile.",
+            defaultBodyUr = "Aapka custom avatar ab profile par nazar aayega.",
+        )
     }
 
     suspend fun rejectAvatarRequest(request: AvatarRequest, reviewedBy: String, comment: String): Result<Unit> = runCatching {
-        val now = System.currentTimeMillis()
-        db.getReference("avatar_requests").child(request.requestId).updateChildren(
-            mapOf(
-                "status" to "REJECTED",
-                "adminComment" to comment.trim(),
-                "reviewedBy" to reviewedBy,
-                "reviewedAt" to now,
-            )
-        ).await()
-        db.getReference("users").child(request.userId).updateChildren(
-            mapOf(
-                "customAvatarStatus" to "REJECTED",
-                "customAvatarReviewedAt" to now,
-            )
-        ).await()
-        saveUserNotification(
-            uid = request.userId,
+        reviewAvatarRequest(
+            request, reviewedBy, comment,
+            status = "REJECTED",
+            extraUserUpdates = emptyMap(),
             titleEn = "Avatar not approved",
             titleUr = "Avatar approve nahi hua",
-            bodyEn = comment.ifBlank { "Your custom avatar request was not approved." },
-            bodyUr = comment.ifBlank { "Aapki custom avatar request approve nahi hui." },
-            type = "SYSTEM",
-            actionRoute = "profile",
-        ).getOrThrow()
+            defaultBodyEn = "Your custom avatar request was not approved.",
+            defaultBodyUr = "Aapki custom avatar request approve nahi hui.",
+        )
     }
 
     suspend fun blockUserIdentity(
@@ -1083,7 +965,7 @@ object RealtimeDBService {
         )
         if (uid.isNotBlank()) {
             db.getReference("blocked_users").child(uid).setValue(payload).await()
-            db.getReference("users").child(uid).updateChildren(
+            userRef(uid).updateChildren(
                 mapOf("blocked" to true, "blockedReason" to payload["reason"].toString())
             ).await()
         }
@@ -1102,19 +984,6 @@ object RealtimeDBService {
         ).getOrThrow()
     }
 
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-
-    
     suspend fun saveSocialConnection(
         uid: String,
         platform: String,
@@ -1127,7 +996,6 @@ object RealtimeDBService {
             )).await()
     }
 
-    
     suspend fun saveVerifiedBlueskyConnection(
         uid: String,
         handle: String,
@@ -1150,7 +1018,6 @@ object RealtimeDBService {
             )).await()
     }
 
-    
     suspend fun saveVerifiedSteamConnection(
         uid: String,
         steamId: String,
@@ -1173,7 +1040,6 @@ object RealtimeDBService {
             )).await()
     }
 
-    
     suspend fun saveVerifiedSpotifyConnection(
         uid: String,
         spotifyId: String,
@@ -1197,7 +1063,6 @@ object RealtimeDBService {
             )).await()
     }
 
-    
     suspend fun saveVerifiedYouTubeConnection(
         uid: String,
         channelId: String,
@@ -1259,72 +1124,47 @@ object RealtimeDBService {
             )).await()
     }
 
-    
     suspend fun removeSocialConnection(uid: String, platform: String): Result<Unit> = runCatching {
         db.getReference("social_connections").child(uid).child(platform).removeValue().await()
     }
 
-    
-    fun listenToSocialConnections(uid: String): Flow<Map<String, SocialPlatformConnection>> = callbackFlow {
-        val ref = db.getReference("social_connections").child(uid)
-        val listener = ref.addValueEventListener(object : ValueEventListener {
-            override fun onDataChange(snap: DataSnapshot) {
-                val map = mutableMapOf<String, SocialPlatformConnection>()
-                for (child in snap.children) {
-                    val platform = child.key ?: continue
-                    val username = child.child("username").getValue(String::class.java) ?: continue
-                    val dataExpiresAt = child.child("dataExpiresAt").getValue(Long::class.java) ?: 0L
-                    if (
-                        platform == "youtube" &&
-                        dataExpiresAt > 0L &&
-                        dataExpiresAt <= System.currentTimeMillis()
-                    ) {
-                        
-                        
-                        child.ref.removeValue()
-                        continue
-                    }
-                    map[platform] = SocialPlatformConnection(
-                        platform = platform,
-                        username = username,
-                        did = child.child("did").getValue(String::class.java).orEmpty(),
-                        externalId = child.child("externalId").getValue(String::class.java).orEmpty(),
-                        authMethod = child.child("authMethod").getValue(String::class.java).orEmpty(),
-                        dataAccess = child.child("dataAccess").getValue(String::class.java).orEmpty(),
-                        verified = child.child("verified").getValue(Boolean::class.java) ?: false,
-                        consentVersion = child.child("consentVersion").getValue(String::class.java).orEmpty(),
-                        consentedAt = child.child("consentedAt").getValue(Long::class.java) ?: 0L,
-                        connectedAt = child.child("connectedAt").getValue(Long::class.java) ?: 0L,
-                        dataExpiresAt = dataExpiresAt,
-                        subscriptionCount = (child.child("subscriptionCount")
-                            .getValue(Long::class.java) ?: 0L).toInt(),
-                        analysisEnabled = child.child("analysisEnabled").getValue(Boolean::class.java) ?: false
-                    )
+    fun listenToSocialConnections(uid: String): Flow<Map<String, SocialPlatformConnection>> =
+        rtdbFlow(ref = { db.getReference("social_connections").child(uid) }) { snap ->
+            val map = mutableMapOf<String, SocialPlatformConnection>()
+            for (child in snap.children) {
+                val platform = child.key ?: continue
+                val username = child.strOrNull("username") ?: continue
+                val dataExpiresAt = child.lng("dataExpiresAt")
+                if (
+                    platform == "youtube" &&
+                    dataExpiresAt > 0L &&
+                    dataExpiresAt <= System.currentTimeMillis()
+                ) {
+                    child.ref.removeValue()
+                    continue
                 }
-                trySend(map)
+                map[platform] = SocialPlatformConnection(
+                    platform = platform,
+                    username = username,
+                    did = child.str("did"),
+                    externalId = child.str("externalId"),
+                    authMethod = child.str("authMethod"),
+                    dataAccess = child.str("dataAccess"),
+                    verified = child.bool("verified"),
+                    consentVersion = child.str("consentVersion"),
+                    consentedAt = child.lng("consentedAt"),
+                    connectedAt = child.lng("connectedAt"),
+                    dataExpiresAt = dataExpiresAt,
+                    subscriptionCount = child.lng("subscriptionCount").toInt(),
+                    analysisEnabled = child.bool("analysisEnabled")
+                )
             }
-            override fun onCancelled(error: DatabaseError) { Log.w("RealtimeDBService", "RTDB listener cancelled", error.toException()); close() }
-        })
-        awaitClose { ref.removeEventListener(listener) }
-    }
-
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
+            map
+        }
 
     private fun hoursToQuality(h: Float) =
         when { h >= 8f -> "excellent"; h >= 7f -> "good"; h >= 6f -> "okay"; else -> "poor" }
 
-    
     suspend fun saveSleepLog(
         uid: String,
         date: String,      
@@ -1374,60 +1214,38 @@ object RealtimeDBService {
         hours.takeIf { it.isNotEmpty() }?.average()?.toFloat()
     }.getOrNull()
 
-    
     fun listenToWeekSleepLogs(
         uid: String,
         mondayDate: String,
         sundayDate: String
-    ): Flow<Map<String, Map<String, Any>>> = callbackFlow {
-        val ref = db.getReference("sleep").child(uid)
-            .orderByKey().startAt(mondayDate).endAt(sundayDate)
-        val listener = ref.addValueEventListener(object : ValueEventListener {
-            override fun onDataChange(snap: DataSnapshot) {
-                val map = mutableMapOf<String, Map<String, Any>>()
-                for (child in snap.children) {
-                    val date = child.key ?: continue
-                    val entry = mutableMapOf<String, Any>()
-                    child.child("bedtime").getValue(String::class.java)?.let  { entry["bedtime"]     = it }
-                    child.child("waketime").getValue(String::class.java)?.let { entry["waketime"]    = it }
-                    child.child("hours").getValue(Double::class.java)?.let    { entry["hours"]       = it.toFloat() }
-                    child.child("qualityType").getValue(String::class.java)?.let { entry["qualityType"] = it }
-                    child.child("source").getValue(String::class.java)?.let { entry["source"] = it }
-                    child.child("timeZoneId").getValue(String::class.java)?.let { entry["timeZoneId"] = it }
-                    child.child("automatic").getValue(Boolean::class.java)?.let { entry["automatic"] = it }
-                    child.child("confidence").getValue(Double::class.java)?.let { entry["confidence"] = it.toFloat() }
-                    child.child("sourceReason").getValue(String::class.java)?.let { entry["sourceReason"] = it }
-                    if (entry.isNotEmpty()) map[date] = entry
-                }
-                trySend(map)
+    ): Flow<Map<String, Map<String, Any>>> =
+        rtdbFlow(ref = {
+            db.getReference("sleep").child(uid).orderByKey().startAt(mondayDate).endAt(sundayDate)
+        }) { snap ->
+            val map = mutableMapOf<String, Map<String, Any>>()
+            for (child in snap.children) {
+                val date = child.key ?: continue
+                val entry = mutableMapOf<String, Any>()
+                child.fieldsInto(
+                    entry,
+                    "bedtime" to FT.STR, "waketime" to FT.STR, "hours" to FT.FLT,
+                    "qualityType" to FT.STR, "source" to FT.STR, "timeZoneId" to FT.STR,
+                    "automatic" to FT.BOOL, "confidence" to FT.FLT, "sourceReason" to FT.STR,
+                )
+                if (entry.isNotEmpty()) map[date] = entry
             }
-            override fun onCancelled(error: DatabaseError) { Log.w("RealtimeDBService", "RTDB listener cancelled", error.toException()); close() }
-        })
-        awaitClose { ref.removeEventListener(listener) }
-    }
+            map
+        }
 
-    
     suspend fun saveSleepGoal(uid: String, goal: Float): Result<Unit> = runCatching {
         db.getReference("sleep_goals").child(uid).child("goal").setValue(goal).await()
     }
 
-    
     suspend fun loadSleepGoal(uid: String): Float = runCatching {
         (db.getReference("sleep_goals").child(uid).child("goal")
             .get().await().getValue(Double::class.java) ?: 8.0).toFloat()
     }.getOrDefault(8f)
 
-    
-    
-    
-    
-    
-    
-    
-    
-    
-
-    
     suspend fun saveMoodLog(
         uid: String,
         mood: String,
@@ -1444,89 +1262,36 @@ object RealtimeDBService {
             )).await()
     }
 
-    
-    fun listenToMoodLogs(uid: String, limit: Int = 50): Flow<List<Map<String, Any>>> = callbackFlow {
-        val ref = db.getReference("mood_logs").child(uid)
-            .orderByKey().limitToLast(limit)
-        val listener = ref.addValueEventListener(object : ValueEventListener {
-            override fun onDataChange(snap: DataSnapshot) {
-                val list = mutableListOf<Map<String, Any>>()
-                for (child in snap.children) {
-                    val date = child.key ?: continue
-                    val entry = mutableMapOf<String, Any>()
-                    entry["id"]   = date      
-                    entry["date"] = date
-                    child.child("mood").getValue(String::class.java)?.let      { entry["mood"]      = it }
-                    child.child("emoji").getValue(String::class.java)?.let     { entry["emoji"]     = it }
-                    child.child("labelEn").getValue(String::class.java)?.let   { entry["labelEn"]   = it }
-                    child.child("timestamp").getValue(Long::class.java)?.let   { entry["timestamp"] = it }
-                    if (entry.size > 2) list.add(entry)   
-                }
-                trySend(list.reversed())   
+    fun listenToMoodLogs(uid: String, limit: Int = 50): Flow<List<Map<String, Any>>> =
+        rtdbFlow(ref = { db.getReference("mood_logs").child(uid).orderByKey().limitToLast(limit) }) { snap ->
+            val list = mutableListOf<Map<String, Any>>()
+            for (child in snap.children) {
+                val date = child.key ?: continue
+                val entry = mutableMapOf<String, Any>()
+                entry["id"]   = date
+                entry["date"] = date
+                child.fieldsInto(entry, "mood" to FT.STR, "emoji" to FT.STR, "labelEn" to FT.STR, "timestamp" to FT.LNG)
+                if (entry.size > 2) list.add(entry)
             }
-            override fun onCancelled(error: DatabaseError) { Log.w("RealtimeDBService", "RTDB listener cancelled", error.toException()); close() }
-        })
-        awaitClose { ref.removeEventListener(listener) }
-    }
+            list.reversed()
+        }
 
-    
-    
-    
-
-    
-    fun listenToAllCounselorKeys(): Flow<List<Map<String, Any>>> = callbackFlow {
-        val ref = db.getReference("counselor_keys")
-        val listener = ref.addValueEventListener(object : ValueEventListener {
-            override fun onDataChange(snap: DataSnapshot) {
-                val list = snap.children.mapNotNull { child ->
-                    val data = child.value as? Map<String, Any> ?: return@mapNotNull null
-                    val complete = data["profileComplete"] as? Boolean ?: false
-                    if (!complete) return@mapNotNull null
-                    keyedAccessData(child, data)
-                }
-                trySend(list)
+    fun listenToAllCounselorKeys(): Flow<List<Map<String, Any>>> =
+        rtdbFlow(ref = { db.getReference("counselor_keys") }) { snap ->
+            snap.children.mapNotNull { child ->
+                val data = child.value as? Map<String, Any> ?: return@mapNotNull null
+                val complete = data["profileComplete"] as? Boolean ?: false
+                if (!complete) return@mapNotNull null
+                keyedAccessData(child, data)
             }
-            override fun onCancelled(error: DatabaseError) { Log.w("RealtimeDBService", "RTDB listener cancelled", error.toException()); close() }
-        })
-        awaitClose { ref.removeEventListener(listener) }
-    }
+        }
 
-    
-    fun listenToUserCount(): Flow<Int> = callbackFlow {
-        val ref = db.getReference("users")
-        val listener = ref.addValueEventListener(object : ValueEventListener {
-            override fun onDataChange(snap: DataSnapshot) = trySend(snap.childrenCount.toInt()).let {}
-            override fun onCancelled(error: DatabaseError) { Log.w("RealtimeDBService", "RTDB listener cancelled", error.toException()); close() }
-        })
-        awaitClose { ref.removeEventListener(listener) }
-    }
+    fun listenToUserCount(): Flow<Int> =
+        rtdbFlow(ref = { db.getReference("users") }) { it.childrenCount.toInt() }
 
-    
-    fun listenToChatSessionCount(): Flow<Int> = callbackFlow {
-        val ref = db.getReference("user_chats")
-        val listener = ref.addValueEventListener(object : ValueEventListener {
-            override fun onDataChange(snap: DataSnapshot) = trySend(snap.childrenCount.toInt()).let {}
-            override fun onCancelled(error: DatabaseError) { Log.w("RealtimeDBService", "RTDB listener cancelled", error.toException()); close() }
-        })
-        awaitClose { ref.removeEventListener(listener) }
-    }
+    fun listenToChatSessionCount(): Flow<Int> =
+        rtdbFlow(ref = { db.getReference("user_chats") }) { it.childrenCount.toInt() }
 
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-
-    
     private suspend fun requireRealtimeConnection(
         message: String = "Internet connection is required to save the assessment."
     ) {
@@ -1541,7 +1306,7 @@ object RealtimeDBService {
                 .await()
                 .getValue(Boolean::class.java) == true
         }.onFailure {
-            Log.w("RealtimeDBService", ".info/connected probe threw", it)
+            Log.w(TAG, ".info/connected probe threw", it)
         }.getOrNull()
         if (ok == false) {
             // Probe returned a definitive "not connected". Surface that with a
@@ -1553,11 +1318,11 @@ object RealtimeDBService {
     private fun parseAssessmentEntry(child: DataSnapshot): Map<String, Any>? {
         val entry = mutableMapOf<String, Any>()
         entry["id"] = child.key ?: ""
-        child.child("score").getValue(Long::class.java)?.let        { entry["score"]     = it.toInt() }
-        child.child("quizType").getValue(String::class.java)?.let   { entry["quizType"]  = it }
-        child.child("riskLevel").getValue(String::class.java)?.let  { entry["riskLevel"] = it }
-        child.child("date").getValue(String::class.java)?.let       { entry["date"]      = it }
-        child.child("timestamp").getValue(Long::class.java)?.let    { entry["timestamp"] = it }
+        child.fieldsInto(
+            entry,
+            "score" to FT.INT, "quizType" to FT.STR, "riskLevel" to FT.STR,
+            "date" to FT.STR, "timestamp" to FT.LNG,
+        )
         return if (entry.containsKey("score")) entry else null
     }
 
@@ -1597,7 +1362,6 @@ object RealtimeDBService {
 
         val ref = db.getReference("assessment").child(uid).push()
 
-        
         val answersMap = answers.entries.associate { (idx, triple) ->
             idx.toString() to mapOf(
                 "questionEn" to triple.first,
@@ -1624,7 +1388,7 @@ object RealtimeDBService {
         // Log the full path + exception so the next "invalid token in path"
         // (or whatever Firebase throws) is diagnosable from logcat instead
         // of just the snackbar's truncated string.
-        Log.e("RealtimeDBService", "saveAssessment failed (uid='$uid', quizType='$quizType')", it)
+        Log.e(TAG, "saveAssessment failed (uid='$uid', quizType='$quizType')", it)
     }
 
     suspend fun loadLatestAssessmentResult(uid: String): Result<Map<String, Any>?> = runCatching {
@@ -1636,56 +1400,30 @@ object RealtimeDBService {
     suspend fun loadLatestAssessment(uid: String): Map<String, Any>? =
         loadLatestAssessmentResult(uid).getOrNull()
 
-    
-    fun listenToAssessments(uid: String): Flow<List<Map<String, Any>>> = callbackFlow {
-        val ref = db.getReference("assessment").child(uid)
-            .orderByChild("timestamp")
-        val listener = ref.addValueEventListener(object : ValueEventListener {
-            override fun onDataChange(snap: DataSnapshot) {
-                val list = mutableListOf<Map<String, Any>>()
-                for (child in snap.children) {
-                    val entry = mutableMapOf<String, Any>()
-                    entry["id"] = child.key ?: continue
-                    child.child("quizType").getValue(String::class.java)?.let       { entry["quizType"]       = it }
-                    child.child("score").getValue(Long::class.java)?.let            { entry["score"]          = it.toInt() }
-                    child.child("totalQuestions").getValue(Long::class.java)?.let   { entry["totalQuestions"] = it.toInt() }
-                    child.child("riskLevel").getValue(String::class.java)?.let      { entry["riskLevel"]      = it }
-                    child.child("date").getValue(String::class.java)?.let           { entry["date"]           = it }
-                    child.child("timestamp").getValue(Long::class.java)?.let        { entry["timestamp"]      = it }
-                    
-                    val answersMap = mutableMapOf<String, Map<String, Any>>()
-                    for (aq in child.child("answers").children) {
-                        val aIdx = aq.key ?: continue
-                        val aEntry = mutableMapOf<String, Any>()
-                        aq.child("questionEn").getValue(String::class.java)?.let { aEntry["questionEn"] = it }
-                        aq.child("questionUr").getValue(String::class.java)?.let { aEntry["questionUr"] = it }
-                        aq.child("answer").getValue(Boolean::class.java)?.let    { aEntry["answer"]     = it }
-                        if (aEntry.isNotEmpty()) answersMap[aIdx] = aEntry
-                    }
-                    if (answersMap.isNotEmpty()) entry["answers"] = answersMap
-                    if (entry.containsKey("quizType")) list.add(entry)
+    fun listenToAssessments(uid: String): Flow<List<Map<String, Any>>> =
+        rtdbFlow(ref = { db.getReference("assessment").child(uid).orderByChild("timestamp") }) { snap ->
+            val list = mutableListOf<Map<String, Any>>()
+            for (child in snap.children) {
+                val entry = mutableMapOf<String, Any>()
+                entry["id"] = child.key ?: continue
+                child.fieldsInto(
+                    entry,
+                    "quizType" to FT.STR, "score" to FT.INT, "totalQuestions" to FT.INT,
+                    "riskLevel" to FT.STR, "date" to FT.STR, "timestamp" to FT.LNG,
+                )
+                val answersMap = mutableMapOf<String, Map<String, Any>>()
+                for (aq in child.child("answers").children) {
+                    val aIdx = aq.key ?: continue
+                    val aEntry = mutableMapOf<String, Any>()
+                    aq.fieldsInto(aEntry, "questionEn" to FT.STR, "questionUr" to FT.STR, "answer" to FT.BOOL)
+                    if (aEntry.isNotEmpty()) answersMap[aIdx] = aEntry
                 }
-                trySend(list.reversed())   
+                if (answersMap.isNotEmpty()) entry["answers"] = answersMap
+                if (entry.containsKey("quizType")) list.add(entry)
             }
-            override fun onCancelled(error: DatabaseError) { Log.w("RealtimeDBService", "RTDB listener cancelled", error.toException()); close() }
-        })
-        awaitClose { ref.removeEventListener(listener) }
-    }
+            list.reversed()
+        }
 
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-
-    
     suspend fun saveScreenTime(
         uid: String,
         date: String,
@@ -1711,59 +1449,32 @@ object RealtimeDBService {
             ).await()
     }
 
-    
     suspend fun loadScreenTime(uid: String, date: String): Map<String, Any>? = runCatching {
         db.getReference("screen_time").child(uid).child(date)
             .get().await().value as? Map<String, Any>
     }.getOrNull()
 
-    
-    fun listenToScreenTime(uid: String, limit: Int = 30): Flow<List<Map<String, Any>>> = callbackFlow {
-        val ref = db.getReference("screen_time").child(uid)
-            .orderByKey().limitToLast(limit)
-        val listener = ref.addValueEventListener(object : ValueEventListener {
-            override fun onDataChange(snap: DataSnapshot) {
-                val list = mutableListOf<Map<String, Any>>()
-                for (child in snap.children) {
-                    val date  = child.key ?: continue
-                    val entry = mutableMapOf<String, Any>()
-                    entry["date"] = date
-                    child.child("totalMs").getValue(Long::class.java)?.let  { entry["totalMs"] = it }
-                    child.child("savedAt").getValue(Long::class.java)?.let  { entry["savedAt"] = it }
-                    
-                    val appsMap = mutableMapOf<String, Map<String, Any>>()
-                    for (app in child.child("apps").children) {
-                        val pkg   = app.key ?: continue
-                        val aData = mutableMapOf<String, Any>()
-                        app.child("packageName").getValue(String::class.java)?.let { aData["packageName"] = it }
-                        app.child("appName").getValue(String::class.java)?.let     { aData["appName"]     = it }
-                        app.child("timeMs").getValue(Long::class.java)?.let        { aData["timeMs"]      = it }
-                        if (aData.isNotEmpty()) appsMap[pkg] = aData
-                    }
-                    if (appsMap.isNotEmpty()) entry["apps"] = appsMap
-                    if (entry.containsKey("totalMs")) list.add(entry)
+    fun listenToScreenTime(uid: String, limit: Int = 30): Flow<List<Map<String, Any>>> =
+        rtdbFlow(ref = { db.getReference("screen_time").child(uid).orderByKey().limitToLast(limit) }) { snap ->
+            val list = mutableListOf<Map<String, Any>>()
+            for (child in snap.children) {
+                val date  = child.key ?: continue
+                val entry = mutableMapOf<String, Any>()
+                entry["date"] = date
+                child.fieldsInto(entry, "totalMs" to FT.LNG, "savedAt" to FT.LNG)
+                val appsMap = mutableMapOf<String, Map<String, Any>>()
+                for (app in child.child("apps").children) {
+                    val pkg   = app.key ?: continue
+                    val aData = mutableMapOf<String, Any>()
+                    app.fieldsInto(aData, "packageName" to FT.STR, "appName" to FT.STR, "timeMs" to FT.LNG)
+                    if (aData.isNotEmpty()) appsMap[pkg] = aData
                 }
-                trySend(list.reversed())   
+                if (appsMap.isNotEmpty()) entry["apps"] = appsMap
+                if (entry.containsKey("totalMs")) list.add(entry)
             }
-            override fun onCancelled(error: DatabaseError) { Log.w("RealtimeDBService", "RTDB listener cancelled", error.toException()); close() }
-        })
-        awaitClose { ref.removeEventListener(listener) }
-    }
+            list.reversed()
+        }
 
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-
-    
     suspend fun updateDailyCheckIn(uid: String, today: String): Result<Map<String, Any>> = runCatching {
         val ref  = db.getReference("progress").child(uid)
         val snap = ref.get().await()
@@ -1773,7 +1484,6 @@ object RealtimeDBService {
         val longestStreak  = snap.child("longestStreak").getValue(Long::class.java)   ?: 0L
         val totalDays      = snap.child("totalDays").getValue(Long::class.java)       ?: 0L
 
-        
         if (lastCheckIn == today) {
             return@runCatching mapOf(
                 "streak"        to currentStreak,
@@ -1783,7 +1493,6 @@ object RealtimeDBService {
             )
         }
 
-        
         val sdf       = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
         val todayDate = sdf.parse(today)!!
         val newStreak: Long = if (lastCheckIn.isNotBlank()) {
@@ -1808,18 +1517,17 @@ object RealtimeDBService {
         update
     }
 
-    
     suspend fun loadProgressData(uid: String): Map<String, Any>? = runCatching {
         val snap = db.getReference("progress").child(uid).get().await()
         if (!snap.exists()) return@runCatching null
 
         val result = mutableMapOf<String, Any>()
-        snap.child("streak").getValue(Long::class.java)?.let        { result["streak"]        = it }
-        snap.child("longestStreak").getValue(Long::class.java)?.let { result["longestStreak"] = it }
-        snap.child("totalDays").getValue(Long::class.java)?.let     { result["totalDays"]     = it }
-        snap.child("lastCheckIn").getValue(String::class.java)?.let { result["lastCheckIn"]   = it }
+        snap.fieldsInto(
+            result,
+            "streak" to FT.LNG, "longestStreak" to FT.LNG,
+            "totalDays" to FT.LNG, "lastCheckIn" to FT.STR,
+        )
 
-        
         val achMap = mutableMapOf<String, Long>()
         for (child in snap.child("unlockedAchievements").children) {
             val id = child.key ?: continue
@@ -1831,7 +1539,6 @@ object RealtimeDBService {
         result
     }.getOrNull()
 
-    
     suspend fun unlockAchievement(uid: String, achievementId: String): Result<Unit> = runCatching {
         val ref  = db.getReference("progress").child(uid)
             .child("unlockedAchievements").child(achievementId)
@@ -1840,28 +1547,22 @@ object RealtimeDBService {
         if (!snap.exists()) ref.setValue(System.currentTimeMillis()).await()
     }
 
-    
     suspend fun loadAssessmentHistory(uid: String, limit: Int = 6): List<Map<String, Any>> = runCatching {
         val snap = db.getReference("assessment").child(uid)
             .orderByChild("timestamp").limitToLast(limit).get().await()
         val list = mutableListOf<Map<String, Any>>()
         for (child in snap.children) {
             val entry = mutableMapOf<String, Any>()
-            child.child("date").getValue(String::class.java)?.let      { entry["date"]      = it }
-            child.child("score").getValue(Long::class.java)?.let       { entry["score"]     = it.toInt() }
-            child.child("riskLevel").getValue(String::class.java)?.let { entry["riskLevel"] = it }
-            child.child("quizType").getValue(String::class.java)?.let  { entry["quizType"]  = it }
-            child.child("timestamp").getValue(Long::class.java)?.let   { entry["timestamp"] = it }
+            child.fieldsInto(
+                entry,
+                "date" to FT.STR, "score" to FT.INT, "riskLevel" to FT.STR,
+                "quizType" to FT.STR, "timestamp" to FT.LNG,
+            )
             if (entry.containsKey("score")) list.add(entry)
         }
-        list.reversed()   
+        list.reversed()
     }.getOrDefault(emptyList())
 
-    
-    
-    
-
-    
     suspend fun updateLeaderboardEntry(
         uid          : String,
         displayName  : String,
@@ -1880,71 +1581,32 @@ object RealtimeDBService {
         ).await()
     }
 
-    
-    suspend fun loadLeaderboard(limit: Int = 50): List<Map<String, Any>> = runCatching {
+    private suspend fun loadLeaderboardOrdered(field: String, limit: Int): List<Map<String, Any>> = runCatching {
         val snap = db.getReference("leaderboard")
-            .orderByChild("streak")
+            .orderByChild(field)
             .limitToLast(limit)
             .get().await()
 
         val list = mutableListOf<Map<String, Any>>()
         for (child in snap.children) {
             val entry = mutableMapOf<String, Any>()
-            entry["uid"]           = child.key ?: continue
-            child.child("displayName").getValue(String::class.java)?.let  { entry["displayName"]   = it }
-            child.child("streak").getValue(Long::class.java)?.let         { entry["streak"]        = it }
-            child.child("longestStreak").getValue(Long::class.java)?.let  { entry["longestStreak"] = it }
-            child.child("totalDays").getValue(Long::class.java)?.let      { entry["totalDays"]     = it }
-            child.child("lastUpdated").getValue(Long::class.java)?.let    { entry["lastUpdated"]   = it }
+            entry["uid"] = child.key ?: continue
+            child.fieldsInto(
+                entry,
+                "displayName" to FT.STR, "streak" to FT.LNG, "longestStreak" to FT.LNG,
+                "totalDays" to FT.LNG, "lastUpdated" to FT.LNG,
+            )
             if (entry.containsKey("displayName")) list.add(entry)
         }
-        list.reversed()   
+        list.reversed()
     }.getOrDefault(emptyList())
 
-    
-    suspend fun loadLeaderboardByDays(limit: Int = 50): List<Map<String, Any>> = runCatching {
-        val snap = db.getReference("leaderboard")
-            .orderByChild("totalDays")
-            .limitToLast(limit)
-            .get().await()
+    suspend fun loadLeaderboard(limit: Int = 50): List<Map<String, Any>> =
+        loadLeaderboardOrdered("streak", limit)
 
-        val list = mutableListOf<Map<String, Any>>()
-        for (child in snap.children) {
-            val entry = mutableMapOf<String, Any>()
-            entry["uid"]           = child.key ?: continue
-            child.child("displayName").getValue(String::class.java)?.let  { entry["displayName"]   = it }
-            child.child("streak").getValue(Long::class.java)?.let         { entry["streak"]        = it }
-            child.child("longestStreak").getValue(Long::class.java)?.let  { entry["longestStreak"] = it }
-            child.child("totalDays").getValue(Long::class.java)?.let      { entry["totalDays"]     = it }
-            child.child("lastUpdated").getValue(Long::class.java)?.let    { entry["lastUpdated"]   = it }
-            if (entry.containsKey("displayName")) list.add(entry)
-        }
-        list.reversed()   
-    }.getOrDefault(emptyList())
+    suspend fun loadLeaderboardByDays(limit: Int = 50): List<Map<String, Any>> =
+        loadLeaderboardOrdered("totalDays", limit)
 
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-
-    
     suspend fun startGameRecovery(uid: String, alias: String, location: String): Result<Map<String, Any>> = runCatching {
         require(uid.isNotBlank()) { "Missing user id." }
         val cleanAlias = alias.trim()
@@ -2011,7 +1673,7 @@ object RealtimeDBService {
             "completedToday" to emptySet<String>(),
         )
     }.onFailure {
-        Log.w("RealtimeDBService", "startGameRecovery failed", it)
+        Log.w(TAG, "startGameRecovery failed", it)
     }
 
     suspend fun saveGameAlias(uid: String, alias: String, location: String): Result<Unit> = runCatching {
@@ -2033,36 +1695,18 @@ object RealtimeDBService {
             }
         }
 
-        val aliasRef = db.getReference("game_alias_index").child(aliasKey)
-        suspendCancellableCoroutine<Unit> { continuation ->
-            var takenByOtherUser = false
-            aliasRef.runTransaction(object : Transaction.Handler {
-                override fun doTransaction(currentData: MutableData): Transaction.Result {
-                    val currentUid = currentData.child("uid").getValue(String::class.java).orEmpty()
-                    if (currentUid.isNotBlank() && currentUid != uid) {
-                        takenByOtherUser = true
-                        return Transaction.abort()
-                    }
-                    currentData.value = mapOf(
-                        "uid" to uid,
-                        "alias" to alias,
-                        "aliasKey" to aliasKey,
-                        "createdAt" to System.currentTimeMillis(),
-                    )
-                    return Transaction.success(currentData)
-                }
-
-                override fun onComplete(error: DatabaseError?, committed: Boolean, currentData: DataSnapshot?) {
-                    when {
-                        error != null -> continuation.resumeWithException(error.toException())
-                        takenByOtherUser || !committed ->
-                            continuation.resumeWithException(
-                                IllegalStateException("This anonymous name is already taken. Please choose another.")
-                            )
-                        else -> continuation.resume(Unit)
-                    }
-                }
-            })
+        db.getReference("game_alias_index").child(aliasKey).awaitTransaction(
+            abortError = { IllegalStateException("This anonymous name is already taken. Please choose another.") },
+        ) { currentData ->
+            val currentUid = currentData.child("uid").getValue(String::class.java).orEmpty()
+            if (currentUid.isNotBlank() && currentUid != uid) return@awaitTransaction Transaction.abort()
+            currentData.value = mapOf(
+                "uid" to uid,
+                "alias" to alias,
+                "aliasKey" to aliasKey,
+                "createdAt" to System.currentTimeMillis(),
+            )
+            Transaction.success(currentData)
         }
     }
 
@@ -2081,14 +1725,14 @@ object RealtimeDBService {
         )).await()
     }
 
-    private fun gameAliasKey(alias: String): String {
-        val normalized = alias.trim().lowercase(Locale.US)
-        val digest = MessageDigest.getInstance("SHA-256")
-            .digest(normalized.toByteArray())
-        return digest.joinToString("") { "%02x".format(it) }
+    private fun gameAliasKey(alias: String): String = sha256Hex(alias.trim().lowercase(Locale.US))
+
+    private fun completedTaskIds(snap: DataSnapshot, today: String): MutableSet<String> {
+        val done = mutableSetOf<String>()
+        for (c in snap.child("completedTasks").child(today).children) c.key?.let { done.add(it) }
+        return done
     }
 
-    
     suspend fun loadGameProfile(uid: String, today: String, thisWeek: String): Map<String, Any>? = runCatching {
         val ref  = db.getReference("game_recovery").child(uid)
         val snap = ref.get().await()
@@ -2127,9 +1771,7 @@ object RealtimeDBService {
             }
         }
 
-        val completedToday = mutableSetOf<String>()
-        for (child in snap.child("completedTasks").child(today).children)
-            child.key?.let { completedToday.add(it) }
+        val completedToday = completedTaskIds(snap, today)
 
         mapOf(
             "alias"          to alias,
@@ -2142,7 +1784,6 @@ object RealtimeDBService {
         )
     }.getOrNull()
 
-    
     suspend fun completeGameTask(
         uid      : String,
         taskId   : String,
@@ -2153,10 +1794,8 @@ object RealtimeDBService {
         val ref  = db.getReference("game_recovery").child(uid)
         val snap = ref.get().await()
 
-        
         if (snap.child("completedTasks").child(today).child(taskId).exists()) {
-            val done = mutableSetOf<String>()
-            for (c in snap.child("completedTasks").child(today).children) c.key?.let { done.add(it) }
+            val done = completedTaskIds(snap, today)
             return@runCatching mapOf(
                 "totalXp"        to (snap.child("totalXp").getValue(Long::class.java)  ?: 0L),
                 "dailyXp"        to (snap.child("dailyXp").getValue(Long::class.java)  ?: 0L),
@@ -2195,8 +1834,7 @@ object RealtimeDBService {
             "lastUpdated" to now
         )).await()
 
-        val done = mutableSetOf<String>()
-        for (c in snap.child("completedTasks").child(today).children) c.key?.let { done.add(it) }
+        val done = completedTaskIds(snap, today)
         done.add(taskId)
 
         mapOf(
@@ -2207,8 +1845,6 @@ object RealtimeDBService {
             "completedToday" to done
         )
     }
-
-    
 
     suspend fun logAppUsageEvent(
         uid: String,
@@ -2257,24 +1893,11 @@ object RealtimeDBService {
                 for (child in snapshot.children) {
                     val entry = mutableMapOf<String, Any>()
                     entry["id"] = child.key ?: continue
-                    child.child("packageName").getValue(String::class.java)?.let {
-                        entry["packageName"] = it
-                    }
-                    child.child("appName").getValue(String::class.java)?.let {
-                        entry["appName"] = it
-                    }
-                    child.child("startTimeMillis").getValue(Long::class.java)?.let {
-                        entry["startTimeMillis"] = it
-                    }
-                    child.child("endTimeMillis").getValue(Long::class.java)?.let {
-                        entry["endTimeMillis"] = it
-                    }
-                    child.child("durationMillis").getValue(Long::class.java)?.let {
-                        entry["durationMillis"] = it
-                    }
-                    child.child("date").getValue(String::class.java)?.let {
-                        entry["date"] = it
-                    }
+                    child.fieldsInto(
+                        entry,
+                        "packageName" to FT.STR, "appName" to FT.STR, "startTimeMillis" to FT.LNG,
+                        "endTimeMillis" to FT.LNG, "durationMillis" to FT.LNG, "date" to FT.STR,
+                    )
                     if (entry.containsKey("packageName")) events.add(entry)
                 }
                 trySend(events.sortedByDescending { (it["startTimeMillis"] as? Long) ?: 0L })
@@ -2292,7 +1915,6 @@ object RealtimeDBService {
         awaitClose { ref.removeEventListener(listener) }
     }
 
-    
     suspend fun loadGameLeaderboard(
         sortBy: String = "allTime",
         limit: Int = 20,
@@ -2321,21 +1943,17 @@ object RealtimeDBService {
             if (!isCurrentWindow) continue
             val entry = mutableMapOf<String, Any>()
             entry["uid"] = child.key ?: continue
-            child.child("alias").getValue(String::class.java)?.let    { entry["alias"]    = it }
-            child.child("location").getValue(String::class.java)?.let { entry["location"] = it }
-            child.child("totalXp").getValue(Long::class.java)?.let    { entry["totalXp"]  = it }
-            child.child("dailyXp").getValue(Long::class.java)?.let    { entry["dailyXp"]  = it }
-            child.child("weeklyXp").getValue(Long::class.java)?.let   { entry["weeklyXp"] = it }
+            child.fieldsInto(
+                entry,
+                "alias" to FT.STR, "location" to FT.STR, "totalXp" to FT.LNG,
+                "dailyXp" to FT.LNG, "weeklyXp" to FT.LNG,
+            )
             entry["lastDailyDate"] = lastDailyDate
             entry["lastWeeklyDate"] = lastWeeklyDate
             if (entry.containsKey("alias")) list.add(entry)
         }
         list.reversed().take(limit)
     }.getOrDefault(emptyList())
-
-    
-    
-    
 
     suspend fun submitRegistrationRequest(
         applicantType: String,
@@ -2393,17 +2011,10 @@ object RealtimeDBService {
         requestId
     }
 
-    fun listenToRegistrationRequests(): Flow<List<RegistrationRequest>> = callbackFlow {
-        val ref = db.getReference("registration_requests")
-        val listener = ref.addValueEventListener(object : ValueEventListener {
-            override fun onDataChange(snapshot: DataSnapshot) {
-                trySend(snapshot.children.mapNotNull(::registrationRequestFrom).sortedByDescending { it.createdAt })
-            }
-
-            override fun onCancelled(error: DatabaseError) { Log.w("RealtimeDBService", "RTDB listener cancelled", error.toException()); close() }
-        })
-        awaitClose { ref.removeEventListener(listener) }
-    }
+    fun listenToRegistrationRequests(): Flow<List<RegistrationRequest>> =
+        rtdbFlow(ref = { db.getReference("registration_requests") }) { snapshot ->
+            snapshot.children.mapNotNull(::registrationRequestFrom).sortedByDescending { it.createdAt }
+        }
 
     suspend fun submitBugReport(
         userId: String,
@@ -2456,7 +2067,6 @@ object RealtimeDBService {
         ).await()
     }
 
-    
     suspend fun approveRegistrationRequest(
         request: RegistrationRequest,
         issuedKey: String,
@@ -2502,7 +2112,7 @@ object RealtimeDBService {
         if (request.applicantType == "COUNSELOR") {
             val attributeLabelsEn = cleanAttributes.map(CounselorAttributeCatalog::labelEn)
             val attributeLabelsUr = cleanAttributes.map(CounselorAttributeCatalog::labelUr)
-            db.getReference("counselor_keys").child(accessKeyPathSegment(cleanIssuedKey)).setValue(
+            counselorKeyRef(cleanIssuedKey).setValue(
                 mapOf(
                     "issuedKey" to cleanIssuedKey,
                     "isActive" to true,
@@ -2610,7 +2220,6 @@ object RealtimeDBService {
     fun listenToUserPaymentRequests(userId: String): Flow<List<PaymentRequest>> =
         paymentRequestsFlow { it.userId == userId }
 
-    
     suspend fun approvePaymentRequest(
         request: PaymentRequest,
         reviewedBy: String,
@@ -2655,7 +2264,7 @@ object RealtimeDBService {
                     "timestamp" to timestamp
                 )
             ).await()
-        db.getReference("counselor_keys").child(accessKeyPathSegment(request.counselorKey)).child("sessionCount")
+        counselorKeyRef(request.counselorKey).child("sessionCount")
             .setValue(ServerValue.increment(1)).await()
 
         saveUserNotification(
@@ -2700,81 +2309,65 @@ object RealtimeDBService {
         ).getOrThrow()
     }
 
-    
-    fun listenToRegionalRiskSummaries(): Flow<List<RegionalRiskSummary>> = callbackFlow {
-        val root = db.reference
-        val listener = root.addValueEventListener(object : ValueEventListener {
-            override fun onDataChange(snapshot: DataSnapshot) {
-                val userRegions = snapshot.child("users").children.associate { user ->
-                    val region = user.child("region").getValue(String::class.java)?.trim().orEmpty()
-                    (user.key ?: "") to region.ifBlank { "Unspecified" }
-                }
-                val registeredCounts = userRegions.values.groupingBy { it }.eachCount()
-                val entries = mutableMapOf<String, MutableList<Pair<String, List<DataSnapshot>>>>()
-                snapshot.child("assessment").children.forEach { userAssessments ->
-                    val uid = userAssessments.key ?: return@forEach
-                    val region = userRegions[uid] ?: "Unspecified"
-                    entries.getOrPut(region) { mutableListOf() }
-                        .add(uid to userAssessments.children.toList())
-                }
-
-                val regions = (registeredCounts.keys + entries.keys).toSortedSet()
-                val results = regions.map { region ->
-                    val usersWithScores = entries[region].orEmpty().mapNotNull { (_, assessments) ->
-                        assessments.maxByOrNull {
-                            it.child("timestamp").getValue(Long::class.java) ?: 0L
-                        }?.child("score")?.getValue(Long::class.java)?.toInt()
-                    }
-                    RegionalRiskSummary(
-                        region = region,
-                        registeredUsers = registeredCounts[region] ?: 0,
-                        assessedUsers = usersWithScores.size,
-                        totalAssessments = entries[region].orEmpty().sumOf { it.second.size },
-                        averageLatestScore = usersWithScores.average().takeUnless { it.isNaN() } ?: 0.0,
-                        highRiskUsers = usersWithScores.count { it >= 6 },
-                        moderateRiskUsers = usersWithScores.count { it in 3..5 }
-                    )
-                }
-                trySend(results)
+    fun listenToRegionalRiskSummaries(): Flow<List<RegionalRiskSummary>> =
+        rtdbFlow(ref = { db.reference }) { snapshot ->
+            val userRegions = snapshot.child("users").children.associate { user ->
+                val region = user.strOrNull("region")?.trim().orEmpty()
+                (user.key ?: "") to region.ifBlank { "Unspecified" }
+            }
+            val registeredCounts = userRegions.values.groupingBy { it }.eachCount()
+            val entries = mutableMapOf<String, MutableList<Pair<String, List<DataSnapshot>>>>()
+            snapshot.child("assessment").children.forEach { userAssessments ->
+                val uid = userAssessments.key ?: return@forEach
+                val region = userRegions[uid] ?: "Unspecified"
+                entries.getOrPut(region) { mutableListOf() }
+                    .add(uid to userAssessments.children.toList())
             }
 
-            override fun onCancelled(error: DatabaseError) { Log.w("RealtimeDBService", "RTDB listener cancelled", error.toException()); close() }
-        })
-        awaitClose { root.removeEventListener(listener) }
-    }
+            val regions = (registeredCounts.keys + entries.keys).toSortedSet()
+            regions.map { region ->
+                val usersWithScores = entries[region].orEmpty().mapNotNull { (_, assessments) ->
+                    assessments.maxByOrNull {
+                        it.child("timestamp").getValue(Long::class.java) ?: 0L
+                    }?.child("score")?.getValue(Long::class.java)?.toInt()
+                }
+                RegionalRiskSummary(
+                    region = region,
+                    registeredUsers = registeredCounts[region] ?: 0,
+                    assessedUsers = usersWithScores.size,
+                    totalAssessments = entries[region].orEmpty().sumOf { it.second.size },
+                    averageLatestScore = usersWithScores.average().takeUnless { it.isNaN() } ?: 0.0,
+                    highRiskUsers = usersWithScores.count { it >= 6 },
+                    moderateRiskUsers = usersWithScores.count { it in 3..5 }
+                )
+            }
+        }
 
     private fun avatarRequestFrom(snapshot: DataSnapshot): AvatarRequest? {
         if (!snapshot.exists()) return null
         return AvatarRequest(
-            requestId = snapshot.child("requestId").getValue(String::class.java) ?: snapshot.key.orEmpty(),
-            userId = snapshot.child("userId").getValue(String::class.java).orEmpty(),
-            userEmail = snapshot.child("userEmail").getValue(String::class.java).orEmpty(),
-            userName = snapshot.child("userName").getValue(String::class.java).orEmpty(),
-            fileUrl = snapshot.child("fileUrl").getValue(String::class.java).orEmpty(),
-            fileName = snapshot.child("fileName").getValue(String::class.java).orEmpty(),
-            mimeType = snapshot.child("mimeType").getValue(String::class.java).orEmpty(),
-            sizeBytes = snapshot.child("sizeBytes").getValue(Long::class.java) ?: 0L,
-            status = snapshot.child("status").getValue(String::class.java) ?: "PENDING_REVIEW",
-            adminComment = snapshot.child("adminComment").getValue(String::class.java).orEmpty(),
-            reviewedBy = snapshot.child("reviewedBy").getValue(String::class.java).orEmpty(),
-            createdAt = snapshot.child("createdAt").getValue(Long::class.java) ?: 0L,
-            reviewedAt = snapshot.child("reviewedAt").getValue(Long::class.java) ?: 0L,
+            requestId = snapshot.strOrNull("requestId") ?: snapshot.key.orEmpty(),
+            userId = snapshot.str("userId"),
+            userEmail = snapshot.str("userEmail"),
+            userName = snapshot.str("userName"),
+            fileUrl = snapshot.str("fileUrl"),
+            fileName = snapshot.str("fileName"),
+            mimeType = snapshot.str("mimeType"),
+            sizeBytes = snapshot.lng("sizeBytes"),
+            status = snapshot.strOrNull("status") ?: "PENDING_REVIEW",
+            adminComment = snapshot.str("adminComment"),
+            reviewedBy = snapshot.str("reviewedBy"),
+            createdAt = snapshot.lng("createdAt"),
+            reviewedAt = snapshot.lng("reviewedAt"),
         )
     }
 
     private fun emailKey(email: String): String {
         val normalized = email.trim().lowercase()
-        if (normalized.isBlank()) return ""
-        val digest = MessageDigest.getInstance("SHA-256")
-            .digest(normalized.toByteArray(Charsets.UTF_8))
-        return digest.joinToString("") { "%02x".format(it) }
+        return if (normalized.isBlank()) "" else sha256Hex(normalized)
     }
 
-    private fun safeTokenKey(token: String): String {
-        val digest = MessageDigest.getInstance("SHA-256")
-            .digest(token.toByteArray(Charsets.UTF_8))
-        return digest.joinToString("") { "%02x".format(it) }
-    }
+    private fun safeTokenKey(token: String): String = sha256Hex(token)
 
     /**
      * Inlines an upload as a `data:image/jpeg;base64,...` URI stored
@@ -2838,110 +2431,92 @@ object RealtimeDBService {
 
     private fun paymentRequestsFlow(
         predicate: (PaymentRequest) -> Boolean = { true }
-    ): Flow<List<PaymentRequest>> = callbackFlow {
-        val ref = db.getReference("payment_requests")
-        val listener = ref.addValueEventListener(object : ValueEventListener {
-            override fun onDataChange(snapshot: DataSnapshot) {
-                trySend(
-                    snapshot.children.mapNotNull(::paymentRequestFrom)
-                        .filter(predicate)
-                        .sortedByDescending { it.createdAt }
-                )
-            }
-
-            override fun onCancelled(error: DatabaseError) { Log.w("RealtimeDBService", "RTDB listener cancelled", error.toException()); close() }
-        })
-        awaitClose { ref.removeEventListener(listener) }
-    }
+    ): Flow<List<PaymentRequest>> =
+        rtdbFlow(ref = { db.getReference("payment_requests") }) { snapshot ->
+            snapshot.children.mapNotNull(::paymentRequestFrom)
+                .filter(predicate)
+                .sortedByDescending { it.createdAt }
+        }
 
     private fun registrationRequestFrom(snapshot: DataSnapshot): RegistrationRequest? {
         if (!snapshot.exists()) return null
         return RegistrationRequest(
-            requestId = snapshot.child("requestId").getValue(String::class.java) ?: snapshot.key.orEmpty(),
-            applicantType = snapshot.child("applicantType").getValue(String::class.java).orEmpty(),
-            applicantName = snapshot.child("applicantName").getValue(String::class.java).orEmpty(),
-            organizationName = snapshot.child("organizationName").getValue(String::class.java).orEmpty(),
-            email = snapshot.child("email").getValue(String::class.java).orEmpty(),
-            phone = snapshot.child("phone").getValue(String::class.java).orEmpty(),
-            applicantFcmToken = snapshot.child("applicantFcmToken").getValue(String::class.java).orEmpty(),
-            region = snapshot.child("region").getValue(String::class.java).orEmpty(),
-            city = snapshot.child("city").getValue(String::class.java).orEmpty(),
-            district = snapshot.child("district").getValue(String::class.java).orEmpty(),
+            requestId = snapshot.strOrNull("requestId") ?: snapshot.key.orEmpty(),
+            applicantType = snapshot.str("applicantType"),
+            applicantName = snapshot.str("applicantName"),
+            organizationName = snapshot.str("organizationName"),
+            email = snapshot.str("email"),
+            phone = snapshot.str("phone"),
+            applicantFcmToken = snapshot.str("applicantFcmToken"),
+            region = snapshot.str("region"),
+            city = snapshot.str("city"),
+            district = snapshot.str("district"),
             locationAccuracyMeters = snapshot.child("locationAccuracyMeters").getValue(Float::class.java) ?: 0f,
-            verificationBody = snapshot.child("verificationBody").getValue(String::class.java).orEmpty(),
-            registrationNumber = snapshot.child("registrationNumber").getValue(String::class.java).orEmpty(),
-            qualificationSummary = snapshot.child("qualificationSummary").getValue(String::class.java).orEmpty(),
-            details = snapshot.child("details").getValue(String::class.java).orEmpty(),
-            documentUrl = snapshot.child("documentUrl").getValue(String::class.java).orEmpty(),
+            verificationBody = snapshot.str("verificationBody"),
+            registrationNumber = snapshot.str("registrationNumber"),
+            qualificationSummary = snapshot.str("qualificationSummary"),
+            details = snapshot.str("details"),
+            documentUrl = snapshot.str("documentUrl"),
             documentUrls = snapshot.child("documentUrls").children.associate { child ->
                 child.key.orEmpty() to child.getValue(String::class.java).orEmpty()
             }.filterKeys { it.isNotBlank() }.filterValues { it.isNotBlank() },
             requiredDocumentKeys = snapshot.child("requiredDocumentKeys").children.mapNotNull {
                 it.getValue(String::class.java)
             },
-            status = snapshot.child("status").getValue(String::class.java) ?: "PENDING_REVIEW",
-            issuedKey = snapshot.child("issuedKey").getValue(String::class.java).orEmpty(),
+            status = snapshot.strOrNull("status") ?: "PENDING_REVIEW",
+            issuedKey = snapshot.str("issuedKey"),
             approvedAttributeIds = snapshot.child("approvedAttributeIds").children.mapNotNull {
                 it.getValue(String::class.java)
             },
-            reviewedBy = snapshot.child("reviewedBy").getValue(String::class.java).orEmpty(),
-            reviewNotes = snapshot.child("reviewNotes").getValue(String::class.java).orEmpty(),
-            createdAt = snapshot.child("createdAt").getValue(Long::class.java) ?: 0L,
-            reviewedAt = snapshot.child("reviewedAt").getValue(Long::class.java) ?: 0L
+            reviewedBy = snapshot.str("reviewedBy"),
+            reviewNotes = snapshot.str("reviewNotes"),
+            createdAt = snapshot.lng("createdAt"),
+            reviewedAt = snapshot.lng("reviewedAt")
         )
     }
 
     private fun paymentRequestFrom(snapshot: DataSnapshot): PaymentRequest? {
         if (!snapshot.exists()) return null
         return PaymentRequest(
-            requestId = snapshot.child("requestId").getValue(String::class.java) ?: snapshot.key.orEmpty(),
-            userId = snapshot.child("userId").getValue(String::class.java).orEmpty(),
-            counselorKey = snapshot.child("counselorKey").getValue(String::class.java).orEmpty(),
-            counselorName = snapshot.child("counselorName").getValue(String::class.java).orEmpty(),
-            amountPkr = snapshot.child("amountPkr").getValue(String::class.java).orEmpty(),
-            accountTitle = snapshot.child("accountTitle").getValue(String::class.java).orEmpty(),
-            transactionReference = snapshot.child("transactionReference").getValue(String::class.java).orEmpty(),
-            proofUrl = snapshot.child("proofUrl").getValue(String::class.java).orEmpty(),
-            status = snapshot.child("status").getValue(String::class.java) ?: "PENDING_REVIEW",
-            reviewedBy = snapshot.child("reviewedBy").getValue(String::class.java).orEmpty(),
-            reviewNotes = snapshot.child("reviewNotes").getValue(String::class.java).orEmpty(),
-            reviewAttachmentUrl = snapshot.child("reviewAttachmentUrl").getValue(String::class.java).orEmpty(),
-            createdAt = snapshot.child("createdAt").getValue(Long::class.java) ?: 0L,
-            reviewedAt = snapshot.child("reviewedAt").getValue(Long::class.java) ?: 0L
+            requestId = snapshot.strOrNull("requestId") ?: snapshot.key.orEmpty(),
+            userId = snapshot.str("userId"),
+            counselorKey = snapshot.str("counselorKey"),
+            counselorName = snapshot.str("counselorName"),
+            amountPkr = snapshot.str("amountPkr"),
+            accountTitle = snapshot.str("accountTitle"),
+            transactionReference = snapshot.str("transactionReference"),
+            proofUrl = snapshot.str("proofUrl"),
+            status = snapshot.strOrNull("status") ?: "PENDING_REVIEW",
+            reviewedBy = snapshot.str("reviewedBy"),
+            reviewNotes = snapshot.str("reviewNotes"),
+            reviewAttachmentUrl = snapshot.str("reviewAttachmentUrl"),
+            createdAt = snapshot.lng("createdAt"),
+            reviewedAt = snapshot.lng("reviewedAt")
         )
     }
 
     private fun bugReportsFlow(
         predicate: (BugReport) -> Boolean = { true },
-    ): Flow<List<BugReport>> = callbackFlow {
-        val ref = db.getReference("bug_reports")
-        val listener = ref.addValueEventListener(object : ValueEventListener {
-            override fun onDataChange(snapshot: DataSnapshot) {
-                trySend(
-                    snapshot.children.mapNotNull(::bugReportFrom)
-                        .filter(predicate)
-                        .sortedByDescending { it.createdAt }
-                )
-            }
-
-            override fun onCancelled(error: DatabaseError) { Log.w("RealtimeDBService", "RTDB listener cancelled", error.toException()); close() }
-        })
-        awaitClose { ref.removeEventListener(listener) }
-    }
+    ): Flow<List<BugReport>> =
+        rtdbFlow(ref = { db.getReference("bug_reports") }) { snapshot ->
+            snapshot.children.mapNotNull(::bugReportFrom)
+                .filter(predicate)
+                .sortedByDescending { it.createdAt }
+        }
 
     private fun bugReportFrom(snapshot: DataSnapshot): BugReport? {
         if (!snapshot.exists()) return null
         return BugReport(
-            reportId = snapshot.child("reportId").getValue(String::class.java) ?: snapshot.key.orEmpty(),
-            userId = snapshot.child("userId").getValue(String::class.java).orEmpty(),
-            maskedEmail = snapshot.child("maskedEmail").getValue(String::class.java).orEmpty(),
-            deviceModel = snapshot.child("deviceModel").getValue(String::class.java).orEmpty(),
-            screenshotUrl = snapshot.child("screenshotUrl").getValue(String::class.java).orEmpty(),
-            description = snapshot.child("description").getValue(String::class.java).orEmpty(),
-            status = snapshot.child("status").getValue(String::class.java) ?: "OPEN",
-            createdAt = snapshot.child("createdAt").getValue(Long::class.java) ?: 0L,
-            resolvedAt = snapshot.child("resolvedAt").getValue(Long::class.java) ?: 0L,
-            resolvedBy = snapshot.child("resolvedBy").getValue(String::class.java).orEmpty(),
+            reportId = snapshot.strOrNull("reportId") ?: snapshot.key.orEmpty(),
+            userId = snapshot.str("userId"),
+            maskedEmail = snapshot.str("maskedEmail"),
+            deviceModel = snapshot.str("deviceModel"),
+            screenshotUrl = snapshot.str("screenshotUrl"),
+            description = snapshot.str("description"),
+            status = snapshot.strOrNull("status") ?: "OPEN",
+            createdAt = snapshot.lng("createdAt"),
+            resolvedAt = snapshot.lng("resolvedAt"),
+            resolvedBy = snapshot.str("resolvedBy"),
         )
     }
 
@@ -2954,45 +2529,21 @@ object RealtimeDBService {
     }
 
     private suspend fun reserveBugReportSlot(counterRef: DatabaseReference) {
-        suspendCancellableCoroutine<Unit> { continuation ->
-            var rejectedForLimit = false
-            counterRef.runTransaction(object : Transaction.Handler {
-                override fun doTransaction(currentData: MutableData): Transaction.Result {
-                    val count = currentData.getValue(Long::class.java) ?: 0L
-                    if (count >= 2L) {
-                        rejectedForLimit = true
-                        return Transaction.abort()
-                    }
-                    currentData.value = count + 1L
-                    return Transaction.success(currentData)
-                }
-
-                override fun onComplete(error: DatabaseError?, committed: Boolean, currentData: DataSnapshot?) {
-                    when {
-                        error != null -> continuation.resumeWithException(error.toException())
-                        rejectedForLimit || !committed ->
-                            continuation.resumeWithException(IllegalStateException("You can submit at most 2 bug reports in one day."))
-                        else -> continuation.resume(Unit)
-                    }
-                }
-            })
+        counterRef.awaitTransaction(
+            abortError = { IllegalStateException("You can submit at most 2 bug reports in one day.") },
+        ) { currentData ->
+            val count = currentData.getValue(Long::class.java) ?: 0L
+            if (count >= 2L) return@awaitTransaction Transaction.abort()
+            currentData.value = count + 1L
+            Transaction.success(currentData)
         }
     }
 
     private suspend fun releaseBugReportSlot(counterRef: DatabaseReference) {
-        suspendCancellableCoroutine<Unit> { continuation ->
-            counterRef.runTransaction(object : Transaction.Handler {
-                override fun doTransaction(currentData: MutableData): Transaction.Result {
-                    val count = currentData.getValue(Long::class.java) ?: 0L
-                    currentData.value = (count - 1L).coerceAtLeast(0L)
-                    return Transaction.success(currentData)
-                }
-
-                override fun onComplete(error: DatabaseError?, committed: Boolean, currentData: DataSnapshot?) {
-                    if (error != null) continuation.resumeWithException(error.toException())
-                    else continuation.resume(Unit)
-                }
-            })
+        counterRef.awaitTransaction { currentData ->
+            val count = currentData.getValue(Long::class.java) ?: 0L
+            currentData.value = (count - 1L).coerceAtLeast(0L)
+            Transaction.success(currentData)
         }
     }
 }

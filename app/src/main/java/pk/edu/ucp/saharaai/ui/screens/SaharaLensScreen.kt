@@ -127,7 +127,6 @@ fun SaharaLensScreen(
     val context = LocalContext.current
     val isDark = isSystemInDarkTheme()
     val hazeState = remember { HazeState() }
-    val blobMotion = rememberBackdropBlobMotion()
     val bgGradient = if (isDark) {
         listOf(
             SaharaStrongGreen.copy(alpha = 0.20f),
@@ -142,7 +141,6 @@ fun SaharaLensScreen(
         )
     }
     val blob1Color = SaharaStrongGreen.copy(alpha = if (isDark) 0.25f else 0.16f)
-    val blob2Color = SaharaSky.copy(alpha = if (isDark) 0.20f else 0.18f)
 
     val cameraGranted = remember {
         mutableStateOf(
@@ -171,28 +169,7 @@ fun SaharaLensScreen(
     }
 
     Box(Modifier.fillMaxSize()) {
-        Box(
-            Modifier
-                .fillMaxSize()
-                .hazeSource(state = hazeState)
-                .background(Brush.verticalGradient(bgGradient))
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(350.dp)
-                    .offset(x = (-80).dp, y = (-50).dp)
-                    .primaryBlobMotion(blobMotion)
-                    .background(Brush.radialGradient(listOf(blob1Color, Color.Transparent)))
-            )
-            Box(
-                modifier = Modifier
-                    .size(400.dp)
-                    .align(Alignment.BottomEnd)
-                    .offset(x = 100.dp, y = 50.dp)
-                    .secondaryBlobMotion(blobMotion)
-                    .background(Brush.radialGradient(listOf(blob2Color, Color.Transparent)))
-            )
-        }
+        ScreenBackdrop(hazeState, bgGradient, blob1Color)
 
         Scaffold(
             topBar = { LensTopBar(isEnglish, hazeState, onBack = { navController.popBackStack() }) },

@@ -167,23 +167,10 @@ fun AssessmentScreen(
         SaharaPeach.copy(alpha = 0.1f),
         MaterialTheme.colorScheme.background.copy(alpha = 0.2f)
     )
-    val blob1Color = SaharaStrongGreen.copy(alpha = if (isDark) 0.25f else 0.15f)
     val blob2Color = SaharaStrongGreen.copy(alpha = if (isDark) 0.2f else 0.18f)
 
-    val blobMotion = rememberBackdropBlobMotion()
-
     Box(modifier = Modifier.fillMaxSize()) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .hazeSource(state = hazeState)
-                .background(Brush.verticalGradient(bgGradient))
-        ) {
-            Box(Modifier.size(350.dp).offset((-80).dp, (-50).dp).primaryBlobMotion(blobMotion)
-                .background(Brush.radialGradient(listOf(blob1Color, Color.Transparent))))
-            Box(Modifier.size(400.dp).align(Alignment.BottomEnd).offset(100.dp, 50.dp).secondaryBlobMotion(blobMotion)
-                .background(Brush.radialGradient(listOf(blob2Color, Color.Transparent))))
-        }
+        ScreenBackdrop(hazeState, bgGradient, blob2Color = blob2Color)
 
         Scaffold(
             bottomBar = { BottomNav(navController = navController, hazeState = hazeState) },

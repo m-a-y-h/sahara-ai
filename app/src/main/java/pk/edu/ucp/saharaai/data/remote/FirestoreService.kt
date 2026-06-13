@@ -7,6 +7,7 @@ import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreSettings
 import com.google.firebase.firestore.Query
+import com.google.firebase.firestore.QuerySnapshot
 import com.google.firebase.Firebase
 import com.google.firebase.firestore.firestore
 import kotlinx.coroutines.channels.awaitClose
@@ -46,6 +47,32 @@ object FirestoreService {
     private const val COL_CONNECTIONS      = "user_connections"
     private const val COL_REPORTS          = "reports"
     private const val COL_CHAT_SESSIONS    = "chat_sessions"
+
+    private const val TAG = "FirestoreService"
+
+    // Shared body of the snapshot-listener callbackFlow blocks below; the
+    // query lambda runs at collect time, matching the inlined originals.
+    private fun <T> queryFlow(
+        logLabel: String = "Firestore listener error",
+        query: () -> Query,
+        map: (QuerySnapshot?) -> T,
+    ): Flow<T> = callbackFlow {
+        val listener = query().addSnapshotListener { snap, err ->
+            if (err != null) {
+                Log.w(TAG, logLabel, err)
+                close()
+                return@addSnapshotListener
+            }
+            trySend(map(snap))
+        }
+        awaitClose { listener.remove() }
+    }
+
+    private suspend fun createWithId(collection: String, build: (String) -> Any): String {
+        val ref = db.collection(collection).document()
+        ref.set(build(ref.id)).await()
+        return ref.id
+    }
 
     private fun hoursToSleepQuality(hours: Float): String =
         when {
@@ -91,23 +118,14 @@ object FirestoreService {
         ref.id
     }
 
-    fun getMessagesFlow(sessionId: String): Flow<List<FirestoreMessage>> = callbackFlow {
-        val listener = db.collection(COL_MESSAGES)
-            .whereEqualTo("sessionId", sessionId)
-            .orderBy("timestamp", Query.Direction.ASCENDING)
-            .addSnapshotListener { snapshot, error ->
-                if (error != null) {
-                    Log.w("FirestoreService", "messages listener error", error)
-                    close()
-                    return@addSnapshotListener
-                }
-                val messages = snapshot?.documents?.mapNotNull {
-                    it.toFirestoreMessage()
-                } ?: emptyList()
-                trySend(messages)
-            }
-        awaitClose { listener.remove() }
-    }
+    fun getMessagesFlow(sessionId: String): Flow<List<FirestoreMessage>> =
+        queryFlow(logLabel = "messages listener error", query = {
+            db.collection(COL_MESSAGES)
+                .whereEqualTo("sessionId", sessionId)
+                .orderBy("timestamp", Query.Direction.ASCENDING)
+        }) { snapshot ->
+            snapshot?.documents?.mapNotNull { it.toFirestoreMessage() } ?: emptyList()
+        }
 
     suspend fun markMessageRead(messageId: String): Result<Unit> = runCatching {
         db.collection(COL_MESSAGES)
@@ -197,25 +215,18 @@ object FirestoreService {
             .maxByOrNull { it.clientCreatedAtMillis }
     }
 
-    fun getAiChatSessionsFlow(userId: String): Flow<List<AiChatSession>> = callbackFlow {
-        val listener = db.collection(COL_CHAT_SESSIONS)
-            .whereEqualTo("type", AiChatSession.TYPE_AI)
-            .whereEqualTo("userId", userId)
-            .whereEqualTo("isDeleted", false)
-            .addSnapshotListener { snapshot, error ->
-                if (error != null) {
-                    Log.w("FirestoreService", "AI chat sessions listener error", error)
-                    close()
-                    return@addSnapshotListener
-                }
-                val sessions = snapshot?.documents
-                    ?.mapNotNull { it.toAiChatSession() }
-                    ?.sortedByDescending { it.clientCreatedAtMillis }
-                    .orEmpty()
-                trySend(sessions)
-            }
-        awaitClose { listener.remove() }
-    }
+    fun getAiChatSessionsFlow(userId: String): Flow<List<AiChatSession>> =
+        queryFlow(logLabel = "AI chat sessions listener error", query = {
+            db.collection(COL_CHAT_SESSIONS)
+                .whereEqualTo("type", AiChatSession.TYPE_AI)
+                .whereEqualTo("userId", userId)
+                .whereEqualTo("isDeleted", false)
+        }) { snapshot ->
+            snapshot?.documents
+                ?.mapNotNull { it.toAiChatSession() }
+                ?.sortedByDescending { it.clientCreatedAtMillis }
+                .orEmpty()
+        }
 
     suspend fun getAiChatSessionsOnce(userId: String): Result<List<AiChatSession>> = runCatching {
         db.collection(COL_CHAT_SESSIONS)
@@ -418,15 +429,10 @@ object FirestoreService {
             .toObjects(CounselorProfile::class.java)
     }
 
-    fun getCounselorsByNgoFlow(ngoId: String): Flow<List<CounselorProfile>> = callbackFlow {
-        val listener = db.collection(COL_COUNSELORS)
-            .whereEqualTo("ngoId", ngoId)
-            .addSnapshotListener { snap, err ->
-                if (err != null) { Log.w("FirestoreService", "Firestore listener error", err); close(); return@addSnapshotListener }
-                trySend(snap?.toObjects(CounselorProfile::class.java) ?: emptyList())
-            }
-        awaitClose { listener.remove() }
-    }
+    fun getCounselorsByNgoFlow(ngoId: String): Flow<List<CounselorProfile>> =
+        queryFlow(query = { db.collection(COL_COUNSELORS).whereEqualTo("ngoId", ngoId) }) { snap ->
+            snap?.toObjects(CounselorProfile::class.java) ?: emptyList()
+        }
 
     suspend fun getCounselorByUserId(userId: String): Result<CounselorProfile?> = runCatching {
         val snap = db.collection(COL_COUNSELORS)
@@ -461,17 +467,12 @@ object FirestoreService {
         )).await()
     }
 
-    fun getCounselorChatsFlow(counselorId: String): Flow<List<Map<String, Any>>> = callbackFlow {
-        val listener = db.collection(COL_CHAT_SESSIONS)
-            .whereEqualTo("counselorId", counselorId)
-            .orderBy("lastMessageAt", Query.Direction.DESCENDING)
-            .addSnapshotListener { snap, err ->
-                if (err != null) { Log.w("FirestoreService", "Firestore listener error", err); close(); return@addSnapshotListener }
-                val list = snap?.documents?.mapNotNull { it.data } ?: emptyList()
-                trySend(list)
-            }
-        awaitClose { listener.remove() }
-    }
+    fun getCounselorChatsFlow(counselorId: String): Flow<List<Map<String, Any>>> =
+        queryFlow(query = {
+            db.collection(COL_CHAT_SESSIONS)
+                .whereEqualTo("counselorId", counselorId)
+                .orderBy("lastMessageAt", Query.Direction.DESCENDING)
+        }) { snap -> snap?.documents?.mapNotNull { it.data } ?: emptyList() }
 
     suspend fun getNgoStats(ngoId: String): Result<NgoStats?> = runCatching {
         db.collection(COL_NGOS)
@@ -488,21 +489,8 @@ object FirestoreService {
             .await()
     }
 
-    fun getNgoStatsFlow(ngoId: String): Flow<NgoStats?> = callbackFlow {
-        val listener = db.collection(COL_NGOS)
-            .document(ngoId)
-            .addSnapshotListener { snap, err ->
-                if (err != null) { Log.w("FirestoreService", "Firestore listener error", err); close(); return@addSnapshotListener }
-                trySend(snap?.toObject(NgoStats::class.java))
-            }
-        awaitClose { listener.remove() }
-    }
-
     suspend fun saveNotification(notif: AppNotification): Result<String> = runCatching {
-        val ref = db.collection(COL_NOTIFICATIONS).document()
-        val withId = notif.copy(notificationId = ref.id)
-        ref.set(withId).await()
-        ref.id
+        createWithId(COL_NOTIFICATIONS) { notif.copy(notificationId = it) }
     }
 
     suspend fun getNotifications(userId: String): Result<List<AppNotification>> = runCatching {
@@ -514,16 +502,12 @@ object FirestoreService {
             .toObjects(AppNotification::class.java)
     }
 
-    fun getNotificationsFlow(userId: String): Flow<List<AppNotification>> = callbackFlow {
-        val listener = db.collection(COL_NOTIFICATIONS)
-            .whereEqualTo("userId", userId)
-            .orderBy("timestamp", Query.Direction.DESCENDING)
-            .addSnapshotListener { snap, err ->
-                if (err != null) { Log.w("FirestoreService", "Firestore listener error", err); close(); return@addSnapshotListener }
-                trySend(snap?.toObjects(AppNotification::class.java) ?: emptyList())
-            }
-        awaitClose { listener.remove() }
-    }
+    fun getNotificationsFlow(userId: String): Flow<List<AppNotification>> =
+        queryFlow(query = {
+            db.collection(COL_NOTIFICATIONS)
+                .whereEqualTo("userId", userId)
+                .orderBy("timestamp", Query.Direction.DESCENDING)
+        }) { snap -> snap?.toObjects(AppNotification::class.java) ?: emptyList() }
 
     suspend fun markNotificationRead(notifId: String): Result<Unit> = runCatching {
         db.collection(COL_NOTIFICATIONS)
@@ -546,10 +530,7 @@ object FirestoreService {
     }
 
     suspend fun createEmergencyAlert(alert: EmergencyAlert): Result<String> = runCatching {
-        val ref = db.collection(COL_EMERGENCY_ALERTS).document()
-        val withId = alert.copy(alertId = ref.id)
-        ref.set(withId).await()
-        ref.id
+        createWithId(COL_EMERGENCY_ALERTS) { alert.copy(alertId = it) }
     }
 
     suspend fun getOpenAlerts(ngoId: String): Result<List<EmergencyAlert>> = runCatching {
@@ -562,16 +543,12 @@ object FirestoreService {
             .toObjects(EmergencyAlert::class.java)
     }
 
-    fun getAlertsFlow(ngoId: String): Flow<List<EmergencyAlert>> = callbackFlow {
-        val listener = db.collection(COL_EMERGENCY_ALERTS)
-            .whereEqualTo("ngoId", ngoId)
-            .orderBy("createdAt", Query.Direction.DESCENDING)
-            .addSnapshotListener { snap, err ->
-                if (err != null) { Log.w("FirestoreService", "Firestore listener error", err); close(); return@addSnapshotListener }
-                trySend(snap?.toObjects(EmergencyAlert::class.java) ?: emptyList())
-            }
-        awaitClose { listener.remove() }
-    }
+    fun getAlertsFlow(ngoId: String): Flow<List<EmergencyAlert>> =
+        queryFlow(query = {
+            db.collection(COL_EMERGENCY_ALERTS)
+                .whereEqualTo("ngoId", ngoId)
+                .orderBy("createdAt", Query.Direction.DESCENDING)
+        }) { snap -> snap?.toObjects(EmergencyAlert::class.java) ?: emptyList() }
 
     suspend fun updateAlertStatus(
         alertId: String,
@@ -588,10 +565,7 @@ object FirestoreService {
     }
 
     suspend fun createCommunityPost(post: CommunityPost): Result<String> = runCatching {
-        val ref = db.collection(COL_COMMUNITY_POSTS).document()
-        val withId = post.copy(postId = ref.id)
-        ref.set(withId).await()
-        ref.id
+        createWithId(COL_COMMUNITY_POSTS) { post.copy(postId = it) }
     }
 
     suspend fun getCommunityPosts(): Result<List<CommunityPost>> = runCatching {
@@ -604,19 +578,14 @@ object FirestoreService {
             .filter { !it.isFlagged }
     }
 
-    fun getCommunityPostsFlow(): Flow<List<CommunityPost>> = callbackFlow {
-        val listener = db.collection(COL_COMMUNITY_POSTS)
-            .orderBy("createdAt", Query.Direction.DESCENDING)
-            .limit(50)
-            .addSnapshotListener { snap, err ->
-                if (err != null) { Log.w("FirestoreService", "Firestore listener error", err); close(); return@addSnapshotListener }
-                val posts = snap?.toObjects(CommunityPost::class.java)
-                    ?.filter { !it.isFlagged }
-                    ?: emptyList()
-                trySend(posts)
-            }
-        awaitClose { listener.remove() }
-    }
+    fun getCommunityPostsFlow(): Flow<List<CommunityPost>> =
+        queryFlow(query = {
+            db.collection(COL_COMMUNITY_POSTS)
+                .orderBy("createdAt", Query.Direction.DESCENDING)
+                .limit(50)
+        }) { snap ->
+            snap?.toObjects(CommunityPost::class.java)?.filter { !it.isFlagged } ?: emptyList()
+        }
 
     suspend fun toggleLikePost(postId: String, increment: Boolean): Result<Unit> = runCatching {
         val ref = db.collection(COL_COMMUNITY_POSTS).document(postId)
@@ -639,10 +608,7 @@ object FirestoreService {
     }
 
     suspend fun sendConnectionRequest(connection: UserConnection): Result<String> = runCatching {
-        val ref = db.collection(COL_CONNECTIONS).document()
-        val withId = connection.copy(connectionId = ref.id)
-        ref.set(withId).await()
-        ref.id
+        createWithId(COL_CONNECTIONS) { connection.copy(connectionId = it) }
     }
 
     suspend fun getAcceptedConnections(userId: String): Result<List<UserConnection>> = runCatching {
@@ -699,10 +665,7 @@ object FirestoreService {
     }
 
     suspend fun submitReport(report: ModerationReport): Result<String> = runCatching {
-        val ref = db.collection(COL_REPORTS).document()
-        val withId = report.copy(reportId = ref.id)
-        ref.set(withId).await()
-        ref.id
+        createWithId(COL_REPORTS) { report.copy(reportId = it) }
     }
 
     suspend fun getOpenReports(): Result<List<ModerationReport>> = runCatching {

@@ -51,14 +51,6 @@ fun ActivityLogScreen(
     val hazeState    = remember { HazeState() }
     val context      = LocalContext.current
 
-    val bgGradient = if (isDark)
-        listOf(SaharaStrongGreen.copy(.2f), MaterialTheme.colorScheme.background.copy(.6f), MaterialTheme.colorScheme.background)
-    else
-        listOf(SaharaStrongGreen.copy(.25f), SaharaPeach.copy(.1f), MaterialTheme.colorScheme.background.copy(.2f))
-
-    val blobMotion = rememberBackdropBlobMotion()
-
-    
     val weekStart = remember {
         Calendar.getInstance().apply {
             set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0)
@@ -82,12 +74,7 @@ fun ActivityLogScreen(
 
     
     Box(Modifier.fillMaxSize()) {
-        Box(Modifier.fillMaxSize().hazeSource(hazeState).background(Brush.verticalGradient(bgGradient))) {
-            Box(Modifier.size(350.dp).offset((-80).dp, (-50).dp).primaryBlobMotion(blobMotion)
-                .background(Brush.radialGradient(listOf(SaharaStrongGreen.copy(if (isDark) .25f else .15f), Color.Transparent))))
-            Box(Modifier.size(400.dp).align(Alignment.BottomEnd).offset(100.dp, 50.dp).secondaryBlobMotion(blobMotion)
-                .background(Brush.radialGradient(listOf(SaharaSky.copy(if (isDark) .2f else .18f), Color.Transparent))))
-        }
+        ScreenBackdrop(hazeState)
 
         Scaffold(
             bottomBar = { BottomNav(navController = navController, hazeState = hazeState) },

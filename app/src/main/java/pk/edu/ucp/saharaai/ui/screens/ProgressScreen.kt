@@ -126,20 +126,24 @@ fun ProgressScreenContent(
         MaterialTheme.colorScheme.background.copy(alpha = 0.4f)
     )
 
-    val blobMotion = rememberBackdropBlobMotion()
-
     Box(modifier = Modifier.fillMaxSize()) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .hazeSource(state = hazeState)
-                .background(Brush.verticalGradient(bgGradient))
-        ) {
-            Box(Modifier.size(450.dp).offset((-120).dp, (-80).dp).primaryBlobMotion(blobMotion)
-                .background(Brush.radialGradient(listOf(SaharaWarning.copy(alpha = if (isDark) 0.15f else 0.12f), Color.Transparent))))
-            Box(Modifier.size(500.dp).align(Alignment.BottomEnd).offset(150.dp, 100.dp).secondaryBlobMotion(blobMotion)
-                .background(Brush.radialGradient(listOf(SaharaStrongGreen.copy(alpha = if (isDark) 0.15f else 0.15f), Color.Transparent))))
-        }
+        ScreenBackdrop(
+            hazeState = hazeState,
+            bgGradient = bgGradient,
+            primaryBlob = BackdropBlobSpec(
+                size = 450.dp,
+                offsetX = (-120).dp,
+                offsetY = (-80).dp,
+                color = SaharaWarning.copy(alpha = if (isDark) 0.15f else 0.12f),
+            ),
+            secondaryBlob = BackdropBlobSpec(
+                size = 500.dp,
+                offsetX = 150.dp,
+                offsetY = 100.dp,
+                color = SaharaStrongGreen.copy(alpha = 0.15f),
+                alignment = Alignment.BottomEnd,
+            ),
+        )
 
         Scaffold(
         bottomBar        = { BottomNav(navController = navController, hazeState = hazeState) },

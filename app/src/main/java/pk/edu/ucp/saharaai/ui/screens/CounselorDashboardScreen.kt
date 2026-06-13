@@ -146,8 +146,6 @@ fun CounselorDashboardScreen(
         openAlerts.map { it.toRiskAlert() }
     }
 
-    val blobMotion = rememberBackdropBlobMotion()
-
     val pagerState = rememberPagerState(pageCount = { 3 })
     val isRefreshing by dashboardViewModel.isRefreshing.collectAsState()
 
@@ -169,36 +167,25 @@ fun CounselorDashboardScreen(
 
     Box(modifier = Modifier.fillMaxSize()) {
 
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .hazeSource(bgHazeState)
-                .background(Brush.verticalGradient(bgGradient)),
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(350.dp)
-                    .offset(x = (-50).dp, y = (-100).dp)
-                    .primaryBlobMotion(blobMotion)
-                    .background(
-                        if (isDark) SaharaCoral.copy(0.15f) else SaharaCoral.copy(0.2f),
-                        CircleShape,
-                    )
-                    .blur(100.dp),
-            )
-            Box(
-                modifier = Modifier
-                    .size(400.dp)
-                    .align(Alignment.BottomEnd)
-                    .offset(x = 50.dp, y = 150.dp)
-                    .secondaryBlobMotion(blobMotion)
-                    .background(
-                        if (isDark) SaharaSky.copy(0.15f) else SaharaSky.copy(0.25f),
-                        CircleShape,
-                    )
-                    .blur(120.dp),
-            )
-        }
+        ScreenBackdrop(
+            hazeState = bgHazeState,
+            bgGradient = bgGradient,
+            primaryBlob = BackdropBlobSpec(
+                size = 350.dp,
+                offsetX = (-50).dp,
+                offsetY = (-100).dp,
+                color = if (isDark) SaharaCoral.copy(0.15f) else SaharaCoral.copy(0.2f),
+                blurRadius = 100.dp,
+            ),
+            secondaryBlob = BackdropBlobSpec(
+                size = 400.dp,
+                offsetX = 50.dp,
+                offsetY = 150.dp,
+                color = if (isDark) SaharaSky.copy(0.15f) else SaharaSky.copy(0.25f),
+                alignment = Alignment.BottomEnd,
+                blurRadius = 120.dp,
+            ),
+        )
 
         PullToRefreshBox(
             isRefreshing = isRefreshing,

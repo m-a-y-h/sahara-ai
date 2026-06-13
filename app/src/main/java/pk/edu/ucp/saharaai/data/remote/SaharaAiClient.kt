@@ -17,7 +17,7 @@ object SaharaAiClient {
 
     private val gson = Gson()
 
-    /** One turn of conversation history used by Gemini chat and legacy service clients. */
+    /** One turn of conversation history used by chat clients. */
     data class HistoryTurn(
         @SerializedName("role")         val role: String,         // "user" | "assistant"
         @SerializedName("content")      val content: String,
@@ -36,16 +36,6 @@ object SaharaAiClient {
          *  to the prompt as "Earlier context summaries" so continuity is
          *  preserved past the live-history window. */
         @SerializedName("prior_summaries")  val priorSummaries: List<String> = emptyList(),
-    )
-
-    data class SummarizeRequest(
-        /** Full 16-message batch (8 user + 8 assistant) to compress, oldest-first. */
-        @SerializedName("messages") val messages: List<HistoryTurn>,
-        @SerializedName("language") val language: String? = null,
-    )
-
-    data class SummarizeResponse(
-        @SerializedName("summary") val summary: String? = null,
     )
 
     data class ChatResponse(
@@ -86,32 +76,6 @@ object SaharaAiClient {
         )
         return postJson(endpoint = trimmedEndpoint, body = gson.toJson(request))
             .mapCatching { parseResponse<ChatResponse>(it) }
-    }
-
-    /**
-     * Legacy service summarization endpoint. Live app summarization now uses
-     * [pk.edu.ucp.saharaai.data.repository.GeminiChatService] directly.
-     */
-    suspend fun postSummarize(
-        chatEndpoint: String,
-        messages: List<HistoryTurn>,
-        language: String?,
-    ): Result<String> {
-        val summarizeUrl = chatEndpoint.trim().let { base ->
-            if (base.endsWith("/v1/chat")) base.removeSuffix("/v1/chat") + "/v1/summarize"
-            else if (base.endsWith("/v1/chat/")) base.removeSuffix("/v1/chat/") + "/v1/summarize"
-            else base.trimEnd('/') + "/v1/summarize"
-        }
-        if (messages.isEmpty()) {
-            return Result.failure(IllegalArgumentException("nothing to summarize"))
-        }
-        val request = SummarizeRequest(messages = messages, language = language)
-        return postJson(endpoint = summarizeUrl, body = gson.toJson(request))
-            .mapCatching { parseResponse<SummarizeResponse>(it).summary.orEmpty().trim() }
-            .mapCatching { summary ->
-                if (summary.isBlank()) throw IOException("Sahara AI returned an empty summary")
-                summary
-            }
     }
 
     private suspend fun postJson(endpoint: String, body: String): Result<String> {

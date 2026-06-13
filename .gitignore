@@ -58,6 +58,7 @@ Thumbs.db
 *.swp
 *.swo
 *~
+.claude/
 
 # NOTE: no blanket "!*.ext" re-includes here. A `!*.properties` line previously
 # un-ignored local.properties (a secret) because a later negation overrides the

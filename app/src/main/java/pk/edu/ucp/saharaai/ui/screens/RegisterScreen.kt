@@ -97,14 +97,6 @@ fun RegisterScreen(
     val context = LocalContext.current
     val primaryGreen = if (isDark) SaharaStrongGreen else SaharaGreen
 
-    val bgGradient = if (isDark) {
-        listOf(SaharaStrongGreen.copy(alpha = 0.2f), MaterialTheme.colorScheme.background.copy(alpha = 0.6f), MaterialTheme.colorScheme.background)
-    } else {
-        listOf(SaharaStrongGreen.copy(alpha = 0.25f), SaharaPeach.copy(alpha = 0.1f), MaterialTheme.colorScheme.background.copy(alpha = 0.2f))
-    }
-    val blob1Color = SaharaStrongGreen.copy(alpha = if (isDark) 0.25f else 0.15f)
-    val blob2Color = SaharaSky.copy(alpha = if (isDark) 0.2f else 0.18f)
-
     var name by remember { mutableStateOf("") }
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
@@ -131,8 +123,6 @@ fun RegisterScreen(
 
     val isFormValid = isValidName(name) && isValidEmail(email) && isPasswordValid && (password == confirmPassword) && isAccepted
 
-    val blobMotion = rememberBackdropBlobMotion()
-
     Box(modifier = Modifier.fillMaxSize()) {
 
         Box(
@@ -140,15 +130,7 @@ fun RegisterScreen(
                 .fillMaxSize()
                 .hazeSource(state = rootHazeState)
         ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .hazeSource(state = bgHazeState)
-                    .background(Brush.verticalGradient(bgGradient))
-            ) {
-                Box(modifier = Modifier.size(350.dp).offset(x = (-80).dp, y = (-50).dp).primaryBlobMotion(blobMotion).background(Brush.radialGradient(listOf(blob1Color, Color.Transparent))))
-                Box(modifier = Modifier.size(400.dp).align(Alignment.BottomEnd).offset(x = 100.dp, y = 50.dp).secondaryBlobMotion(blobMotion).background(Brush.radialGradient(listOf(blob2Color, Color.Transparent))))
-            }
+            ScreenBackdrop(bgHazeState)
 
             Column(
                 modifier = Modifier

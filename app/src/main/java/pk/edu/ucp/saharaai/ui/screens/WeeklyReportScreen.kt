@@ -115,7 +115,6 @@ fun WeeklyReportScreen(
 
     val hazeState = remember { HazeState() }
     val isDark = isSystemInDarkTheme()
-    val blobMotion = rememberBackdropBlobMotion()
     val bgGradient = if (isDark) {
         listOf(
             SaharaStrongGreen.copy(alpha = 0.20f),
@@ -133,28 +132,18 @@ fun WeeklyReportScreen(
     val blob2Color = SaharaSky.copy(alpha = if (isDark) 0.20f else 0.18f)
 
     Box(Modifier.fillMaxSize()) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .hazeSource(hazeState)
-                .background(Brush.verticalGradient(bgGradient)),
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(350.dp)
-                    .offset(x = (-80).dp, y = (-50).dp)
-                    .primaryBlobMotion(blobMotion)
-                    .background(Brush.radialGradient(listOf(blob1Color, Color.Transparent))),
-            )
-            Box(
-                modifier = Modifier
-                    .size(420.dp)
-                    .align(Alignment.BottomEnd)
-                    .offset(x = 110.dp, y = 60.dp)
-                    .secondaryBlobMotion(blobMotion)
-                    .background(Brush.radialGradient(listOf(blob2Color, Color.Transparent))),
-            )
-        }
+        ScreenBackdrop(
+            hazeState = hazeState,
+            bgGradient = bgGradient,
+            blob1Color = blob1Color,
+            secondaryBlob = BackdropBlobSpec(
+                size = 420.dp,
+                offsetX = 110.dp,
+                offsetY = 60.dp,
+                color = blob2Color,
+                alignment = Alignment.BottomEnd,
+            ),
+        )
 
         Scaffold(
             bottomBar = { BottomNav(navController = navController, hazeState = hazeState) },

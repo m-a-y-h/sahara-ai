@@ -85,9 +85,6 @@ fun CommunityScreen(
     else
         listOf(SaharaLavender.copy(0.28f), SaharaSkyLight.copy(0.12f), MaterialTheme.colorScheme.background.copy(0.2f))
 
-    val blobMotion = rememberBackdropBlobMotion()
-
-    
     val uid             = communityViewModel.uid
     val posts           by communityViewModel.posts.collectAsState()
     val likedPostIds    by communityViewModel.likedPostIds.collectAsState()
@@ -109,18 +106,17 @@ fun CommunityScreen(
 
     
     Box(modifier = Modifier.fillMaxSize()) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .hazeSource(state = hazeState)
-                .background(Brush.verticalGradient(bgGradient))
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(300.dp).offset(x = 200.dp, y = (-100).dp).primaryBlobMotion(blobMotion)
-                    .background(Brush.radialGradient(listOf(SaharaLavender.copy(0.2f), Color.Transparent)))
-            )
-        }
+        ScreenBackdrop(
+            hazeState = hazeState,
+            bgGradient = bgGradient,
+            primaryBlob = BackdropBlobSpec(
+                size = 300.dp,
+                offsetX = 200.dp,
+                offsetY = (-100).dp,
+                color = SaharaLavender.copy(0.2f),
+            ),
+            secondaryBlob = null,
+        )
 
         Scaffold(
             bottomBar    = { BottomNav(navController = navController, hazeState = hazeState) },

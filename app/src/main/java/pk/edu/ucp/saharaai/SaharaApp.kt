@@ -688,21 +688,6 @@ fun SaharaApp() {
                 }
             }
 
-            // Legacy `mood-patterns` route: the standalone screen was retired
-            // and its mood-tracking surface moved into JournalScreen. We keep
-            // the route as a redirect so anything that still calls
-            // navigate("mood-patterns") (deep links, bookmarks) lands on the
-            // unified journal experience. Remove this block once nothing in
-            // the codebase references the old name.
-            composable("mood-patterns") {
-                RequireCurrentAssessment {
-                    JournalScreen(
-                        navController = navController,
-                        isEnglish     = isEnglish
-                    )
-                }
-            }
-
             composable("progress") {
                 ProgressScreen(
                     navController = navController,

@@ -187,17 +187,6 @@ class CounselorDashboardViewModel : ViewModel() {
         }
     }
 
-    /** Legacy direct online toggle. Kept for back-compat with older callers
-     *  (e.g. fallback admin flows). New screens should use [toggleInvisible]
-     *  and rely on [attachPresence] for online state. */
-    fun toggleOnlineStatus(key: String) {
-        val newStatus = !_isOnline.value
-        _isOnline.value = newStatus
-        viewModelScope.launch {
-            RealtimeDBService.setOnlineStatus(key, newStatus)
-        }
-    }
-
     fun setCallAvailability(key: String, enabled: Boolean) {
         _callEnabled.value = enabled
         viewModelScope.launch {

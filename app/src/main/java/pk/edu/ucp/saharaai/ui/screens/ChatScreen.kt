@@ -445,16 +445,6 @@ private fun ChatConversationScreen(
             }
         }
     }
-    LaunchedEffect(chatViewModel) {
-        chatViewModel.voiceNoteEvents.collect { event ->
-            isTyping = false
-            event.analyzedBubbleText?.let { text ->
-                val index = transientMessages.indexOfFirst { it.id == event.bubbleId }
-                if (index >= 0) transientMessages[index] = transientMessages[index].copy(text = text)
-            }
-            transientMessages.add(ChatMessage(text = event.replyText, isBot = true))
-        }
-    }
     LaunchedEffect(chatUiState) {
         val error = chatUiState as? ChatUiState.Error ?: return@LaunchedEffect
         isTyping = false
@@ -477,7 +467,6 @@ private fun ChatConversationScreen(
             }
         }
     }
-    val blobMotion = rememberBackdropBlobMotion()
     val handleSendMessage: (String) -> Unit = { text ->
         val trimmed = text.trim()
         if (trimmed.isNotBlank()) {
@@ -526,36 +515,16 @@ private fun ChatConversationScreen(
         }
     }
     Box(modifier = Modifier.fillMaxSize()) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .hazeSource(state = hazeState)
-                .background(
-                    Brush.verticalGradient(
-                        listOf(
-                            SaharaStrongGreen.copy(alpha = if (isDark) 0.15f else 0.1f),
-                            MaterialTheme.colorScheme.background.copy(alpha = 0.8f),
-                            MaterialTheme.colorScheme.background
-                        )
-                    )
-                )
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(350.dp)
-                    .offset(x = (-80).dp, y = (-50).dp)
-                    .primaryBlobMotion(blobMotion)
-                    .background(Brush.radialGradient(listOf(SaharaStrongGreen.copy(alpha = 0.15f), Color.Transparent)))
-            )
-            Box(
-                modifier = Modifier
-                    .size(400.dp)
-                    .align(Alignment.BottomEnd)
-                    .offset(x = 100.dp, y = 50.dp)
-                    .secondaryBlobMotion(blobMotion)
-                    .background(Brush.radialGradient(listOf(SaharaSky.copy(alpha = 0.15f), Color.Transparent)))
-            )
-        }
+        ScreenBackdrop(
+            hazeState = hazeState,
+            bgGradient = listOf(
+                SaharaStrongGreen.copy(alpha = if (isDark) 0.15f else 0.1f),
+                MaterialTheme.colorScheme.background.copy(alpha = 0.8f),
+                MaterialTheme.colorScheme.background,
+            ),
+            blob1Color = SaharaStrongGreen.copy(alpha = 0.15f),
+            blob2Color = SaharaSky.copy(alpha = 0.15f),
+        )
 
         Scaffold(
             bottomBar = { BottomNav(navController = navController, hazeState = hazeState) },
@@ -842,7 +811,6 @@ private fun CounselorFrameOverview(
 ) {
     val isDark = isSystemInDarkTheme()
     val hazeState = remember { HazeState() }
-    val blobMotion = rememberBackdropBlobMotion()
     var sessions by remember { mutableStateOf<List<Map<String, Any>>>(emptyList()) }
     var isLoadingSessions by remember { mutableStateOf(true) }
 
@@ -859,36 +827,27 @@ private fun CounselorFrameOverview(
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .hazeSource(state = hazeState)
-                .background(
-                    Brush.verticalGradient(
-                        listOf(
-                            SaharaSky.copy(alpha = if (isDark) 0.18f else 0.12f),
-                            MaterialTheme.colorScheme.background.copy(alpha = 0.8f),
-                            MaterialTheme.colorScheme.background,
-                        )
-                    )
-                )
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(320.dp)
-                    .offset(x = (-90).dp, y = (-40).dp)
-                    .primaryBlobMotion(blobMotion)
-                    .background(Brush.radialGradient(listOf(SaharaSky.copy(alpha = 0.16f), Color.Transparent)))
-            )
-            Box(
-                modifier = Modifier
-                    .size(380.dp)
-                    .align(Alignment.BottomEnd)
-                    .offset(x = 120.dp, y = 60.dp)
-                    .secondaryBlobMotion(blobMotion)
-                    .background(Brush.radialGradient(listOf(SaharaStrongGreen.copy(alpha = 0.14f), Color.Transparent)))
-            )
-        }
+        ScreenBackdrop(
+            hazeState = hazeState,
+            bgGradient = listOf(
+                SaharaSky.copy(alpha = if (isDark) 0.18f else 0.12f),
+                MaterialTheme.colorScheme.background.copy(alpha = 0.8f),
+                MaterialTheme.colorScheme.background,
+            ),
+            primaryBlob = BackdropBlobSpec(
+                size = 320.dp,
+                offsetX = (-90).dp,
+                offsetY = (-40).dp,
+                color = SaharaSky.copy(alpha = 0.16f),
+            ),
+            secondaryBlob = BackdropBlobSpec(
+                size = 380.dp,
+                offsetX = 120.dp,
+                offsetY = 60.dp,
+                color = SaharaStrongGreen.copy(alpha = 0.14f),
+                alignment = Alignment.BottomEnd,
+            ),
+        )
 
         Scaffold(
             bottomBar = { BottomNav(navController = navController, hazeState = hazeState) },

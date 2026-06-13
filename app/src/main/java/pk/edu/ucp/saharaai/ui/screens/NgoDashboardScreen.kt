@@ -84,9 +84,6 @@ fun NgoDashboardScreen(
         offlinePct to SaharaCoral
     )
 
-    
-    val blobMotion = rememberBackdropBlobMotion()
-
     // SAF-backed CSV export. The Uri is whatever the user picks in the system
     // file-picker (Downloads, Drive, etc.); we write the snapshot of the
     // dashboard's current totals + regional risk + counselor table to it.
@@ -132,33 +129,9 @@ fun NgoDashboardScreen(
             MaterialTheme.colorScheme.background.copy(alpha = 0.2f),
         )
     }
-    val blob1Color = SaharaStrongGreen.copy(alpha = if (isDark) 0.25f else 0.15f)
-    val blob2Color = SaharaSky.copy(alpha = if (isDark) 0.20f else 0.18f)
-
     Box(modifier = Modifier.fillMaxSize()) {
 
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .hazeSource(bgHazeState)
-                .background(Brush.verticalGradient(bgGradient))
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(350.dp)
-                    .offset(x = (-80).dp, y = (-50).dp)
-                    .primaryBlobMotion(blobMotion)
-                    .background(androidx.compose.ui.graphics.Brush.radialGradient(listOf(blob1Color, Color.Transparent)))
-            )
-            Box(
-                modifier = Modifier
-                    .size(400.dp)
-                    .align(Alignment.BottomEnd)
-                    .offset(x = 100.dp, y = 50.dp)
-                    .secondaryBlobMotion(blobMotion)
-                    .background(androidx.compose.ui.graphics.Brush.radialGradient(listOf(blob2Color, Color.Transparent)))
-            )
-        }
+        ScreenBackdrop(bgHazeState, bgGradient)
 
         PullToRefreshBox(
             isRefreshing = isRefreshing,

@@ -46,15 +46,21 @@ object RiskProfileRepository {
 
     private fun requireUid(): String? = auth.currentUser?.uid
 
+    private inline fun <T> withUid(block: (String) -> T): Result<T> {
+        val uid = requireUid() ?: return Result.failure(IllegalStateException("not signed in"))
+        return runCatching { block(uid) }
+    }
+
+    private fun userDoc(uid: String) = firestore.collection("users").document(uid)
+
     private fun isoUtc(ms: Long): String {
         val formatter = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", Locale.US)
         formatter.timeZone = TimeZone.getTimeZone("UTC")
         return formatter.format(Date(ms))
     }
 
-    suspend fun registerAssessmentCycle(dastScore: Int, completedAtMs: Long): Result<Unit> {
-        val uid = requireUid() ?: return Result.failure(IllegalStateException("not signed in"))
-        return runCatching {
+    suspend fun registerAssessmentCycle(dastScore: Int, completedAtMs: Long): Result<Unit> =
+        withUid { uid ->
             val cleanScore = dastScore.coerceIn(0, 10)
             val initialRisk = riskFromDast[cleanScore] ?: 0.05
             val completedAt = completedAtMs.takeIf { it > 0L } ?: System.currentTimeMillis()
@@ -71,7 +77,7 @@ object RiskProfileRepository {
             val historyDocId = completedAt.toString()
             val cycleDocId = startsAt.toString()
 
-            val userRef = firestore.collection("users").document(uid)
+            val userRef = userDoc(uid)
             val batch = firestore.batch()
             batch.set(
                 userRef.collection("monitoring").document("active"),
@@ -151,122 +157,77 @@ object RiskProfileRepository {
             batch.commit().await()
             Unit
         }.onFailure { android.util.Log.e("RiskProfileRepo", "registerAssessmentCycle failed", it) }
+
+    suspend fun loadProfile(): Result<RiskProfile?> = withUid { uid ->
+        val snap = userDoc(uid).collection("risk_profile").document("current").get().await()
+        snap.data?.let { RiskProfile.fromFirestore(uid, it) }
     }
 
-    suspend fun loadProfile(): Result<RiskProfile?> {
-        val uid = requireUid() ?: return Result.failure(IllegalStateException("not signed in"))
-        return runCatching {
-            val snap = firestore
-                .collection("users").document(uid)
-                .collection("risk_profile").document("current")
-                .get().await()
-            snap.data?.let { RiskProfile.fromFirestore(uid, it) }
-        }
+    suspend fun loadMonitoringPeriod(): Result<MonitoringPeriod?> = withUid { uid ->
+        val snap = userDoc(uid).collection("monitoring").document("active").get().await()
+        snap.data?.let { MonitoringPeriod.fromFirestore(uid, it) }
     }
 
-    suspend fun loadMonitoringPeriod(): Result<MonitoringPeriod?> {
-        val uid = requireUid() ?: return Result.failure(IllegalStateException("not signed in"))
-        return runCatching {
-            val snap = firestore
-                .collection("users").document(uid)
-                .collection("monitoring").document("active")
-                .get().await()
-            snap.data?.let { MonitoringPeriod.fromFirestore(uid, it) }
-        }
+    suspend fun loadAssessmentCycleStatus(): Result<AssessmentCycleStatus?> = withUid { uid ->
+        val snap = userDoc(uid).collection("lifecycle").document("current").get().await()
+        snap.data?.let { AssessmentCycleStatus.fromFirestore(it) }
     }
 
-    suspend fun loadAssessmentCycleStatus(): Result<AssessmentCycleStatus?> {
-        val uid = requireUid() ?: return Result.failure(IllegalStateException("not signed in"))
-        return runCatching {
-            val snap = firestore
-                .collection("users").document(uid)
-                .collection("lifecycle").document("current")
-                .get().await()
-            snap.data?.let { AssessmentCycleStatus.fromFirestore(it) }
-        }
+    suspend fun loadPendingCumulativeReport(): Result<CumulativeRiskReport?> = withUid { uid ->
+        val snap = userDoc(uid).collection("cumulative_reports")
+            .orderBy("generated_at", Query.Direction.DESCENDING)
+            .limit(1)
+            .get().await()
+        val data = snap.documents.firstOrNull()?.data ?: return@withUid null
+        val report = CumulativeRiskReport.fromFirestore(uid, data)
+        if (report.acknowledged) null else report
     }
 
-    suspend fun loadPendingCumulativeReport(): Result<CumulativeRiskReport?> {
-        val uid = requireUid() ?: return Result.failure(IllegalStateException("not signed in"))
-        return runCatching {
-            val snap = firestore
-                .collection("users").document(uid)
-                .collection("cumulative_reports")
-                .orderBy("generated_at", Query.Direction.DESCENDING)
-                .limit(1)
-                .get().await()
-            val doc = snap.documents.firstOrNull() ?: return@runCatching null
-            val data = doc.data ?: return@runCatching null
-            val report = CumulativeRiskReport.fromFirestore(uid, data)
-            if (report.acknowledged) null else report
-        }
-    }
-
-    suspend fun markCumulativeReportAcknowledged(cycleId: String): Result<Unit> {
-        val uid = requireUid() ?: return Result.failure(IllegalStateException("not signed in"))
-        return runCatching {
-            if (cycleId.isBlank()) return@runCatching
-            firestore
-                .collection("users").document(uid)
-                .collection("cumulative_reports").document(cycleId)
-                .update("acknowledged", true)
-                .await()
-            firestore
-                .collection("users").document(uid)
-                .collection("lifecycle").document("current")
-                .set(
-                    mapOf(
-                        "report_acknowledged" to true,
-                        "updated_at" to com.google.firebase.Timestamp.now(),
-                    ),
-                    SetOptions.merge(),
-                )
-                .await()
-            Unit
-        }
+    suspend fun markCumulativeReportAcknowledged(cycleId: String): Result<Unit> = withUid { uid ->
+        if (cycleId.isBlank()) return@withUid
+        userDoc(uid)
+            .collection("cumulative_reports").document(cycleId)
+            .update("acknowledged", true)
+            .await()
+        userDoc(uid)
+            .collection("lifecycle").document("current")
+            .set(
+                mapOf(
+                    "report_acknowledged" to true,
+                    "updated_at" to com.google.firebase.Timestamp.now(),
+                ),
+                SetOptions.merge(),
+            )
+            .await()
+        Unit
     }
 
     /** Reads the one-shot start notice — null when none pending. */
-    suspend fun loadPendingStartNotice(): Result<MonitoringStartNotice?> {
-        val uid = requireUid() ?: return Result.failure(IllegalStateException("not signed in"))
-        return runCatching {
-            val snap = firestore
-                .collection("users").document(uid)
-                .collection("monitoring").document("start_notice")
-                .get().await()
-            val data = snap.data ?: return@runCatching null
-            val notice = MonitoringStartNotice.fromFirestore(data)
-            if (notice.shown) null else notice
-        }
+    suspend fun loadPendingStartNotice(): Result<MonitoringStartNotice?> = withUid { uid ->
+        val snap = userDoc(uid).collection("monitoring").document("start_notice").get().await()
+        val data = snap.data ?: return@withUid null
+        val notice = MonitoringStartNotice.fromFirestore(data)
+        if (notice.shown) null else notice
     }
 
     /** Mark the start notice as shown so the dashboard doesn't re-fire the popup. */
-    suspend fun markStartNoticeShown(): Result<Unit> {
-        val uid = requireUid() ?: return Result.failure(IllegalStateException("not signed in"))
-        return runCatching {
-            firestore
-                .collection("users").document(uid)
-                .collection("monitoring").document("start_notice")
-                .update(mapOf("shown" to true))
-                .await()
-            Unit
-        }
+    suspend fun markStartNoticeShown(): Result<Unit> = withUid { uid ->
+        userDoc(uid)
+            .collection("monitoring").document("start_notice")
+            .update(mapOf("shown" to true))
+            .await()
+        Unit
     }
 
     /** Weekly history rows in reverse chronological order. */
-    suspend fun loadHistory(limit: Long = 26): Result<List<WeeklyRiskHistoryRow>> {
-        val uid = requireUid() ?: return Result.failure(IllegalStateException("not signed in"))
-        return runCatching {
-            firestore
-                .collection("users").document(uid)
-                .collection("risk_history")
-                .orderBy("week_iso", Query.Direction.DESCENDING)
-                .limit(limit)
-                .get().await()
-                .documents.mapNotNull { doc ->
-                    val data = doc.data ?: return@mapNotNull null
-                    WeeklyRiskHistoryRow.fromFirestore(data)
-                }
-        }
+    suspend fun loadHistory(limit: Long = 26): Result<List<WeeklyRiskHistoryRow>> = withUid { uid ->
+        userDoc(uid)
+            .collection("risk_history")
+            .orderBy("week_iso", Query.Direction.DESCENDING)
+            .limit(limit)
+            .get().await()
+            .documents.mapNotNull { doc ->
+                doc.data?.let { WeeklyRiskHistoryRow.fromFirestore(it) }
+            }
     }
 }

@@ -61,14 +61,6 @@ fun HelpCenterScreen(
     var showBugReports by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(Unit) { helpViewModel.initialize() }
 
-    val bgGradient = if (isDark)
-        listOf(SaharaStrongGreen.copy(.2f), MaterialTheme.colorScheme.background.copy(.6f), MaterialTheme.colorScheme.background)
-    else
-        listOf(SaharaStrongGreen.copy(.25f), SaharaPeach.copy(.1f), MaterialTheme.colorScheme.background.copy(.2f))
-
-    val blobMotion = rememberBackdropBlobMotion()
-
-    
     val faqs = if (isEnglish) listOf(
         FaqItem("What is Sahara AI?",
             "Sahara AI is an AI-powered Android application designed to detect early signs of illegal narcotic substance abuse and emotional distress among youth in Pakistan. It analyzes user behavior, emotional patterns, voice tone, and interaction data using AI to identify risks early — without directly detecting drug usage. It also provides multilingual support, anonymous counseling, and recovery tools."),
@@ -118,16 +110,7 @@ fun HelpCenterScreen(
 
     
     Box(Modifier.fillMaxSize()) {
-        Box(
-            Modifier.fillMaxSize()
-                .hazeSource(hazeState)
-                .background(Brush.verticalGradient(bgGradient))
-        ) {
-            Box(Modifier.size(350.dp).offset((-80).dp, (-50).dp).primaryBlobMotion(blobMotion)
-                .background(Brush.radialGradient(listOf(SaharaStrongGreen.copy(if (isDark) .25f else .15f), Color.Transparent))))
-            Box(Modifier.size(400.dp).align(Alignment.BottomEnd).offset(100.dp, 50.dp).secondaryBlobMotion(blobMotion)
-                .background(Brush.radialGradient(listOf(SaharaSky.copy(if (isDark) .2f else .18f), Color.Transparent))))
-        }
+        ScreenBackdrop(hazeState)
 
         Scaffold(
             bottomBar = { BottomNav(navController = navController, hazeState = hazeState) },

@@ -211,24 +211,29 @@ fun MeditationScreen(
     else
         listOf(selectedColor.copy(.22f), SaharaLavender.copy(.12f), MaterialTheme.colorScheme.background.copy(.3f))
 
-    val blobMotion = rememberBackdropBlobMotion()
     val idlePulse = rememberFrameOscillation(1f, 1.08f, 2_500)
     val activePuls = rememberFrameOscillation(1f, 1.55f, 4_000)
     val auraScale  = if (playingTitle != null) activePuls else idlePulse
 
     
     Box(modifier = Modifier.fillMaxSize()) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .hazeSource(hazeState)
-                .background(Brush.verticalGradient(bgGradient))
-        ) {
-            Box(Modifier.size(360.dp).offset((-80).dp, (-50).dp).primaryBlobMotion(blobMotion)
-                .background(Brush.radialGradient(listOf(selectedColor.copy(.18f), Color.Transparent))))
-            Box(Modifier.size(420.dp).align(Alignment.BottomEnd).offset(100.dp, 50.dp).secondaryBlobMotion(blobMotion)
-                .background(Brush.radialGradient(listOf(SaharaLavender.copy(.14f), Color.Transparent))))
-        }
+        ScreenBackdrop(
+            hazeState = hazeState,
+            bgGradient = bgGradient,
+            primaryBlob = BackdropBlobSpec(
+                size = 360.dp,
+                offsetX = (-80).dp,
+                offsetY = (-50).dp,
+                color = selectedColor.copy(.18f),
+            ),
+            secondaryBlob = BackdropBlobSpec(
+                size = 420.dp,
+                offsetX = 100.dp,
+                offsetY = 50.dp,
+                color = SaharaLavender.copy(.14f),
+                alignment = Alignment.BottomEnd,
+            ),
+        )
 
         Scaffold(
             bottomBar = { BottomNav(navController, hazeState) },
