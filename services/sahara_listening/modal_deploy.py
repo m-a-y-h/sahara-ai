@@ -26,7 +26,7 @@ The refresh token must be stored server-side after the user goes through the
 ConnectionsScreen Spotify OAuth flow. The current PoC keeps it client-side
 only (in ``SpotifyOAuthCallbackStore``); promoting that to a Firestore field
 is a separate piece of work and **must** be paired with the user disclosure
-update described in the README.
+update described in the project wiki.
 """
 
 from __future__ import annotations

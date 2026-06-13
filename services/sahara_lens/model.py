@@ -1,7 +1,7 @@
 """Hybrid ResNet-50 + Vision Transformer architecture for FER.
 
 Design rationale (from the South Asian FER research synthesis bundled in the
-repo README): a strong CNN trunk extracts robust local AU-style features and
+project wiki): a strong CNN trunk extracts robust local AU-style features and
 a small ViT head re-attends over them globally. This combination has been
 shown to reach >95% testing accuracy on FER benchmarks while remaining
 trainable on a single GPU. The transformer head is intentionally shallow so

@@ -2192,7 +2192,7 @@ def build_llama31_prompt(
                 )
 
     # Llama-3.1's official chat template puts TWO newlines after the
-    # assistant header; a single-newline variant nudges Qalb into a slightly
+    # assistant header; a single-newline variant nudges Llama-style checkpoints into a slightly
     # different output distribution that's been observed to collapse into
     # the "Aaj rata hain? Aaj subah hain?" repetition loop.
     parts.append(

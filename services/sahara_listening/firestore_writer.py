@@ -87,7 +87,7 @@ def delete_user_history(uid: str) -> dict[str, int]:
     """Server-side "delete my listening data" cleanup.
 
     Used both by the Android client's privacy panel and by the GDPR-style
-    request flow described in the README's privacy section. Deletes
+    request flow described in the project wiki's privacy section. Deletes
     everything under the three subcollections this package writes.
     """
     db = _client()

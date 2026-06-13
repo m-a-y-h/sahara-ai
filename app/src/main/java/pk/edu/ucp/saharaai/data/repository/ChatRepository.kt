@@ -150,7 +150,7 @@ object ChatRepository {
         FirestoreService.deleteAllMessages(sessionId)
 
     /**
-     * Asks Qalb to compress a 16-message batch into a short paragraph that
+     * Asks the model to compress a 16-message batch into a short paragraph that
      * preserves the user's situation, concerns, substance/risk mentions,
      * and the assistant's guidance. Returns the summary text or null if
      * the endpoint isn't configured / the call fails — caller falls back

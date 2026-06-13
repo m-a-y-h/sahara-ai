@@ -11,8 +11,7 @@
 > ``SAHARA_LISTENING_RESEARCH_MODE`` environment variable. The Android client
 > only ever reads the *derived* flagged-track and weekly-report Firestore
 > documents — never raw listening history — so the same UI also works against
-> the policy-clean YouTube-subscription path documented in the top-level
-> README.
+> the policy-clean YouTube-subscription path documented in the project wiki.
 
 The package is structured to mirror sahara_ai / sahara_lens / sahara_voice:
 

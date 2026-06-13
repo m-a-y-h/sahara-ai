@@ -383,7 +383,7 @@ class ChatViewModel : ViewModel() {
                 return@launch
             }
 
-            // Build Qalb's context BEFORE persisting this user message —
+            // Build the model context BEFORE persisting this user message —
             // otherwise the listener might race and include the new message
             // in both `history` and `user_input`. The current session's
             // batch summaries cover everything older than summarizedThroughMs;
@@ -393,7 +393,7 @@ class ChatViewModel : ViewModel() {
             val summarizedThroughMs = session?.summarizedThroughMs ?: 0L
             // Drop the seeded welcome bubble out of the assistant history.
             // It's a UI greeting, not a real model turn — feeding it in as
-            // `{role: "assistant", content: "Salam..."}` makes Qalb think the
+            // `{role: "assistant", content: "Salam..."}` makes the model think the
             // pattern is "the assistant introduces itself first," so on the
             // user's first message it re-greets instead of engaging.
             // Heuristic: skip every AI message that arrives BEFORE any user
@@ -490,7 +490,7 @@ class ChatViewModel : ViewModel() {
             // Fire-and-forget batch summarisation. When the live (unsummarised)
             // window now holds >= 16 messages — i.e. we've completed at
             // least 8 user prompts + 8 AI replies since the last summary —
-            // ask Qalb to compress the OLDEST 16 into a paragraph and
+            // ask the model to compress the OLDEST 16 into a paragraph and
             // record the new summarizedThroughMs boundary on the session.
             // Runs after the UI already has the reply, so the extra
             // inference roundtrip doesn't delay the user's next turn.
