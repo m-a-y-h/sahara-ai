@@ -123,9 +123,6 @@ The checked-in configuration currently contains a different Android certificate 
 sahara.admin.key=<admin-dashboard-key>
 sahara.ngo.key=<ngo-key>
 sahara.counselor.key=<counselor-key>
-emailjs.service.id=<service-id>
-emailjs.template.id=<template-id>
-emailjs.public.key=<public-key>
 sahara.livekit.url=wss://<your>.livekit.cloud
 sahara.livekit.token.url=<sahara_livekit Modal URL>/token
 sahara.lens.scan.url=<sahara_lens Modal URL>/v1/lens/scan

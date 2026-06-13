@@ -3,7 +3,7 @@
 `modal_deploy.py` deploys one Modal app named `sahara-push`. It contains:
 
 - FCM notification jobs for user notifications, admin review alerts, approval keys, and rejection emails.
-- `sahara-mailer`, the transactional email endpoint used by Android signup/password flows.
+- `sahara-mailer`, the transactional email endpoint used by Android signup verification and service emails.
 - `sahara-biometric-enroll`, `sahara-biometric-login`, and `sahara-biometric-disable`, the per-device biometric login endpoints.
 
 ## Deploy

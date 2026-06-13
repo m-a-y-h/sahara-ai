@@ -16,7 +16,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Email
-import androidx.compose.material.icons.filled.MarkEmailRead
+import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -64,7 +64,6 @@ fun EmailVerificationScreen(
     val isSending = verificationViewModel.isSending
     val errorMsg = verificationViewModel.errorMsg
     val isVerified = verificationViewModel.isVerified
-    val isNotConfigured = verificationViewModel.isNotConfigured
 
     
     var expirySeconds  by remember { mutableStateOf(600) }
@@ -130,10 +129,13 @@ fun EmailVerificationScreen(
                 }
             }
 
-            Spacer(Modifier.height(32.dp))
+            Spacer(Modifier.height(24.dp))
 
-            
-            SaharaCard(variant = CardVariant.GLASS, hazeState = hazeState, modifier = Modifier.fillMaxWidth()) {
+            SaharaCard(
+                variant = CardVariant.GLASS,
+                hazeState = hazeState,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
                 Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
 
                     if (isVerified) {
@@ -165,21 +167,31 @@ fun EmailVerificationScreen(
 
                     } else {
                         
-                        Icon(
-                            if (isSending) Icons.Default.Email else Icons.Default.MarkEmailRead,
-                            null, tint = primaryGreen, modifier = Modifier.size(56.dp)
-                        )
-                        Spacer(Modifier.height(16.dp))
+                        Box(
+                            modifier = Modifier
+                                .size(64.dp)
+                                .clip(RoundedCornerShape(18.dp))
+                                .background(primaryGreen.copy(alpha = 0.12f)),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                if (isSending) Icons.Default.Email else Icons.Default.VerifiedUser,
+                                null,
+                                tint = primaryGreen,
+                                modifier = Modifier.size(34.dp),
+                            )
+                        }
+                        Spacer(Modifier.height(14.dp))
                         Text(
-                            if (isEnglish) "Check your email" else "Apni email dekhein",
+                            if (isEnglish) "Enter verification code" else "Code darj karein",
                             style = MaterialTheme.typography.titleLarge,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Spacer(Modifier.height(8.dp))
                         Text(
-                            if (isEnglish) "We sent a 6-digit verification code to:"
-                            else           "Hum ne 6-digit verification code bheji hai:",
+                            if (isEnglish) "We sent a 6-digit code to"
+                            else           "6-digit code bheja gaya hai",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             textAlign = TextAlign.Center
@@ -190,7 +202,8 @@ fun EmailVerificationScreen(
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.Bold,
                             color = primaryGreen,
-                            textAlign = TextAlign.Center
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth(),
                         )
 
                         Spacer(Modifier.height(24.dp))
@@ -213,7 +226,7 @@ fun EmailVerificationScreen(
                         if (expirySeconds > 0) {
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
                                 Text(
-                                    if (isEnglish) "Code expires in " else "Code $timerText mein expire hoga  ",
+                                    if (isEnglish) "Code expires in " else "$timerText mein expire hoga",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -232,27 +245,6 @@ fun EmailVerificationScreen(
                             )
                         }
 
-                        
-                        AnimatedVisibility(isNotConfigured) {
-                            Spacer(Modifier.height(8.dp))
-                            Card(
-                                colors = CardDefaults.cardColors(containerColor = SaharaWarning.copy(.12f)),
-                                shape  = RoundedCornerShape(10.dp),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text(
-                                    "⚠ EmailJS not configured.\n" +
-                                    "Add credentials to local.properties:\n" +
-                                    "emailjs.service.id, emailjs.template.id, emailjs.public.key\n" +
-                                    "(See emailjs.com for free setup)",
-                                    style    = MaterialTheme.typography.labelSmall,
-                                    color    = SaharaWarning,
-                                    modifier = Modifier.padding(12.dp)
-                                )
-                            }
-                        }
-
-                        
                         AnimatedVisibility(errorMsg.isNotBlank()) {
                             Spacer(Modifier.height(8.dp))
                             Card(
@@ -261,7 +253,6 @@ fun EmailVerificationScreen(
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 Row(Modifier.padding(12.dp), verticalAlignment = Alignment.Top) {
-                                    Text("⚠️  ", style = MaterialTheme.typography.bodySmall)
                                     Text(errorMsg, color = SaharaCoral, style = MaterialTheme.typography.bodySmall)
                                 }
                             }

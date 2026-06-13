@@ -42,13 +42,6 @@ android {
         val counselorKey = localProperties.getProperty("sahara.counselor.key") ?: ""
         buildConfigField("String", "COUNSELOR_KEY", "\"$counselorKey\"")
 
-        val emailjsServiceId  = localProperties.getProperty("emailjs.service.id")  ?: ""
-        val emailjsTemplateId = localProperties.getProperty("emailjs.template.id") ?: ""
-        val emailjsPublicKey  = localProperties.getProperty("emailjs.public.key")  ?: ""
-        buildConfigField("String", "EMAILJS_SERVICE_ID",  "\"$emailjsServiceId\"")
-        buildConfigField("String", "EMAILJS_TEMPLATE_ID", "\"$emailjsTemplateId\"")
-        buildConfigField("String", "EMAILJS_PUBLIC_KEY",  "\"$emailjsPublicKey\"")
-
         val saharaMailerUrl = localProperties.getProperty("sahara.mailer.url") ?: ""
         buildConfigField("String", "SAHARA_MAILER_URL", "\"$saharaMailerUrl\"")
 

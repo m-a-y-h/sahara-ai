@@ -29,8 +29,8 @@ Four jobs run on the same cron (every minute), plus one direct mail endpoint:
 
   * ``send_otp_email`` — direct HTTPS endpoint. The Android app calls this
     during signup verification so OTPs use the same SAHARA AI SMTP sender
-    instead of the old EmailJS sender. The endpoint verifies the caller's
-    Firebase ID token before sending.
+    as the rest of the app. The endpoint verifies the caller's Firebase ID
+    token before sending.
 
   * ``biometric_enroll`` / ``biometric_login`` / ``biometric_disable`` —
     direct HTTPS endpoints for per-device biometric login. The app stores a
@@ -291,7 +291,13 @@ def _send_email(to_addr: str, subject: str, body: str) -> bool:
     port = int(os.environ.get("SMTP_PORT", "587"))
     user = os.environ.get("SMTP_USER", "")
     pwd  = os.environ.get("SMTP_PASS", "")
-    from_addr = os.environ.get("EMAIL_FROM") or user or "noreply@sahara.local"
+    configured_from = os.environ.get("EMAIL_FROM", "").strip()
+    if configured_from:
+        from_addr = configured_from
+    elif user:
+        from_addr = f"Sahara AI <{user}>"
+    else:
+        from_addr = "Sahara AI <noreply@sahara.local>"
 
     msg = EmailMessage()
     msg["From"]    = from_addr
@@ -329,7 +335,6 @@ def send_otp_email(data: dict) -> dict:
     id_token = (data.get("id_token") or "").strip()
     to_email = (data.get("to_email") or "").strip().lower()
     to_name = (data.get("to_name") or "").strip() or to_email.split("@")[0] or "there"
-    kind = (data.get("kind") or "otp").strip().lower()
 
     if not id_token or not to_email:
         raise HTTPException(status_code=400, detail="Missing required email payload.")
@@ -342,31 +347,6 @@ def send_otp_email(data: dict) -> dict:
     token_email = (decoded.get("email") or "").strip().lower()
     if token_email != to_email:
         raise HTTPException(status_code=403, detail="Email does not match signed-in user.")
-
-    # Password-setup confirmation. Only ever goes to the user's own,
-    # token-verified inbox.
-    if kind == "password":
-        password = (data.get("password") or "").strip()
-        if not password:
-            raise HTTPException(status_code=400, detail="Missing password.")
-        body = "\n".join([
-            f"Hello {to_name},",
-            "",
-            "You just enabled email + fingerprint sign-in for your Sahara AI account.",
-            "Use these to sign in with your email next time:",
-            "",
-            f"  Email:    {to_email}",
-            f"  Password: {password}",
-            "",
-            "Keep this somewhere safe. You can change it any time from Settings,",
-            "or via 'Forgot password' on the login screen.",
-            "",
-            "— Sahara AI",
-        ])
-        ok = _send_email(to_addr=to_email, subject="Your Sahara AI sign-in password", body=body)
-        if not ok:
-            raise HTTPException(status_code=503, detail="Email sender is not configured or failed.")
-        return {"ok": True}
 
     otp_code = (data.get("otp_code") or "").strip()
     expiry_minutes = str(data.get("expiry_minutes") or "10").strip()

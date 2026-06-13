@@ -18,8 +18,6 @@ class EmailVerificationViewModel : ViewModel() {
         private set
     var isVerified by mutableStateOf(false)
         private set
-    var isNotConfigured by mutableStateOf(false)
-        private set
 
     fun clearError() {
         errorMsg = ""
@@ -46,13 +44,16 @@ class EmailVerificationViewModel : ViewModel() {
                     toName = name.ifBlank { email.substringBefore("@") },
                     otp = otp,
                     mailerUrl = BuildConfig.SAHARA_MAILER_URL,
-                    serviceId = BuildConfig.EMAILJS_SERVICE_ID,
-                    templateId = BuildConfig.EMAILJS_TEMPLATE_ID,
-                    publicKey = BuildConfig.EMAILJS_PUBLIC_KEY
                 )
             ) {
                 is EmailOtpService.SendResult.Success -> Unit
-                is EmailOtpService.SendResult.NotConfigured -> isNotConfigured = true
+                is EmailOtpService.SendResult.NotConfigured -> {
+                    errorMsg = if (isEnglish) {
+                        "Sahara mailer is not configured."
+                    } else {
+                        "Sahara mailer configure nahi hai."
+                    }
+                }
                 is EmailOtpService.SendResult.RateLimited -> {
                     errorMsg = if (isEnglish) "Please wait before resending." else "Dobara bhejna ke liye intzaar karein."
                 }

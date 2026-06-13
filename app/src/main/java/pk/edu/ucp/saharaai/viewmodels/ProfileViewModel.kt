@@ -12,11 +12,16 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.Priority
+import com.google.android.gms.tasks.CancellationTokenSource
 import com.google.firebase.Firebase
 import com.google.firebase.auth.UserProfileChangeRequest
 import com.google.firebase.auth.auth
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import pk.edu.ucp.saharaai.data.remote.RealtimeDBService
 import pk.edu.ucp.saharaai.ui.screens.GlobalAppState
 import java.text.SimpleDateFormat
@@ -248,23 +253,42 @@ class ProfileViewModel : ViewModel() {
         if (!hasLocationPermission(context)) return null
         return runCatching {
             val appContext = context.applicationContext
-            val location = LocationServices.getFusedLocationProviderClient(appContext).lastLocation.await()
-                ?: return@runCatching null
-            val address = Geocoder(appContext, Locale.getDefault())
-                .getFromLocation(location.latitude, location.longitude, 1)
-                ?.firstOrNull()
-                ?: return@runCatching null
-            val area = address.subLocality ?: address.featureName
-            val city = address.locality ?: address.subAdminArea ?: address.adminArea
-            val detected = listOfNotNull(area, city)
-                .map { it.trim() }
-                .filter { it.isNotBlank() }
-                .distinct()
-                .joinToString(", ")
-            normalizedLocation(detected)?.also {
-                GlobalAppState.userLocation = it
-                GlobalAppState.hasGrantedLocation = true
+            val client = LocationServices.getFusedLocationProviderClient(appContext)
+            val priority = if (
+                ContextCompat.checkSelfPermission(appContext, Manifest.permission.ACCESS_FINE_LOCATION) ==
+                    PackageManager.PERMISSION_GRANTED
+            ) {
+                Priority.PRIORITY_HIGH_ACCURACY
+            } else {
+                Priority.PRIORITY_BALANCED_POWER_ACCURACY
             }
+            val freshLocation = withTimeoutOrNull(12_000L) {
+                val cancellation = CancellationTokenSource()
+                try {
+                    client.getCurrentLocation(priority, cancellation.token).await()
+                } finally {
+                    cancellation.cancel()
+                }
+            }
+            val location = freshLocation ?: client.lastLocation.await()
+                ?: return@runCatching null
+            val detected = withContext(Dispatchers.IO) {
+                val address = Geocoder(appContext, Locale.getDefault())
+                    .getFromLocation(location.latitude, location.longitude, 1)
+                    ?.firstOrNull()
+                    ?: return@withContext null
+                val area = address.subLocality ?: address.featureName
+                val city = address.locality ?: address.subAdminArea ?: address.adminArea
+                val label = listOfNotNull(area, city)
+                    .map { it.trim() }
+                    .filter { it.isNotBlank() }
+                    .distinct()
+                    .joinToString(", ")
+                normalizedLocation(label)
+            } ?: return@runCatching null
+            GlobalAppState.userLocation = detected
+            GlobalAppState.hasGrantedLocation = true
+            detected
         }.getOrNull()
     }
 

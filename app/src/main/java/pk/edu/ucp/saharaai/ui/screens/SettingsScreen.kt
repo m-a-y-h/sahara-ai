@@ -69,7 +69,6 @@ fun SettingsScreen(
 
     LaunchedEffect(Unit) { settingsViewModel.initialize(context) }
     val biometricEnabled = settingsViewModel.biometricEnabled
-    val passwordBackupEnabled = settingsViewModel.passwordBackupEnabled
     val privacyModeEnabled = settingsViewModel.privacyModeEnabled
 
     val softTextColor = if (isDark) Color.White.copy(alpha = 0.9f) else Color.Black.copy(alpha = 0.85f)
@@ -203,8 +202,7 @@ fun SettingsScreen(
                             CompactSecurityToggleCard(
                                 icon = Icons.Default.Fingerprint,
                                 color = SaharaStrongGreen,
-                                title = if (isEnglish) "Fingerprint Login"
-                                        else "Fingerprint Login",
+                                title = if (isEnglish) "Biometric" else "Biometric",
                                 checked = biometricEnabled,
                                 hazeState = hazeState,
                                 softTextColor = softTextColor,
@@ -229,7 +227,7 @@ fun SettingsScreen(
                                     )
                                     Spacer(Modifier.height(8.dp))
                                     Text(
-                                        text = if (isEnglish) "Biometric Login" else "Biometric Login",
+                                        text = if (isEnglish) "Biometric" else "Biometric",
                                         style = MaterialTheme.typography.labelMedium,
                                         color = softTextColor.copy(alpha = 0.4f)
                                     )
@@ -252,18 +250,6 @@ fun SettingsScreen(
                             onCheckedChange = { settingsViewModel.togglePrivacyMode(context, it) },
                         )
                     }
-
-                    SettingsToggleCard(
-                        icon = Icons.Default.Lock,
-                        color = SaharaLavender,
-                        title = if (isEnglish) "Email Password Backup" else "Email Password Backup",
-                        checked = passwordBackupEnabled,
-                        hazeState = hazeState,
-                        softTextColor = softTextColor,
-                        onCheckedChange = { enabled ->
-                            if (enabled) settingsViewModel.requestPasswordBackup(context)
-                        },
-                    )
                 }
 
                 Spacer(Modifier.height(32.dp))
@@ -312,13 +298,6 @@ fun SettingsScreen(
             isEnglish = isEnglish,
             hazeState = hazeState,
             onDismiss = { settingsViewModel.dismissBiometricEnrollmentState() },
-        )
-        PasswordBackupDialog(
-            state = settingsViewModel.passwordBackupState,
-            isEnglish = isEnglish,
-            hazeState = hazeState,
-            onSubmit = { pwd -> settingsViewModel.completePasswordBackup(context, pwd) },
-            onDismiss = { settingsViewModel.cancelPasswordBackup() },
         )
     }
 }
@@ -373,150 +352,6 @@ private fun BiometricEnrollmentDialog(
                 TextButton(onClick = onDismiss) {
                     Text(if (isEnglish) "OK" else "Theek hai")
                 }
-            }
-        },
-    )
-}
-
-@Composable
-private fun PasswordBackupDialog(
-    state: SettingsViewModel.PasswordBackupState,
-    isEnglish: Boolean,
-    hazeState: HazeState,
-    onSubmit: (String) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    if (state is SettingsViewModel.PasswordBackupState.Idle) return
-
-    val request = state as? SettingsViewModel.PasswordBackupState.Requested
-    val submitting = state is SettingsViewModel.PasswordBackupState.Submitting
-    val email = request?.email ?: (state as? SettingsViewModel.PasswordBackupState.Submitting)?.email.orEmpty()
-    val requestErrorMessage = request?.errorMessage.orEmpty()
-    var password by remember(state) { mutableStateOf("") }
-    var confirmPassword by remember(state) { mutableStateOf("") }
-    var passwordVisible by remember(state) { mutableStateOf(false) }
-
-    if (state is SettingsViewModel.PasswordBackupState.Error) {
-        GlassAlertDialog(
-            hazeState = hazeState,
-            onDismissRequest = onDismiss,
-            title = { Text(if (isEnglish) "Password backup" else "Password backup") },
-            text = { Text(state.message) },
-            confirmButton = {
-                TextButton(onClick = onDismiss) {
-                    Text(if (isEnglish) "OK" else "Theek hai")
-                }
-            },
-        )
-        return
-    }
-
-    GlassAlertDialog(
-        hazeState = hazeState,
-        onDismissRequest = { if (!submitting) onDismiss() },
-        title = {
-            Text(
-                if (isEnglish) "Add email/password login"
-                else "Email/password login add karein"
-            )
-        },
-        text = {
-            Column {
-                Text(
-                    if (isEnglish)
-                        "Set a backup password for this email. Google sign-in will keep working."
-                    else
-                        "Is email ke liye backup password set karein. Google sign-in bhi chalti rahegi."
-                )
-                Spacer(Modifier.height(12.dp))
-                Text(
-                    text = email,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(Modifier.height(12.dp))
-                OutlinedTextField(
-                    value = password,
-                    onValueChange = { password = it },
-                    singleLine = true,
-                    enabled = !submitting,
-                    label = { Text(if (isEnglish) "Password" else "Password") },
-                    visualTransformation = if (passwordVisible) {
-                        androidx.compose.ui.text.input.VisualTransformation.None
-                    } else {
-                        androidx.compose.ui.text.input.PasswordVisualTransformation()
-                    },
-                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                        keyboardType = androidx.compose.ui.text.input.KeyboardType.Password,
-                        imeAction = androidx.compose.ui.text.input.ImeAction.Next,
-                    ),
-                    trailingIcon = {
-                        IconButton(onClick = { passwordVisible = !passwordVisible }) {
-                            Icon(
-                                if (passwordVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                                contentDescription = null,
-                            )
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Spacer(Modifier.height(10.dp))
-                OutlinedTextField(
-                    value = confirmPassword,
-                    onValueChange = { confirmPassword = it },
-                    singleLine = true,
-                    enabled = !submitting,
-                    label = { Text(if (isEnglish) "Confirm password" else "Password dobara") },
-                    visualTransformation = if (passwordVisible) {
-                        androidx.compose.ui.text.input.VisualTransformation.None
-                    } else {
-                        androidx.compose.ui.text.input.PasswordVisualTransformation()
-                    },
-                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                        keyboardType = androidx.compose.ui.text.input.KeyboardType.Password,
-                        imeAction = androidx.compose.ui.text.input.ImeAction.Done,
-                    ),
-                    isError = confirmPassword.isNotEmpty() && password != confirmPassword,
-                    supportingText = {
-                        if (confirmPassword.isNotEmpty() && password != confirmPassword) {
-                            Text(
-                                if (isEnglish) "Passwords do not match" else "Password aik jaisa nahi hai",
-                                color = SaharaCoral,
-                                style = MaterialTheme.typography.labelSmall,
-                            )
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                if (requestErrorMessage.isNotBlank()) {
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        text = requestErrorMessage,
-                        color = SaharaCoral,
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-            }
-        },
-        confirmButton = {
-            val canSubmit = !submitting &&
-                password.isNotBlank() &&
-                confirmPassword.isNotBlank() &&
-                password == confirmPassword
-            TextButton(
-                enabled = canSubmit,
-                onClick = { onSubmit(password) },
-            ) {
-                Text(
-                    if (submitting) (if (isEnglish) "Working..." else "Ho raha hai...")
-                    else (if (isEnglish) "Save password" else "Password save karein"),
-                    color = SaharaStrongGreen,
-                )
-            }
-        },
-        dismissButton = {
-            TextButton(enabled = !submitting, onClick = onDismiss) {
-                Text(if (isEnglish) "Cancel" else "Cancel")
             }
         },
     )

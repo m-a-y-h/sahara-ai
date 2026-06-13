@@ -20,7 +20,6 @@ import java.util.concurrent.TimeUnit
 object EmailOtpService {
 
     private const val TAG             = "EmailOtpService"
-    private const val EMAILJS_URL     = "https://api.emailjs.com/api/v1.0/email/send"
     private const val OTP_EXPIRY_MS   = 10L * 60 * 1000   
     private const val RATE_LIMIT_MS   = 60L * 1000        
     private const val OTP_DIGITS      = 6
@@ -76,68 +75,10 @@ object EmailOtpService {
         toEmail   : String,
         toName    : String,
         otp       : String,
-        mailerUrl : String,
-        serviceId : String,
-        templateId: String,
-        publicKey : String
-    ): SendResult {
-        if (mailerUrl.isNotBlank()) {
-            when (val modalResult = sendOtpWithSaharaMailer(toEmail, toName, otp, mailerUrl)) {
-                is SendResult.Success -> return modalResult
-                is SendResult.NotConfigured -> Unit
-                is SendResult.RateLimited -> return modalResult
-                is SendResult.Failure -> Log.w(TAG, "Sahara mailer failed; falling back to EmailJS: ${modalResult.error}")
-            }
-        }
-        return sendOtpWithEmailJs(toEmail, toName, otp, serviceId, templateId, publicKey)
-    }
-
-    /** Emails the user the email/password they just set from Settings, so
-     *  they have it for email sign-in. Goes only to the
-     *  signed-in user's own, token-verified inbox (the mailer enforces that).
-     *  Best-effort; EmailJS isn't used here as its template is OTP-only. */
-    suspend fun sendPasswordEmail(
-        toEmail  : String,
-        toName   : String,
-        password : String,
-        mailerUrl: String,
+        mailerUrl : String
     ): SendResult {
         if (mailerUrl.isBlank()) return SendResult.NotConfigured
-        val idToken = try {
-            Firebase.auth.currentUser?.getIdToken(false)?.await()?.token.orEmpty()
-        } catch (e: Exception) {
-            Log.w(TAG, "Could not get Firebase ID token for password email", e)
-            ""
-        }
-        if (idToken.isBlank()) return SendResult.NotConfigured
-
-        return withContext(Dispatchers.IO) {
-            try {
-                val payload = JSONObject().apply {
-                    put("id_token", idToken)
-                    put("to_email", toEmail)
-                    put("to_name", toName)
-                    put("kind", "password")
-                    put("password", password)
-                }.toString()
-
-                val request = Request.Builder()
-                    .url(mailerUrl.trim().trimEnd('/'))
-                    .addHeader("Content-Type", "application/json")
-                    .post(payload.toRequestBody("application/json".toMediaType()))
-                    .build()
-
-                val response = httpClient.newCall(request).execute()
-                val body = response.body?.string().orEmpty()
-                Log.d(TAG, "Password email response ${response.code}: $body")
-
-                if (response.isSuccessful) SendResult.Success
-                else SendResult.Failure("mailer ${response.code}: $body")
-            } catch (e: Exception) {
-                Log.e(TAG, "sendPasswordEmail failed", e)
-                SendResult.Failure(e.message ?: "Network error")
-            }
-        }
+        return sendOtpWithSaharaMailer(toEmail, toName, otp, mailerUrl)
     }
 
     private suspend fun sendOtpWithSaharaMailer(
@@ -171,7 +112,7 @@ object EmailOtpService {
                     .build()
 
                 val response = httpClient.newCall(request).execute()
-                val body = response.body?.string().orEmpty()
+                val body = response.body.string()
                 Log.d(TAG, "Sahara mailer response ${response.code}: $body")
 
                 if (response.isSuccessful) SendResult.Success
@@ -183,55 +124,6 @@ object EmailOtpService {
         }
     }
 
-    private suspend fun sendOtpWithEmailJs(
-        toEmail: String,
-        toName: String,
-        otp: String,
-        serviceId: String,
-        templateId: String,
-        publicKey: String,
-    ): SendResult = withContext(Dispatchers.IO) {
-
-        
-        if (serviceId.isBlank() || templateId.isBlank() || publicKey.isBlank() ||
-            serviceId == "YOUR_SERVICE_ID") {
-            Log.w(TAG, "EmailJS credentials not configured")
-            return@withContext SendResult.NotConfigured
-        }
-
-        return@withContext try {
-            val payload = JSONObject().apply {
-                put("service_id",  serviceId)
-                put("template_id", templateId)
-                put("user_id",     publicKey)
-                put("template_params", JSONObject().apply {
-                    put("to_name",        toName)
-                    put("to_email",       toEmail)
-                    put("otp_code",       otp)
-                    put("expiry_minutes", (OTP_EXPIRY_MS / 60_000).toString())
-                })
-            }.toString()
-
-            val request = Request.Builder()
-                .url(EMAILJS_URL)
-                .addHeader("Content-Type", "application/json")
-                .post(payload.toRequestBody("application/json".toMediaType()))
-                .build()
-
-            val response = httpClient.newCall(request).execute()
-            val body     = response.body?.string() ?: ""
-            Log.d(TAG, "EmailJS response ${response.code}: $body")
-
-            if (response.isSuccessful) SendResult.Success
-            else SendResult.Failure("EmailJS ${response.code}: $body")
-
-        } catch (e: Exception) {
-            Log.e(TAG, "sendOtpEmail failed", e)
-            SendResult.Failure(e.message ?: "Network error")
-        }
-    }
-
-    
     suspend fun resendCooldownSeconds(uid: String): Int {
         return try {
             val snap   = FirebaseDatabase.getInstance()
