@@ -261,10 +261,9 @@ fun SaharaApp() {
                             }
                         }
 
-                    // Google-only users have no password yet, but we DON'T nag
-                    // them here — no link email, no toast. They set a password
-                    // (and we email it) when they enable the fingerprint scanner
-                    // in Settings, which is the natural place for it.
+                    // Google-only users are not interrupted here. If they want
+                    // email/password login too, Settings exposes that as a
+                    // separate password-backup action.
                     val targetRoute = if (state.onboardingCompleted) "dashboard" else "onboarding"
                     if (navController.currentDestination?.route != targetRoute) {
                         navController.navigate(targetRoute) {
@@ -337,10 +336,7 @@ fun SaharaApp() {
                             val adminUid = GoogleCredentialAuth.signIn(context).getOrNull()?.let { outcome ->
                                 when (outcome) {
                                     is GoogleSignInOutcome.Signed -> Firebase.auth.currentUser?.uid
-                                    is GoogleSignInOutcome.NeedsPasswordLink ->
-                                        runCatching {
-                                            Firebase.auth.signInWithCredential(outcome.pendingGoogleCredential).await()
-                                        }.getOrNull()?.user?.uid
+                                    is GoogleSignInOutcome.NeedsPasswordLink -> null
                                 }
                             }
                             if (adminUid.isNullOrBlank()) {
@@ -376,36 +372,18 @@ fun SaharaApp() {
                         routeAfterAuth(emailHint = email)
                     },
                     onBiometricSuccess = {
-                        // A successful fingerprint/face unlock only proves the
-                        // device owner is present — it cannot, on its own, revive
-                        // a Firebase session that has already been signed out (we
-                        // never persist the password). If there is no live session
-                        // to restore, keep the user on Login and ask for their
-                        // password instead of dumping them back to Welcome.
                         if (Firebase.auth.currentUser == null) {
                             context.showLocalizedToast(
                                 isEnglish,
-                                "Please sign in with your password to continue.",
-                                "Jari rakhne ke liye apne password se sign in karein.",
+                                "Fingerprint login failed. Try again or sign in normally.",
+                                "Fingerprint login nahi ho saka. Dobara koshish karein ya normal sign in karein.",
                                 android.widget.Toast.LENGTH_LONG,
                             )
                         } else {
-                            val restoredEmail =
-                                Firebase.auth.currentUser?.email?.ifBlank { null }
-                                    ?: prefs.getString(KEY_USER_EMAIL, "")?.ifBlank { null }
-                                    ?: prefs.getString("biometric_last_email", "") ?: ""
-
-                            val storedFull =
-                                prefs.getString(KEY_USER_FULL_NAME, "")?.ifBlank { null }
-                                    ?: prefs.getString("biometric_last_name", "") ?: ""
-
-                            val restoredCalling =
-                                prefs.getString(KEY_USER_NAME, "")?.ifBlank { null }
-                                    ?: callingName(storedFull).ifBlank { storedFull }
-                                        .ifBlank { "User" }
-
-                            applyUserState(restoredEmail, storedFull.ifBlank { restoredCalling })
-                            routeAfterAuth(emailHint = restoredEmail, nameHint = storedFull)
+                            routeAfterAuth(
+                                emailHint = Firebase.auth.currentUser?.email.orEmpty(),
+                                nameHint = Firebase.auth.currentUser?.displayName.orEmpty(),
+                            )
                         }
                     },
                     onNavigateToRegister       = { navController.navigate("register") },

@@ -164,11 +164,9 @@ object RealtimeDBService {
 
     /**
      * Public, world-readable registry of "this email has a password account
-     * on this project." Used by [GoogleCredentialAuth.signIn] to detect a
-     * collision before consuming the Google credential, because Firebase's
-     * Email Enumeration Protection (the post-2023 default) makes
-     * `fetchSignInMethodsForEmail` return empty and silently lets the
-     * Google sign-in replace the password provider on an unverified email.
+     * on this project." This avoids relying on
+     * `fetchSignInMethodsForEmail`, because Firebase's Email Enumeration
+     * Protection (the post-2023 default) can make that API return empty.
      *
      * Stored as a hash of the email (SHA-256 via [emailKey]) so the
      * registry doesn't leak the raw addresses to anyone snooping the DB.

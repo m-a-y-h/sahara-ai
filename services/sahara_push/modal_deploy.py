@@ -32,6 +32,11 @@ Four jobs run on the same cron (every minute), plus one direct mail endpoint:
     instead of the old EmailJS sender. The endpoint verifies the caller's
     Firebase ID token before sending.
 
+  * ``biometric_enroll`` / ``biometric_login`` / ``biometric_disable`` —
+    direct HTTPS endpoints for per-device biometric login. The app stores a
+    random device secret locally; this service stores only its hash and mints a
+    Firebase custom token after validation.
+
 Setup (one time):
     modal secret create firebase-admin \\
         FIREBASE_SERVICE_ACCOUNT="$(cat serviceAccount.json)" \\
@@ -48,7 +53,10 @@ Deploy:
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
 import os
+import time
 import modal
 
 APP_NAME = "sahara-push"
@@ -89,6 +97,36 @@ def _init():
     if not firebase_admin._apps:
         cred = credentials.Certificate(json.loads(os.environ["FIREBASE_SERVICE_ACCOUNT"]))
         firebase_admin.initialize_app(cred, {"databaseURL": os.environ["FIREBASE_DB_URL"]})
+
+
+def _sha256_hex(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _device_key(device_id: str) -> str:
+    clean = (device_id or "").strip()
+    if not clean:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="Missing device id.")
+    return _sha256_hex(clean)
+
+
+def _now_ms() -> int:
+    return int(time.time() * 1000)
+
+
+def _verify_id_token(id_token: str) -> dict:
+    from fastapi import HTTPException
+    from firebase_admin import auth as fb_auth
+
+    clean = (id_token or "").strip()
+    if not clean:
+        raise HTTPException(status_code=400, detail="Missing Firebase token.")
+    try:
+        return fb_auth.verify_id_token(clean)
+    except Exception as e:
+        print(f"[sahara-push] token verification failed: {e}")
+        raise HTTPException(status_code=401, detail="Invalid Firebase token.")
 
 
 def _tokens_for(uid: str) -> list[str]:
@@ -305,8 +343,7 @@ def send_otp_email(data: dict) -> dict:
     if token_email != to_email:
         raise HTTPException(status_code=403, detail="Email does not match signed-in user.")
 
-    # Password-setup confirmation (sent when a Google user sets an email/password
-    # while enabling the fingerprint scanner). Only ever goes to the user's own,
+    # Password-setup confirmation. Only ever goes to the user's own,
     # token-verified inbox.
     if kind == "password":
         password = (data.get("password") or "").strip()
@@ -352,6 +389,158 @@ def send_otp_email(data: dict) -> dict:
     )
     if not ok:
         raise HTTPException(status_code=503, detail="Email sender is not configured or failed.")
+    return {"ok": True}
+
+
+@app.function(
+    image=image,
+    secrets=[FB_SECRET],
+    timeout=30,
+    scaledown_window=300,
+)
+@modal.fastapi_endpoint(method="POST", label="sahara-biometric-enroll")
+def biometric_enroll(data: dict) -> dict:
+    """Enroll one local device for biometric restore.
+
+    Android sends a Firebase ID token plus a random device secret generated and
+    stored locally behind Android Keystore. We store only the secret hash and
+    use the device id hash as the RTDB key.
+    """
+    _init()
+    from fastapi import HTTPException
+    from firebase_admin import db
+
+    decoded = _verify_id_token(data.get("id_token") or "")
+    uid = (decoded.get("uid") or "").strip()
+    if not uid:
+        raise HTTPException(status_code=401, detail="Firebase token has no uid.")
+
+    device_id = (data.get("device_id") or "").strip()
+    device_secret = (data.get("device_secret") or "").strip()
+    if not device_secret:
+        raise HTTPException(status_code=400, detail="Missing device secret.")
+
+    device_key = _device_key(device_id)
+    now = _now_ms()
+    email_hint = (data.get("email_hint") or decoded.get("email") or "").strip().lower()
+    display_name_hint = (data.get("display_name_hint") or decoded.get("name") or "").strip()
+    secret_hash = _sha256_hex(device_secret)
+
+    db.reference().update({
+        f"biometric_devices/{uid}/{device_key}": {
+            "deviceIdHash": device_key,
+            "secretHash": secret_hash,
+            "enabled": True,
+            "emailHint": email_hint,
+            "displayNameHint": display_name_hint,
+            "createdAt": now,
+            "updatedAt": now,
+            "lastUsedAt": 0,
+        },
+        f"biometric_device_index/{device_key}": uid,
+        f"users/{uid}/biometricEnabled": True,
+    })
+    return {"ok": True}
+
+
+@app.function(
+    image=image,
+    secrets=[FB_SECRET],
+    timeout=30,
+    scaledown_window=300,
+)
+@modal.fastapi_endpoint(method="POST", label="sahara-biometric-login")
+def biometric_login(data: dict) -> dict:
+    """Validate a device biometric credential and mint a Firebase custom token."""
+    _init()
+    from fastapi import HTTPException
+    from firebase_admin import auth as fb_auth
+    from firebase_admin import db
+
+    device_id = (data.get("device_id") or "").strip()
+    device_secret = (data.get("device_secret") or "").strip()
+    if not device_secret:
+        raise HTTPException(status_code=400, detail="Missing device secret.")
+
+    device_key = _device_key(device_id)
+    uid = db.reference(f"biometric_device_index/{device_key}").get()
+    if not uid:
+        raise HTTPException(status_code=404, detail="Biometric login is not enrolled on this device.")
+
+    record = db.reference(f"biometric_devices/{uid}/{device_key}").get() or {}
+    if not isinstance(record, dict):
+        raise HTTPException(status_code=404, detail="Biometric login is not enrolled on this device.")
+    if not record.get("enabled", False):
+        raise HTTPException(status_code=403, detail="Biometric login is disabled for this device.")
+
+    expected = (record.get("secretHash") or "").strip()
+    actual = _sha256_hex(device_secret)
+    if not expected or not hmac.compare_digest(expected, actual):
+        raise HTTPException(status_code=401, detail="Biometric credential is invalid.")
+
+    custom_token = fb_auth.create_custom_token(
+        uid,
+        {"biometric": True, "device_id": device_key},
+    )
+    if isinstance(custom_token, bytes):
+        custom_token = custom_token.decode("utf-8")
+
+    now = _now_ms()
+    db.reference(f"biometric_devices/{uid}/{device_key}").update({
+        "lastUsedAt": now,
+        "updatedAt": now,
+    })
+
+    email = (record.get("emailHint") or "").strip().lower()
+    display_name = (record.get("displayNameHint") or "").strip()
+    try:
+        user = fb_auth.get_user(uid)
+        email = (user.email or email or "").strip().lower()
+        display_name = (user.display_name or display_name or "").strip()
+    except Exception as e:
+        print(f"[sahara-push] biometric_login could not load user uid={uid}: {e}")
+
+    return {
+        "ok": True,
+        "custom_token": custom_token,
+        "email": email,
+        "display_name": display_name,
+    }
+
+
+@app.function(
+    image=image,
+    secrets=[FB_SECRET],
+    timeout=30,
+    scaledown_window=300,
+)
+@modal.fastapi_endpoint(method="POST", label="sahara-biometric-disable")
+def biometric_disable(data: dict) -> dict:
+    """Disable this device's biometric restore credential for the signed-in UID."""
+    _init()
+    from fastapi import HTTPException
+    from firebase_admin import db
+
+    decoded = _verify_id_token(data.get("id_token") or "")
+    uid = (decoded.get("uid") or "").strip()
+    if not uid:
+        raise HTTPException(status_code=401, detail="Firebase token has no uid.")
+
+    device_key = _device_key(data.get("device_id") or "")
+    now = _now_ms()
+    db.reference().update({
+        f"biometric_devices/{uid}/{device_key}/enabled": False,
+        f"biometric_devices/{uid}/{device_key}/disabledAt": now,
+        f"biometric_devices/{uid}/{device_key}/updatedAt": now,
+        f"biometric_device_index/{device_key}": None,
+    })
+
+    devices = db.reference(f"biometric_devices/{uid}").get() or {}
+    any_enabled = any(
+        isinstance(device, dict) and device.get("enabled", False)
+        for device in devices.values()
+    )
+    db.reference(f"users/{uid}/biometricEnabled").set(any_enabled)
     return {"ok": True}
 
 

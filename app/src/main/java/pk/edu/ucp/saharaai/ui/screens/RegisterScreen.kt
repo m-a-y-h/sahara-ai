@@ -293,16 +293,9 @@ fun RegisterScreen(
                             SaharaButton(
                                 text = if (isEnglish) "Sign Up" else "Register Karein",
                                 onClick = {
-                                    // Seal the chosen password into the biometric vault now,
-                                    // while we still have it in plaintext, so enabling the
-                                    // fingerprint scanner later just turns on without re-asking.
-                                    val capturedPassword = password
                                     registerViewModel.registerWithEmail(
                                         name, email, password, isEnglish
                                     ) { fullName, regEmail, callingName ->
-                                        pk.edu.ucp.saharaai.utils.BiometricCredentialVault.save(
-                                            context, regEmail, capturedPassword
-                                        )
                                         onNavigateToOnboarding(fullName, regEmail, callingName)
                                     }
                                 },

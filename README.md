@@ -37,9 +37,9 @@ The app combines culturally aware chat support, Sahara AI harm-reduction respons
 | Voice screening | `facebook/wav2vec2-xls-r-300m` fine-tuned on UrduSER, served on Modal (~91% precision on flagged distress, 86.6% accuracy on conf ≥ 0.65) |
 | Maps/location | Google Play Services / Google Maps |
 | Voice & video calls | LiveKit (in-app WebRTC); tokens minted by `services/sahara_livekit/` |
-| Python service hosting | Modal for Lens, Voice, LiveKit tokens, risk jobs, listening jobs, and push jobs |
+| Python service hosting | Modal for Lens, Voice, LiveKit tokens, risk jobs, listening jobs, push jobs, mailer, and biometric custom-token auth |
 | OAuth connections helper | Node Express on Render — `services/connections_poc_server/` (Bluesky / Steam / Spotify; YouTube authorised on-device) |
-| Push notifications | Firebase Cloud Messaging; sender + admin notifier + key-delivery cron in `services/sahara_push/` |
+| Push/auth support | Firebase Cloud Messaging plus mailer, admin notifier, key-delivery cron, and biometric custom-token endpoints in `services/sahara_push/` |
 
 ### Deployed endpoints
 
@@ -50,6 +50,10 @@ Python services run on the same Modal account (`its-asattar`). The Node OAuth he
 | Sahara Lens scan | `https://its-asattar--sahara-lens.modal.run/v1/lens/scan` |
 | Sahara Voice analyze | `https://its-asattar--voice-endpoint.modal.run/v1/voice/analyze` |
 | LiveKit token | `https://its-asattar--livekit-token.modal.run/token` |
+| Sahara mailer | `https://its-asattar--sahara-mailer.modal.run` |
+| Biometric enroll | `https://its-asattar--sahara-biometric-enroll.modal.run` |
+| Biometric login | `https://its-asattar--sahara-biometric-login.modal.run` |
+| Biometric disable | `https://its-asattar--sahara-biometric-disable.modal.run` |
 | Connections OAuth helper | `https://sahara-connections.onrender.com` |
 
 Firebase Auth, Firestore, and Realtime Database are the app backend services. The Android `data/` package is the client-side data layer that talks to Firebase and the Sahara AI endpoint. A separate FastAPI folder is only needed if we later deploy our own server outside Colab.
@@ -110,10 +114,10 @@ SHA-256: D4:54:A5:70:C1:FE:EF:75:03:CE:61:6F:FF:0D:82:DD:74:E4:BD:E3:DE:48:12:7D
 
 The checked-in configuration currently contains a different Android certificate fingerprint, so a locally signed debug APK cannot complete Google sign-in until Firebase is updated.
 
-5. AI chat uses Firebase AI Logic's Gemini SDK directly. No `sahara.ai.chat.url`
+6. AI chat uses Firebase AI Logic's Gemini SDK directly. No `sahara.ai.chat.url`
    local property is required for the app.
 
-6. Other optional local secrets:
+7. Other optional local secrets:
 
 ```properties
 sahara.admin.key=<admin-dashboard-key>
@@ -126,6 +130,10 @@ sahara.livekit.url=wss://<your>.livekit.cloud
 sahara.livekit.token.url=<sahara_livekit Modal URL>/token
 sahara.lens.scan.url=<sahara_lens Modal URL>/v1/lens/scan
 sahara.voice.analyze.url=<sahara_voice Modal URL>/v1/voice/analyze
+sahara.mailer.url=<sahara_push mailer Modal URL>
+sahara.biometric.enroll.url=<sahara_push biometric enroll Modal URL>
+sahara.biometric.login.url=<sahara_push biometric login Modal URL>
+sahara.biometric.disable.url=<sahara_push biometric disable Modal URL>
 sahara.bank.account.title=<receiving account title>
 sahara.bank.iban=<iban or mobile-wallet number>
 sahara.bank.name=<bank or wallet, e.g. HBL, JazzCash, Easypaisa>
@@ -134,7 +142,24 @@ sahara.bank.account.number=<account-number>
 
 > The payment receiver is bank-agnostic: use `sahara.bank.*` for any bank or mobile wallet (HBL, JazzCash, Easypaisa, …), not just one bank.
 
-7. Sync Gradle and run the Android module `:app`.
+8. Sync Gradle and run the Android module `:app`.
+
+### Authentication And Biometric Login
+
+Email/password and Google sign-in both use Firebase Authentication. Google
+sign-in is allowed to use Firebase's one-account-per-email linking path, so an
+existing password account can attach Google once and keep both sign-in methods
+for the same UID. If Firebase refuses automatic linking with an account
+collision, the login screen shows a one-time password fallback.
+
+Fingerprint login is separate from the email/password provider. Enabling it in
+Settings enrolls only this device: Android stores a random device id + secret in
+Keystore-backed encrypted preferences, and `services/sahara_push/` stores only a
+hash of that secret. After the biometric prompt succeeds, the app calls the
+Modal biometric login endpoint, receives a Firebase custom token for the same
+UID, and signs in with `signInWithCustomToken`. Clearing app data removes the
+local device credential; disabling fingerprint login removes only that device's
+biometric restore path and does not unlink Google or email/password.
 
 ## Secrets
 

@@ -52,6 +52,13 @@ android {
         val saharaMailerUrl = localProperties.getProperty("sahara.mailer.url") ?: ""
         buildConfigField("String", "SAHARA_MAILER_URL", "\"$saharaMailerUrl\"")
 
+        val saharaBiometricEnrollUrl = localProperties.getProperty("sahara.biometric.enroll.url") ?: ""
+        val saharaBiometricLoginUrl = localProperties.getProperty("sahara.biometric.login.url") ?: ""
+        val saharaBiometricDisableUrl = localProperties.getProperty("sahara.biometric.disable.url") ?: ""
+        buildConfigField("String", "SAHARA_BIOMETRIC_ENROLL_URL", "\"$saharaBiometricEnrollUrl\"")
+        buildConfigField("String", "SAHARA_BIOMETRIC_LOGIN_URL", "\"$saharaBiometricLoginUrl\"")
+        buildConfigField("String", "SAHARA_BIOMETRIC_DISABLE_URL", "\"$saharaBiometricDisableUrl\"")
+
         val saharaAiChatUrl        = localProperties.getProperty("sahara.ai.chat.url")        ?: ""
         val saharaLensScanUrl      = localProperties.getProperty("sahara.lens.scan.url")      ?: ""
         val saharaVoiceAnalyzeUrl  = localProperties.getProperty("sahara.voice.analyze.url")  ?: ""

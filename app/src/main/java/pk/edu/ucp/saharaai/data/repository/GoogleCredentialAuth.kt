@@ -11,31 +11,27 @@ import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.firebase.auth.AuthCredential
 import com.google.firebase.auth.AuthResult
+import com.google.firebase.auth.EmailAuthProvider
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.GoogleAuthProvider
 import kotlinx.coroutines.tasks.await
 import pk.edu.ucp.saharaai.R
+import pk.edu.ucp.saharaai.data.remote.RealtimeDBService
 
 /**
  * Possible outcomes of a Google sign-in attempt.
  *
- * [NeedsPasswordLink] is the important one: when the email returned by
- * Google already has a password account on the project, Firebase's
- * "Link accounts that use the same email" setting will happily merge them —
- * but if the password account was never email-verified, Google's verified
- * email assertion is treated as more trustworthy and the password provider
- * gets dropped from the user. We catch that case ourselves and require the
- * user to enter their password first; once signed in via password we attach
- * the Google credential via [FirebaseAuth.currentUser.linkWithCredential],
- * so the resulting account keeps *both* providers.
+ * [NeedsPasswordLink] is only a fallback for projects where Firebase refuses
+ * automatic one-account-per-email linking and throws a collision. The normal
+ * path signs in with Google directly so Firebase can link Google to the
+ * existing email/password UID once and keep it linked afterwards.
  */
 sealed class GoogleSignInOutcome {
     /** Google sign-in completed and we're now authenticated. */
     data class Signed(val authResult: AuthResult) : GoogleSignInOutcome()
 
-    /** The chosen Google email already has a password account. The caller
-     *  must prompt the user for that password and then call
-     *  [GoogleCredentialAuth.completeLinkWithPassword] with both pieces. */
+    /** Firebase refused automatic provider linking. The caller can ask for the
+     *  password once, then call [GoogleCredentialAuth.completeLinkWithPassword]. */
     data class NeedsPasswordLink(
         val email: String,
         val pendingGoogleCredential: AuthCredential,
@@ -46,12 +42,7 @@ object GoogleCredentialAuth {
 
     private const val TAG = "GoogleCredentialAuth"
 
-    /**
-     * Runs the Credential Manager flow, then either signs the user in with
-     * the Google ID token directly, or — if a password account already
-     * exists for the same email — defers the sign-in and returns
-     * [GoogleSignInOutcome.NeedsPasswordLink].
-     */
+    /** Runs Credential Manager, then signs in with Google directly. */
     suspend fun signIn(context: Context): Result<GoogleSignInOutcome> = runCatching {
         val webClientId = context.getString(R.string.default_web_client_id)
         check(webClientId.isNotBlank()) {
@@ -78,35 +69,32 @@ object GoogleCredentialAuth {
         val firebaseCred = GoogleAuthProvider.getCredential(idToken, null)
         val auth = FirebaseAuth.getInstance()
 
-        // Already signed in (e.g., user is enabling Google from Settings) ->
-        // attach Google to the current account directly. No collision path.
+        // Login/register surfaces should not link a chosen Google account to
+        // whatever Firebase user happens to be cached. This especially matters
+        // after WelcomeSettings signs in anonymously to verify access keys.
         val current = auth.currentUser
         if (current != null) {
-            // Could be a deliberate "enable Google from Settings", or just a
-            // stale session (e.g. an admin who never logged out). Try to attach
-            // Google to the current account, but if it's already linked — or the
-            // chosen Google account belongs to a different user — don't fail:
-            // fall through and sign in AS the chosen account, replacing the
-            // session. This is what fixed the "User has already been linked to
-            // the given provider" error on the login screen.
-            runCatching { current.linkWithCredential(firebaseCred).await() }
-                .onFailure { Log.i(TAG, "link skipped (${it.message}); signing in with Google directly") }
-            return@runCatching GoogleSignInOutcome.Signed(auth.signInWithCredential(firebaseCred).await())
+            Log.i(TAG, "Replacing cached Firebase session before Google sign-in. anonymous=${current.isAnonymous}")
+            auth.signOut()
         }
 
-        // Not signed in. With "One account per email" linking enabled in the
-        // Firebase console (Auth -> Settings -> User account linking),
-        // signInWithCredential auto-links the Google credential to an existing
-        // email/password account — keeping BOTH providers, no password prompt.
-        // That is the industry-standard convenience path the app wants.
-        //
-        // If that console setting is OFF, Firebase raises a collision for an
-        // email that already owns a password account; only then do we fall back
-        // to the password-prompt link flow, so sign-in keeps working either way.
         return@runCatching try {
-            GoogleSignInOutcome.Signed(auth.signInWithCredential(firebaseCred).await())
+            val authResult = auth.signInWithCredential(firebaseCred).await()
+            val signedUser = authResult.user
+            if (
+                signedUser != null &&
+                signedUser.providerData.any { it.providerId == EmailAuthProvider.PROVIDER_ID }
+            ) {
+                runCatching {
+                    RealtimeDBService.recordEmailHasPassword(
+                        uid = signedUser.uid,
+                        email = signedUser.email.orEmpty().ifBlank { email },
+                    )
+                }
+            }
+            GoogleSignInOutcome.Signed(authResult)
         } catch (e: com.google.firebase.auth.FirebaseAuthUserCollisionException) {
-            Log.i(TAG, "Google collided with an existing password account; linking via password.", e)
+            Log.i(TAG, "Firebase refused automatic Google/email account linking.", e)
             GoogleSignInOutcome.NeedsPasswordLink(
                 email = email,
                 pendingGoogleCredential = firebaseCred,
@@ -135,6 +123,7 @@ object GoogleCredentialAuth {
         } catch (e: com.google.firebase.auth.FirebaseAuthUserCollisionException) {
             Log.i(TAG, "Google provider already linked to this account; continuing.", e)
         }
+        runCatching { RealtimeDBService.recordEmailHasPassword(user.uid, email) }
         authResult
     }.onFailure { Log.w(TAG, "completeLinkWithPassword failed for $email", it) }
 

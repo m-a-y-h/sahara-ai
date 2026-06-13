@@ -2,36 +2,37 @@ package pk.edu.ucp.saharaai.utils
 
 import android.content.Context
 import android.util.Log
+import android.util.Base64
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import java.security.SecureRandom
+import java.util.UUID
 
 /**
- * On-device biometric login vault.
+ * On-device biometric session credential.
  *
- * Sits behind the system biometric prompt: when the user has fingerprint /
- * face unlock enrolled, we save their (email, password) AES-GCM-encrypted with
- * an Android Keystore-backed master key. Next time they hit "Login with
- * fingerprint" we decrypt those values back out and hand them to
- * Firebase.auth.signInWithEmailAndPassword. No Firebase Cloud Function, no
- * Blaze plan, no WebAuthn extension — the whole thing is local crypto.
- *
- * Threat model: a thief with physical access to an unlocked phone *and* the
- * user's biometric can sign back in. Same security model as the device lock
- * itself; that's the trade-off the user opted into when they enabled biometric
- * login. Encrypted at rest with the Keystore master key so a stolen-and-rooted
- * device can't trivially extract the password from disk.
- *
- * IMPORTANT: every successful manual sign-in updates the vault, and every
- * sign-out clears it. The biometric login flow only succeeds if BOTH the
- * device biometric authenticates AND a saved credential exists.
+ * The vault stores only a random device id + secret behind Android
+ * Keystore-backed encrypted prefs. After the system biometric prompt succeeds,
+ * the app sends that device credential to the backend, which validates it and
+ * returns a Firebase custom token for the original UID. User passwords and
+ * Firebase refresh tokens are never stored here.
  */
-object BiometricCredentialVault {
+object BiometricSessionVault {
 
-    private const val TAG = "BiometricVault"
-    private const val FILE_NAME = "sahara_bio_vault"
-    private const val K_EMAIL    = "v1_email"
-    private const val K_PASSWORD = "v1_password"
-    private const val K_ENABLED  = "v1_enabled"
+    private const val TAG = "BiometricSessionVault"
+    private const val FILE_NAME = "sahara_bio_session_vault"
+    private const val K_DEVICE_ID = "v2_device_id"
+    private const val K_DEVICE_SECRET = "v2_device_secret"
+    private const val K_EMAIL_HINT = "v2_email_hint"
+    private const val K_NAME_HINT = "v2_name_hint"
+    private const val K_ENABLED = "v2_enabled"
+
+    data class StoredSession(
+        val deviceId: String,
+        val deviceSecret: String,
+        val emailHint: String = "",
+        val nameHint: String = "",
+    )
 
     /**
      * Builds the encrypted prefs handle. Wrapped in runCatching because
@@ -66,32 +67,47 @@ object BiometricCredentialVault {
             .getOrNull()
     }
 
-    /** Persist after a successful regular sign-in. The vault is now "armed". */
-    fun save(context: Context, email: String, password: String) {
-        if (email.isBlank() || password.isBlank()) return
+    fun createSession(emailHint: String = "", nameHint: String = ""): StoredSession =
+        StoredSession(
+            deviceId = UUID.randomUUID().toString(),
+            deviceSecret = randomSecret(),
+            emailHint = emailHint,
+            nameHint = nameHint,
+        )
+
+    fun save(context: Context, session: StoredSession) {
+        if (session.deviceId.isBlank() || session.deviceSecret.isBlank()) return
         val p = prefs(context) ?: return
         runCatching {
             p.edit()
-                .putString(K_EMAIL, email)
-                .putString(K_PASSWORD, password)
+                .putString(K_DEVICE_ID, session.deviceId)
+                .putString(K_DEVICE_SECRET, session.deviceSecret)
+                .putString(K_EMAIL_HINT, session.emailHint)
+                .putString(K_NAME_HINT, session.nameHint)
                 .putBoolean(K_ENABLED, true)
                 .apply()
         }.onFailure { Log.w(TAG, "save() failed", it) }
     }
 
-    /** Returns the saved (email, password) pair if the vault has been armed,
-     *  or null if the user has never enabled biometric login. */
-    fun load(context: Context): Pair<String, String>? {
+    fun load(context: Context): StoredSession? {
         val p = prefs(context) ?: return null
         return runCatching {
             if (!p.getBoolean(K_ENABLED, false)) return null
-            val email = p.getString(K_EMAIL, "").orEmpty()
-            val pwd   = p.getString(K_PASSWORD, "").orEmpty()
-            if (email.isBlank() || pwd.isBlank()) null else email to pwd
+            val deviceId = p.getString(K_DEVICE_ID, "").orEmpty()
+            val deviceSecret = p.getString(K_DEVICE_SECRET, "").orEmpty()
+            if (deviceId.isBlank() || deviceSecret.isBlank()) {
+                null
+            } else {
+                StoredSession(
+                    deviceId = deviceId,
+                    deviceSecret = deviceSecret,
+                    emailHint = p.getString(K_EMAIL_HINT, "").orEmpty(),
+                    nameHint = p.getString(K_NAME_HINT, "").orEmpty(),
+                )
+            }
         }.onFailure { Log.w(TAG, "load() failed", it) }.getOrNull()
     }
 
-    /** Cheap "is biometric login set up?" check without decrypting anything. */
     fun isArmed(context: Context): Boolean {
         val p = prefs(context) ?: return false
         return runCatching { p.getBoolean(K_ENABLED, false) }
@@ -99,10 +115,15 @@ object BiometricCredentialVault {
             .getOrDefault(false)
     }
 
-    /** Wipe on sign-out. */
     fun clear(context: Context) {
         val p = prefs(context) ?: return
         runCatching { p.edit().clear().apply() }
             .onFailure { Log.w(TAG, "clear() failed", it) }
+    }
+
+    private fun randomSecret(): String {
+        val bytes = ByteArray(32)
+        SecureRandom().nextBytes(bytes)
+        return Base64.encodeToString(bytes, Base64.NO_WRAP)
     }
 }

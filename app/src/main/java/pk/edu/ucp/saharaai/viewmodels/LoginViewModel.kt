@@ -9,13 +9,16 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.firebase.auth.AuthCredential
 import kotlinx.coroutines.launch
+import pk.edu.ucp.saharaai.data.remote.BiometricAuthHttpException
 import pk.edu.ucp.saharaai.data.repository.AuthRepository
+import pk.edu.ucp.saharaai.data.repository.BiometricSessionRepository
 import pk.edu.ucp.saharaai.data.repository.FirebaseAuthFailure
 import pk.edu.ucp.saharaai.data.repository.GoogleCredentialAuth
 import pk.edu.ucp.saharaai.data.repository.GoogleSignInOutcome
 
 class LoginViewModel(
-    private val authRepository: AuthRepository = AuthRepository()
+    private val authRepository: AuthRepository = AuthRepository(),
+    private val biometricRepository: BiometricSessionRepository = BiometricSessionRepository(),
 ) : ViewModel() {
     var email by mutableStateOf("")
     var password by mutableStateOf("")
@@ -80,8 +83,9 @@ class LoginViewModel(
         }
     }
 
-    /** UI state for the "your Google email already has a password; enter it
-     *  so we can link the two providers" dialog. Empty/blank when not active. */
+    /** UI state for the rare Firebase collision fallback where automatic
+     *  Google/email linking is refused and the user must prove the password
+     *  account once. Empty/blank when not active. */
     var googleLinkPromptEmail by mutableStateOf("")
         private set
     private var pendingGoogleCredential: AuthCredential? = null
@@ -99,11 +103,9 @@ class LoginViewModel(
                             onSuccess(outcome.authResult.user?.email.orEmpty())
                         }
                         is GoogleSignInOutcome.NeedsPasswordLink -> {
-                            // Suspend the Google sign-in mid-flight; the
-                            // screen will render the password-link dialog
-                            // and call completeGoogleLinkWithPassword on
-                            // submit. Loading stays true so the Google
-                            // button can't be re-tapped during the dialog.
+                            // Firebase refused automatic provider linking.
+                            // The screen renders the one-time password fallback
+                            // and calls completeGoogleLinkWithPassword.
                             isLoading = false
                             pendingGoogleCredential = outcome.pendingGoogleCredential
                             googleLinkPromptEmail = outcome.email
@@ -157,6 +159,27 @@ class LoginViewModel(
         errorMessage = ""
     }
 
+    fun signInWithBiometricSession(
+        context: Context,
+        isEnglish: Boolean,
+        onSuccess: (String) -> Unit,
+    ) {
+        if (isLoading) return
+        isLoading = true
+        errorMessage = ""
+        viewModelScope.launch {
+            biometricRepository.signInWithStoredSession(context)
+                .onSuccess { restored ->
+                    isLoading = false
+                    onSuccess(restored.email)
+                }
+                .onFailure {
+                    isLoading = false
+                    errorMessage = biometricMessage(it, isEnglish)
+                }
+        }
+    }
+
     fun authenticateWithBiometrics(context: Context, isEnglish: Boolean, onSuccess: (String) -> Unit) {
         val fragmentActivity = context as? FragmentActivity ?: return
         val executor = ContextCompat.getMainExecutor(context)
@@ -181,5 +204,29 @@ class LoginViewModel(
             .build()
 
         biometricPrompt.authenticate(promptInfo)
+    }
+
+    private fun biometricMessage(error: Throwable, isEnglish: Boolean): String {
+        val terminal = (error as? BiometricAuthHttpException)?.isTerminalAuthFailure == true
+        return when {
+            terminal -> {
+                if (isEnglish) {
+                    "Fingerprint login was removed for this device. Sign in normally and enable it again."
+                } else {
+                    "Is device se fingerprint login hata diya gaya hai. Normal sign in karke dobara enable karein."
+                }
+            }
+            error.message?.isNotBlank() == true -> {
+                if (isEnglish) error.message.orEmpty()
+                else "Fingerprint login nahi ho saka. Internet check karke dobara koshish karein."
+            }
+            else -> {
+                if (isEnglish) {
+                    "Fingerprint login failed. Check your internet connection and try again."
+                } else {
+                    "Fingerprint login nahi ho saka. Internet check karke dobara koshish karein."
+                }
+            }
+        }
     }
 }

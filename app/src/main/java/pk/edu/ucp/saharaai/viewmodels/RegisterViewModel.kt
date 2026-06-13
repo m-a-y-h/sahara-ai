@@ -12,7 +12,6 @@ import kotlinx.coroutines.tasks.await
 import pk.edu.ucp.saharaai.data.remote.RealtimeDBService
 import pk.edu.ucp.saharaai.data.repository.AuthRepository
 import pk.edu.ucp.saharaai.data.repository.FirebaseAuthFailure
-import pk.edu.ucp.saharaai.data.repository.GoogleCredentialAuth
 
 class RegisterViewModel(
     private val authRepository: AuthRepository = AuthRepository()
@@ -150,7 +149,6 @@ class RegisterViewModel(
                             val email = user?.email.orEmpty()
                             val displayName = user?.displayName.orEmpty()
                             if (authResult.additionalUserInfo?.isNewUser ?: true) {
-                                RealtimeDBService.saveUser(user?.uid.orEmpty(), displayName, email)
                                 val callingName = runCatching { getCallingName(displayName).ifBlank { "User" } }
                                     .getOrDefault("User")
                                 onNewUser(displayName, email, callingName)
@@ -168,7 +166,6 @@ class RegisterViewModel(
                                 "This email already has a Sahara account — sign in with your password."
                             else
                                 "Is email se Sahara account pehle se hai — apne password se sign in karein."
-                            onExistingUser(outcome.email)
                         }
                     }
                 }

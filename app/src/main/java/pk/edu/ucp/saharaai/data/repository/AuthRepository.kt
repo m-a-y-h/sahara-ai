@@ -28,10 +28,9 @@ class AuthRepository(
         auth.signInWithEmailAndPassword(email, password)
             .addOnCompleteListener { task ->
                 if (task.isSuccessful) {
-                    // Backfill the email->has_password registry that
-                    // GoogleCredentialAuth consults to detect collisions
-                    // (Firebase's Email Enumeration Protection blocks
-                    // fetchSignInMethodsForEmail). Best-effort fire-and-forget.
+                    // Backfill the email->has_password registry without using
+                    // fetchSignInMethodsForEmail, which can be hidden by
+                    // Firebase Email Enumeration Protection.
                     val uid = auth.currentUser?.uid.orEmpty()
                     if (uid.isNotBlank()) recordPasswordIndexAsync(uid, email)
                 }
@@ -84,8 +83,8 @@ class AuthRepository(
         return try {
             val cred = EmailAuthProvider.getCredential(email, password)
             user.linkWithCredential(cred).await()
-            // The user just added a password — record it in our registry so a
-            // future Google sign-in correctly hits the collision branch.
+            // The user just added a password. Record it for flows that need a
+            // reliable "this email has password auth" signal.
             runCatching { RealtimeDBService.recordEmailHasPassword(user.uid, email) }
             null
         } catch (e: Exception) {

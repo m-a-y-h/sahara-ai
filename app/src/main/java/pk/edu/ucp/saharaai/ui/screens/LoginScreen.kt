@@ -126,18 +126,10 @@ fun LoginScreen(
     val isLoading = loginViewModel.isLoading
     val errorMsg = loginViewModel.errorMessage
 
-    val prefs = remember { context.getSharedPreferences("sahara_prefs", Context.MODE_PRIVATE) }
-
-    
-    
-    
-    // The biometric chip is only useful if the vault has been armed — i.e. the
-    // user has signed in manually at least once on this device, so we have a
-    // sealed (email, password) pair waiting behind their biometric. After
-    // sign-out the vault is intentionally NOT cleared, so this stays true and
-    // they can come back in with a fingerprint.
+    // The biometric chip is useful only after Settings enrolls this device
+    // with the backend and saves a local device-session secret.
     val showBiometric = remember {
-        pk.edu.ucp.saharaai.utils.BiometricCredentialVault.isArmed(context)
+        pk.edu.ucp.saharaai.utils.BiometricSessionVault.isArmed(context)
     }
 
     val primaryGreen = if (isDark) SaharaStrongGreen else SaharaGreen
@@ -234,15 +226,7 @@ fun LoginScreen(
                         SaharaButton(
                             text = if (isEnglish) "Sign In" else "Sign In Karein",
                             onClick = {
-                                // Capture the password before VM clears the form so we can seal
-                                // it into the biometric vault on success. Vault is overwritten
-                                // each successful login, so a password change always re-arms.
-                                val capturedPassword = password
                                 loginViewModel.signIn(email, password, isEnglish) { cleanEmail ->
-                                    pk.edu.ucp.saharaai.utils.BiometricCredentialVault.save(
-                                        context, cleanEmail, capturedPassword
-                                    )
-                                    prefs.edit().putBoolean("biometric_enabled", true).apply()
                                     onNavigateToDashboard(cleanEmail)
                                 }
                             },
@@ -293,23 +277,7 @@ fun LoginScreen(
                                 context = context,
                                 isEnglish = isEnglish,
                                 onSuccess = {
-                                    // After the system biometric prompt succeeds, decrypt the
-                                    // saved (email, password) from the keystore-backed vault
-                                    // and run a real Firebase sign-in. No vault entry =
-                                    // biometric is "armed" only after a successful manual
-                                    // login, so this path is guaranteed to have creds.
-                                    val creds = pk.edu.ucp.saharaai.utils.BiometricCredentialVault
-                                        .load(context)
-                                    if (creds == null) {
-                                        loginViewModel.reportError(
-                                            if (isEnglish)
-                                                "Sign in with your password once to enable fingerprint login."
-                                            else
-                                                "Pehli baar password se login karein, phir fingerprint kaam karega."
-                                        )
-                                        return@authenticateWithBiometrics
-                                    }
-                                    loginViewModel.signIn(creds.first, creds.second, isEnglish) {
+                                    loginViewModel.signInWithBiometricSession(context, isEnglish) {
                                         onBiometricSuccess()
                                     }
                                 },
@@ -348,10 +316,8 @@ fun LoginScreen(
             }
         }
 
-        // "This Google email already has a password account — enter it so we
-        // can link both providers" dialog. Without this, Firebase's
-        // auto-link silently replaces the password provider with Google when
-        // the email/password account wasn't email-verified.
+        // Fallback only if Firebase refuses automatic one-account-per-email
+        // Google linking and returns an account-collision exception.
         if (loginViewModel.googleLinkPromptEmail.isNotBlank()) {
             var linkPassword by remember { mutableStateOf("") }
             var linkPwdVisible by remember { mutableStateOf(false) }
@@ -370,9 +336,9 @@ fun LoginScreen(
                     Column {
                         Text(
                             if (isEnglish)
-                                "${loginViewModel.googleLinkPromptEmail} already has a Sahara account with a password. Enter that password to attach Google to the same account — you'll still keep email/password sign-in."
+                                "Firebase needs one password confirmation before it can attach Google to ${loginViewModel.googleLinkPromptEmail}. After that, Google sign-in will work directly."
                             else
-                                "${loginViewModel.googleLinkPromptEmail} se Sahara account password ke saath pehle se hai. Wahi password darj karein takay Google bhi usi account se link ho jaye — email/password sign-in bhi kaam karta rahega.",
+                                "Firebase ko Google ko ${loginViewModel.googleLinkPromptEmail} se link karne ke liye aik dafa password confirmation chahiye. Is ke baad Google sign-in seedha chalega.",
                             style = MaterialTheme.typography.bodyMedium,
                         )
                         Spacer(Modifier.height(12.dp))

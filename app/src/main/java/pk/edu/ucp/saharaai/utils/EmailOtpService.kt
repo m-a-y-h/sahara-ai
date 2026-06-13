@@ -92,8 +92,8 @@ object EmailOtpService {
         return sendOtpWithEmailJs(toEmail, toName, otp, serviceId, templateId, publicKey)
     }
 
-    /** Emails the user the email/password they just set while enabling the
-     *  fingerprint scanner, so they have it for email sign-in. Goes only to the
+    /** Emails the user the email/password they just set from Settings, so
+     *  they have it for email sign-in. Goes only to the
      *  signed-in user's own, token-verified inbox (the mailer enforces that).
      *  Best-effort; EmailJS isn't used here as its template is OTP-only. */
     suspend fun sendPasswordEmail(
