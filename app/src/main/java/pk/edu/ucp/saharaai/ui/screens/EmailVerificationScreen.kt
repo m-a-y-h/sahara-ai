@@ -1,5 +1,10 @@
 package pk.edu.ucp.saharaai.ui.screens
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
+import android.os.Build
+import android.view.WindowManager
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
@@ -29,6 +34,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -57,6 +63,7 @@ fun EmailVerificationScreen(
     val isDark       = isSystemInDarkTheme()
     val primaryGreen = if (isDark) SaharaStrongGreen else SaharaGreen
     val hazeState    = remember { HazeState() }
+    SecureEmailVerificationWindow()
 
     
     var otpValue      by remember { mutableStateOf("") }            
@@ -316,6 +323,35 @@ fun EmailVerificationScreen(
             }
         }
     }
+}
+
+@Composable
+private fun SecureEmailVerificationWindow() {
+    val view = LocalView.current
+    DisposableEffect(view) {
+        val activity = view.context.findActivity()
+        val window = activity?.window
+        window?.setFlags(
+            WindowManager.LayoutParams.FLAG_SECURE,
+            WindowManager.LayoutParams.FLAG_SECURE,
+        )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            activity?.setRecentsScreenshotEnabled(false)
+        }
+
+        onDispose {
+            window?.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                activity?.setRecentsScreenshotEnabled(true)
+            }
+        }
+    }
+}
+
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
 }
 
 

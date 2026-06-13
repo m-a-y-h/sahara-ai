@@ -2,8 +2,11 @@ package pk.edu.ucp.saharaai.ui.screens
 
 import android.Manifest
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.location.LocationManager
 import android.provider.OpenableColumns
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.*
@@ -38,6 +41,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.core.location.LocationManagerCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import coil.compose.AsyncImage
@@ -103,19 +107,28 @@ fun ProfileScreen(
             settingsUr = "Profile location update karne ke liye App settings mein location ki ijazat dein.",
         ),
         onGranted = {
-            profileViewModel.refreshRegionFromDevice(context) { updated ->
-                if (!updated) {
-                    context.showLocalizedToast(
-                        isEnglish,
-                        "Could not detect location yet.",
-                        "Location abhi detect nahi hui.",
-                    )
+            if (!context.isDeviceLocationEnabled()) {
+                context.showLocalizedToast(
+                    isEnglish,
+                    "Turn on device Location to update your profile.",
+                    "Profile location ke liye phone Location on karein.",
+                )
+                context.openSystemLocationSettings()
+            } else {
+                profileViewModel.refreshRegionFromDevice(context) { updated ->
+                    if (!updated) {
+                        context.showLocalizedToast(
+                            isEnglish,
+                            "Could not detect location yet.",
+                            "Location abhi detect nahi hui.",
+                        )
+                    }
                 }
             }
         },
     )
     ObservePermissionState(regionPermissionRequester) { granted ->
-        if (granted && resolvedRegion.isBlank() && !regionLoading) {
+        if (granted && context.isDeviceLocationEnabled() && resolvedRegion.isBlank() && !regionLoading) {
             profileViewModel.refreshRegionFromDevice(context)
         }
     }
@@ -137,13 +150,22 @@ fun ProfileScreen(
             ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
                 ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
         if (hasPermission) {
-            profileViewModel.refreshRegionFromDevice(context) { updated ->
-                if (!updated) {
-                    context.showLocalizedToast(
-                        isEnglish,
-                        "Could not detect location yet.",
-                        "Location abhi detect nahi hui.",
-                    )
+            if (!context.isDeviceLocationEnabled()) {
+                context.showLocalizedToast(
+                    isEnglish,
+                    "Turn on device Location to update your profile.",
+                    "Profile location ke liye phone Location on karein.",
+                )
+                context.openSystemLocationSettings()
+            } else {
+                profileViewModel.refreshRegionFromDevice(context) { updated ->
+                    if (!updated) {
+                        context.showLocalizedToast(
+                            isEnglish,
+                            "Could not detect location yet.",
+                            "Location abhi detect nahi hui.",
+                        )
+                    }
                 }
             }
         } else {
@@ -651,6 +673,18 @@ private fun Context.readAvatarUploadMetadata(uri: android.net.Uri): AvatarUpload
         mimeType = resolver.getType(uri).orEmpty(),
         sizeBytes = sizeBytes,
     )
+}
+
+private fun Context.isDeviceLocationEnabled(): Boolean {
+    val locationManager = getSystemService(Context.LOCATION_SERVICE) as? LocationManager
+        ?: return false
+    return LocationManagerCompat.isLocationEnabled(locationManager)
+}
+
+private fun Context.openSystemLocationSettings() {
+    val intent = Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)
+        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    runCatching { startActivity(intent) }
 }
 
 private fun profileAvatarPresets(): List<ProfileAvatarPreset> = listOf(
